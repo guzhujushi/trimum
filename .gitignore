@@ -109,5 +109,4 @@ desktop/themes/*/preview-unlock.png
 
 # ---- Arch Linux specific ----
 pkg/
-src/
 *.pkg.tar.zst
