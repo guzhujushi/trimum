@@ -1,0 +1,113 @@
+# ================================================================
+# trimum — Arch Linux + Hyprland + AI 桌面运行时环境
+# ================================================================
+# 通用规则
+# ================================================================
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+.tox/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.whl
+
+# ---- Python Environment ----
+.env
+.env.*
+*.env.local
+
+# ---- Rust (future use) ----
+target/
+**/*.rs.bk
+Cargo.lock
+
+# ---- Node / JS (if used for docs) ----
+node_modules/
+*.js.map
+
+# ---- IDE / Editor ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.~lock*
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- LLM / AI cache ----
+~/.trimum/
+**/.trimum-env/
+embeddings-cache/
+chroma-data/
+
+# ---- Databases (user data, not templates) ----
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Generated files ----
+generated/
+tmp/
+*.generated.*
+
+# ---- Large binary files ----
+*.iso
+*.img
+*.qcow2
+*.vdi
+*.vmdk
+*.box
+*.pkg
+*.dmg
+*.exe
+*.msi
+*.bin
+*.tar.gz.enc
+
+# ---- Themes: lock screen images contain faces ---
+# （锁屏图含用户人脸，不上传）
+desktop/themes/*/unlock.png
+desktop/themes/*/preview.png
+desktop/themes/*/preview-unlock.png
+
+# ---- Credentials / secrets ----
+**/secrets/
+*.key
+*.pem
+*.crt.private
+
+# ---- Git / patches ----
+*.orig
+*.rej
+*.patch.tmp
+
+# ---- Backups ----
+*.backup*
+*.bak
+*.old
+
+# ---- Arch Linux specific ----
+pkg/
+src/
+*.pkg.tar.zst
