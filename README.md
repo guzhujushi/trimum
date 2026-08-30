@@ -8,20 +8,17 @@
 
 不需要记住命令参数，不需要手动配置桌面，不需要担心 Arch 滚挂了。
 
-## 与 Omarchy 的区别
+## 借鉴的开源项目
 
-Omarchy 是 DHH 打造的"开发者开箱即用 Arch"——装了 IDE、Docker、Git 等开发工具链。
+| 项目 | 借鉴内容 |
+|---|---|
+| [Omarchy](https://github.com/omacom/omarchy) | 22 套 Hyprland 主题色板、壁纸、锁屏资产；Snapper 配置脚本参考 |
+| [openai/openai-agents-python](https://github.com/openai/openai-agents-python) | Agent SDK 架构设计、Tool/Guardrail 模式（Phase 3） |
+| [DHH/omakub](https://github.com/dhh/omakub) | 一键安装脚本设计理念 |
+| [obra/superpowers](https://github.com/obra/superpowers) | MCP 服务器管理、Agent 生态编排思路 |
+| [mattpocock/skills](https://github.com/mattpocock/skills) | Skill 系统的轻量模块化设计 |
 
-本项目在 Omarchy 的思路基础上再往前推一步：**加入 AI 层**。
-
-| 能力 | Omarchy | 本项目 |
-|---|---|---|
-| 桌面预设 | ✅ Hyprland | ✅ Hyprland 预设主题包 |
-| 开发工具 | ✅ 开箱即用 | ✅ 开箱即用（安装界面可选增减） |
-| 自然语言操作 | ❌ | ✅ AI Shell |
-| 自动维护 | ❌ | ✅ System Healthy Agent |
-| 防滚挂 | ❌ | ✅ Btrfs + Snapper 自动快照 |
-| 渣机友好 | ❌ | ✅ 云端 AI，本地零计算负载 |
+> trimum 的核心价值不是「又一个 Hyprland 发行版」，而是**将 AI Agent 深度集成到桌面操作系统层面**——对标 OpenClaw 的 Agent 能力、iOS 的安全体系、Android 的 Runtime 设计、Coze 的智能体生态、Workbuddy 的多智能体协作架构。
 
 ## 系统架构
 
@@ -91,7 +88,7 @@ Omarchy 是 DHH 打造的"开发者开箱即用 Arch"——装了 IDE、Docker�
 
 ```
 Phase 0 ── 基础环境
-  └── Arch + Rust + Python + Docker + Git
+  └── Arch + Python + Docker + Git
 
 Phase 1 ── AI Shell MVP
   └── 自然语言 → 安全执行
@@ -127,7 +124,6 @@ Phase 6 ── ISO / 安装镜像
 | 类别 | 组件 | 用途 |
 |---|---|---|
 | **语言** | Python 3.12+ + uv | Harness 自身依赖 |
-| **语言** | Rust (rustup) | 可选，Phase 4 Landlock 绑定需要 |
 | **版本控制** | Git | 代码管理 / AI 修改记录 |
 | **容器** | Docker | Agent 沙箱 / 工具链回滚保障 |
 | **系统工具** | ripgrep / fd / jq / btop/htop | 系统监控与搜索 |

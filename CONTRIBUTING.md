@@ -21,6 +21,6 @@
 
 ## 代码风格
 
-- Rust：`rustfmt`
 - Python：`ruff` + `black`
+- Shell：`shellcheck` + `shfmt`
 - 配置文件：YAML，两个空格缩进
