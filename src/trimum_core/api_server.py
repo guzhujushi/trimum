@@ -8,6 +8,7 @@ import socket as stdlib_socket
 from pathlib import Path
 from typing import Optional
 
+import json
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -29,6 +30,7 @@ from .context_manager import ContextManager
 from .agent_manager import AgentManager
 from .config import Config, ensure_dirs
 from .logger import setup_logging, get_logger
+from .ipc_handler import IpcHandler
 
 logger = get_logger("api_server")
 
@@ -47,6 +49,76 @@ class AppState:
         )
         self.context: Optional[ContextManager] = None
         self.socket_server: Optional[stdlib_socket.socket] = None
+        self.ipc: Optional[IpcHandler] = None
+
+
+def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
+    """Register all JSON-RPC methods for the IPC handler."""
+    router = ipc.router
+
+    @router.register("health")
+    async def rpc_health(params: dict) -> dict:
+        return {"status": "ok", "version": "0.2.1"}
+
+    @router.register("execute")
+    async def rpc_execute(params: dict) -> dict:
+        req = ExecuteRequest(**params)
+        resp = await state.tool_gateway.execute(req)
+        return resp.model_dump()
+
+    @router.register("execute.check")
+    async def rpc_check(params: dict) -> dict:
+        cmd = " ".join(params.get("args", []))
+        risk, action, reason = state.policy.evaluate(cmd)
+        return {"command": cmd, "risk": risk.value, "action": action.value, "reason": reason}
+
+    @router.register("agents.list")
+    async def rpc_list_agents(params: dict) -> list:
+        agents = await state.agent_manager.list()
+        return [a.model_dump() for a in agents]
+
+    @router.register("agents.get")
+    async def rpc_get_agent(params: dict) -> dict | None:
+        agent = await state.agent_manager.get(params["agent_id"])
+        return agent.model_dump() if agent else None
+
+    @router.register("agents.spawn")
+    async def rpc_spawn_agent(params: dict) -> dict:
+        req = SpawnRequest(**params)
+        resp = await state.agent_manager.spawn(req)
+        return resp.model_dump()
+
+    @router.register("agents.stop")
+    async def rpc_stop_agent(params: dict) -> dict:
+        ok = await state.agent_manager.stop(params["agent_id"])
+        return {"success": ok}
+
+    @router.register("events.history")
+    async def rpc_events(params: dict) -> list:
+        events = state.event_bus.get_history(limit=params.get("limit", 50))
+        return [e.model_dump() for e in events]
+
+    @router.register("context.get")
+    async def rpc_get_context(params: dict) -> dict:
+        if not state.context:
+            return {"error": "context not initialized"}
+        entries = await state.context.list_namespace(
+            params["agent_id"], params.get("namespace", "default")
+        )
+        return {"agent_id": params["agent_id"], "entries": entries}
+
+    @router.register("context.set")
+    async def rpc_set_context(params: dict) -> dict:
+        if not state.context:
+            return {"error": "context not initialized"}
+        await state.context.set(
+            params["agent_id"],
+            params["key"],
+            params["value"],
+            namespace=params.get("namespace", "default"),
+            ttl_seconds=params.get("ttl_seconds"),
+        )
+        return {"status": "ok"}
 
 
 def create_app(config: Config) -> FastAPI:
@@ -190,20 +262,14 @@ def create_app(config: Config) -> FastAPI:
         # Start health check
         asyncio.create_task(state.agent_manager.start_health_check())
 
-        # Start Unix Socket listener
-        socket_path = config.socket_path
-        if os.name != "nt":  # Unix only
-            try:
-                if os.path.exists(socket_path):
-                    os.unlink(socket_path)
-                sock = stdlib_socket.socket(stdlib_socket.AF_UNIX, stdlib_socket.SOCK_STREAM)
-                sock.bind(socket_path)
-                sock.listen(1)
-                os.chmod(socket_path, 0o700)
-                state.socket_server = sock
-                logger.info("unix_socket_started", path=socket_path)
-            except Exception as e:
-                logger.warning("unix_socket_failed", error=str(e))
+        # Start IPC handler (JSON-RPC over Unix Socket)
+        ipc = IpcHandler(
+            socket_path=config.socket_path,
+            max_conn=config.max_agents,
+        )
+        _register_ipc_routes(ipc, state)
+        state.ipc = ipc
+        asyncio.create_task(ipc.start())
 
         logger.info("trimum_core_started", host=config.host, port=config.port)
 
@@ -213,11 +279,10 @@ def create_app(config: Config) -> FastAPI:
         if state.context:
             await state.context.close()
         await state.agent_manager.stop_health_check()
+        if state.ipc:
+            await state.ipc.stop()
         if state.socket_server:
             state.socket_server.close()
-            socket_path = config.socket_path
-            if os.path.exists(socket_path):
-                os.unlink(socket_path)
         logger.info("trimum_core_stopped")
 
     return app
