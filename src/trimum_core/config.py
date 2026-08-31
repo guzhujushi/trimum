@@ -128,6 +128,10 @@ class Config:
     def health_check_interval(self) -> int:
         return int(self._raw["agent_manager"]["health_check_interval"])
 
+    @property
+    def tools_config(self) -> dict:
+        return self._raw.get("tools", {})
+
     def get(self, key_path: str, default: Any = None) -> Any:
         """Get nested config value by dot-separated key path."""
         keys = key_path.split(".")

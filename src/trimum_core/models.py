@@ -40,6 +40,7 @@ class ExecuteRequest(BaseModel):
     tool: ToolType = ToolType.SHELL
     args: list[str] = Field(default_factory=list)
     agent_id: Optional[str] = None
+    agent_manifest: Optional[AgentManifest] = None
     timeout_seconds: float = 30.0
     env: dict[str, str] = Field(default_factory=dict)
     cwd: Optional[str] = None
@@ -148,6 +149,18 @@ class AgentEvents(BaseModel):
 
     publishes: list[str] = []
     subscribes: list[str] = []
+
+
+class ToolDefinition(BaseModel):
+    """A registered tool that can be executed via ToolGateway."""
+
+    name: str
+    description: str = ""
+    tool_type: ToolType = ToolType.SHELL
+    executable: str = ""
+    allowed_flags: list[str] = Field(default_factory=list)
+    timeout_default: float = 30.0
+    risk_level: RiskLevel = RiskLevel.MEDIUM
 
 
 class AgentManifest(BaseModel):

@@ -18,6 +18,7 @@ from trimum_core.models import (
     SpawnRequest,
     SpawnResponse,
     SystemEvent,
+    ToolDefinition,
     ToolType,
 )
 
@@ -39,6 +40,7 @@ __all__ = [
     "PolicyRule",
     "RiskLevel",
     "RouteEntry",
+    "ToolDefinition",
     "SpawnRequest",
     "SpawnResponse",
     "SystemEvent",
