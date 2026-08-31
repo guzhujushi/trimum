@@ -1,8 +1,8 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-08-30（v9 — Phase 1.5 完成：5 套主题预设 + 切换器 + 安装脚本）
+> 最后更新：2026-08-31（v10 — Phase 2 Agent Registry + Agent Router 完成）
 >
-> 当前阶段：Phase 1.5 完成（AI Shell MVP 完成；Hyprland 主题预设 / 切换器 / 安装脚本就绪）
+> 当前阶段：Phase 2 进行中（Agent Registry + Router 已完成）
 
 ---
 
@@ -41,6 +41,7 @@
 - [x] 安装脚本 desktop/install.sh（纯 bash：分区 → pacstrap → chroot 配置 → 服务 → zsh）
 
 ### Phase 2 — trimum Core（Python + FastAPI）
+- [x] **Agent Registry + Agent Router**（2026-08-31，pr #4 已合并）
 - [ ] API Server 框架 + Tool Gateway
 - [ ] Policy Engine + Agent Manager（Supervisor）
 - [ ] Event Bus + Context Manager（SQLite，atuin Schema）
@@ -76,6 +77,13 @@
 | 2026-08-30 | 主题由 symlink 链驱动（hypr/current -> <name>） | 切换只需翻转 current 链接 + hyprctl reload，dotfiles 保持单一数据源 |
 
 ---
+
+## 今日进度（2026-08-31）
+| 完成项 | 状态 | 备注 |
+|---|---|---|
+| Agent Registry + Router 实现 | ✅ | agent_registry.py / agent_router.py / models 更新 / __init__.py 0.3.0 |
+| 代码审查 | ✅ | 15 文件检查，1 minor warning，已写入 tmp/code-review-agent.md |
+| 推 Git（phase2 分支） | ✅ | origin/phase2 c239d56 |
 
 ## 今日进度（2026-08-30）
 | 完成项 | 状态 | 备注 |
