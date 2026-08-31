@@ -1,0 +1,147 @@
+# trimum-mvp 默认权限策略（shellfirm 风格）
+# risk_level: low | medium | high | critical
+# action: auto | confirm | deny
+# 匹配规则：按顺序匹配，第一条命中即生效（critical 规则必须放在前面）
+# 注意：命令在匹配前会先做 shell 规范化（去转义/引号、按 ; && || | 换行 拆段），
+#       因此规则应写成规范化后的形式（如 rm -rf /，而非 rm\ -rf\ /）。
+
+rules:
+  # ══════════ 禁止操作（critical / deny）══════════
+
+  # 根目录删除（排除 /tmp，/tmp 清理属于中风险确认项）
+  - pattern: "rm\\s+-rf\\s+/(?!tmp)"
+    risk: critical
+    action: deny
+    description: "[DENY] 高危操作已拦截：删除根目录"
+    message: "该操作可能导致系统损坏，已自动拒绝。"
+
+  # 路径穿越删除（rm -rf /tmp/../ 或 rm -rf .. 均可绕过根目录规则）
+  - pattern: "rm\\s+-rf\\s+\\S*\\.\\.\\S*"
+    risk: critical
+    action: deny
+    description: "[DENY] 路径穿越删除已拦截"
+
+  # fork 炸弹（去掉 ^ 锚，链式/行内出现同样拦截）
+  - pattern: ":\\s*\\(\\s*\\)\\s*\\{\\s*:\\s*\\|\\s*:\\s*&\\s*\\}"
+    risk: critical
+    action: deny
+    description: "[DENY] 已拦截 fork 炸弹"
+
+  # 磁盘格式化
+  - pattern: "\\bmkfs(\\.\\w+)?\\b"
+    risk: critical
+    action: deny
+    description: "[DENY] 磁盘格式化已拦截"
+    message: "格式化磁盘将导致数据丢失，已自动拒绝。"
+
+  # dd 覆写磁盘：if=/dev/ + of=/dev/ 组合即拦截（含 urandom 等变体）
+  - pattern: "dd\\s+(?=[^\\n]*if=/dev/)(?=[^\\n]*of=/dev/)"
+    risk: critical
+    action: deny
+    description: "[DENY] 磁盘覆写已拦截"
+
+  # 分区表擦除
+  - pattern: "wipefs\\b"
+    risk: critical
+    action: deny
+    description: "[DENY] 分区表擦除已拦截"
+
+  # 交互式分区编辑（-l/-L 只读列表除外）
+  - pattern: "fdisk\\s+(?!-l\\b)"
+    risk: critical
+    action: deny
+    description: "[DENY] 分区编辑已拦截"
+
+  - pattern: "gdisk\\s+(?!-l\\b)"
+    risk: critical
+    action: deny
+    description: "[DENY] GPT 分区编辑已拦截"
+
+  - pattern: "sfdisk\\s+(?!-l\\b)"
+    risk: critical
+    action: deny
+    description: "[DENY] 分区脚本写入已拦截"
+
+  # parted 破坏性子命令（print 只读列表除外）
+  - pattern: "parted\\b[^\\n]*\\s+(mklabel|mkpart|rm|resizepart|rescue)\\b"
+    risk: critical
+    action: deny
+    description: "[DENY] 分区修改已拦截"
+
+  # ══════════ 高风险（high / confirm + 警告 + 审计）══════════
+
+  # 系统配置修改
+  - pattern: "sed\\s+-i[^\\n]*/etc/"
+    risk: high
+    action: confirm
+    description: "系统配置修改影响所有用户"
+    message: "高危操作：正在修改 /etc 下系统配置，请谨慎确认。"
+
+  # 服务重启
+  - pattern: "systemctl\\s+restart"
+    risk: high
+    action: confirm
+    description: "服务重启影响可用性"
+
+  # 用户管理（词边界 + 前后空白约束，避免误命中 /etc/passwd）
+  - pattern: "(?<!\\S)(useradd|userdel|usermod|passwd)(?=\\s|$)"
+    risk: high
+    action: confirm
+    description: "用户管理属敏感操作"
+
+  # 日志清理（影响全体用户）
+  - pattern: "journalctl\\s+--vacuum"
+    risk: high
+    action: confirm
+    description: "系统日志清理影响审计追溯"
+
+  # ══════════ 中风险（medium / confirm）══════════
+
+  # 文件删除/修改
+  - pattern: "rm\\b|\\brmdir\\b|mv\\b|cp\\b|chmod\\b|chown\\b"
+    risk: medium
+    action: confirm
+    description: "文件修改操作，建议先确认"
+
+  # 包管理安装
+  - pattern: "pacman\\s+-S|yay\\s+-S|paru\\s+-S|pip\\s+install|npm\\s+install"
+    risk: medium
+    action: confirm
+    description: "安装软件包会修改系统"
+
+  # Docker 操作
+  - pattern: "docker\\s+(build|run|pull|compose)"
+    risk: medium
+    action: confirm
+
+  # Git 写入
+  - pattern: "git\\s+(commit|push|merge|reset)"
+    risk: medium
+    action: confirm
+    description: "修改将被记录到审计日志"
+
+  # ══════════ 低风险（low / auto）══════════
+
+  # 只读查询
+  - pattern: "ls\\b|cat\\b|head\\b|tail\\b|pwd\\b|whoami\\b|tree\\b"
+    risk: low
+    action: auto
+
+  # 系统资源
+  - pattern: "df\\b|du\\b|free\\b|ps\\b|top\\b|vmstat\\b|iostat\\b"
+    risk: low
+    action: auto
+
+  # Git 只读
+  - pattern: "git\\s+status\\b|git\\s+diff\\b|git\\s+log\\b"
+    risk: low
+    action: auto
+
+  # Docker 只读
+  - pattern: "docker\\s+ps\\b|docker\\s+images\\b|docker\\s+logs\\b"
+    risk: low
+    action: auto
+
+# 默认行为：未匹配规则时
+default_action: confirm
+default_risk: medium

@@ -1,251 +1,121 @@
 # trimum
 
-> Arch Linux + Hyprland + trimum = 开箱即用、AI 维护、自然语言操作的 Linux 桌面
+> 一句话：**AI 进程运行时**。一个跑在 Arch Linux 上的 AI 基础设施，把 Agent 变成操作系统级能力。
 
-## 一句话定位
+不是聊天助手，不是桌面美化。是让 "想个需求 → AI 自动拆解任务 → 调工具 → 出结果" 这件事，在 Linux 上原生成立。
 
-**一个以 Arch Linux 为底座、Hyprland 为桌面、trimum 为 AI 基础设施的 Linux 桌面环境**。让 Linux 对普通人也可用——自然语言操作、AI 自动维护、开箱即用不折腾。
+---
 
-不需要记住命令参数，不需要手动配置桌面，不需要担心 Arch 滚挂了。
+## 核心组件
 
-## 借鉴的开源项目
+```
+┌─────────────────────────────────────────────────────┐
+│                   AI Native Desktop                  │
+│              面向普通 Linux 用户的统一 AI 桌面体验    │
+└─────────────────────┬───────────────────────────────┘
+                      │
+┌─────────────────────┴───────────────────────────────┐
+│                  Harness Runtime                     │
+│           AI 进程运行时：管理 Agent 生命周期、权限、资源 │
+└─────────────────────┬───────────────────────────────┘
+                      │
+┌──────────┬──────────┼──────────┬──────────┬─────────┐
+│          │          │          │          │         │
+│  Agent   │  Event   │ Workflow │   Tool   │ Security│
+│  Router  │   Bus    │  Engine  │  Gateway │ Runtime │
+│ Agent 调度│ AI 系统  │ 可复用   │ AI 能力  │ AI 权限 │
+│ 与路由   │ 事件总线  │ 任务编排  │ 接口层   │ 与安全  │
+│ 按任务选 │ Agent/   │ 替代大量  │ 统一管理  │ Landlock│
+│ 择/创建  │ Workflow │ 固定     │ Shell/   │ Sandbox │
+│ 分配Agent│ 通信     │ Agent    │ Git/Mem  │ Policy  │
+│          │          │          │ Knowled. │ 人类确认 │
+└─────┬────┴─────┬────┴────┬────┴────┬────┴───┬─────┘
+      │          │         │         │        │
+┌─────┴────┐ ┌──┴───┐ ┌───┴────┐ ┌─┴────┐ ┌─┴────────┐
+│  Memory  │ │Agent │ │ Rollback││ AI   │ │  Agent   │
+│   Tool   │ │Ecosys│ │ System ││Native│ │Ecosystem │
+│轻量本地   │ │第三方│ │Linux稳 ││Desktop││第三方Agent│
+│长期记忆   │ │Agent │ │定性保障 ││       ││ Tool     │
+│SQLite/FTS│ │Tool  │ │快照检测 ││       ││ Wkflow   │
+│          │ │扩展  │ │自动恢复 ││       ││ 扩展生态  │
+└──────────┘ └──────┘ └────────┘ └──────┘ └──────────┘
+```
 
-| 项目 | 借鉴内容 |
+### 核心组件详解
+
+| 组件 | 职责 | 实现状态 |
+|---|---|---|
+| **Harness Runtime** | AI 进程运行时。管理 Agent 生命周期、权限、资源分配。系统级常驻守护进程。 | ✅ Phase 2 Core 完成 |
+| **Agent Router** | Agent 调度与路由。根据任务类型、能力匹配选择/创建/分配 Agent，支持管道构建。 | ✅ Phase 2 完成 |
+| **Event Bus** | AI 系统事件总线。Agent、Workflow、Runtime 之间的 pub/sub 通信。 | ✅ Phase 2 完成 |
+| **Workflow Engine** | 可复用任务编排。DAG 节点定义、依赖链、并行/串行执行，替代大量固定 Agent。 | ✅ Phase 2 完成 |
+| **Tool Gateway** | AI 能力接口层。统一管理 Shell、Git、Docker、Memory、Knowledge 等工具的注册、发现、调用。 | ✅ Phase 2 完成（含 Tool Registry） |
+| **Security Runtime** | AI 权限与安全控制。Policy Engine + Landlock + Sandbox + 人类确认弹窗。 | ⏳ Policy Engine 完成，Landlock/Sandbox 待实现 |
+| **Memory Tool** | 轻量本地长期记忆。SQLite/FTS 实现，Agent 间共享状态。 | ⏳ 基础 Context Manager 完成 |
+| **Agent Ecosystem** | 第三方 Agent、Tool、Workflow 扩展生态。文件化注册（一切皆文件）。 | 📝 设计完成，待实现 |
+| **Rollback System** | Linux 稳定性保障。Btrfs + Snapper 快照，健康检查，自动回滚。 | 📝 设计完成 |
+| **AI Native Desktop** | 面向普通 Linux 用户的统一 AI 桌面体验。Hyprland 预设 + Waybar AI 集成 + 主题切换。 | ✅ Phase 1.5 完成 |
+
+---
+
+## 为什么是这些组件
+
+传统 Linux 桌面对 AI 的支持是割裂的——终端里装个 shell_gpt、浏览器里开个 ChatGPT、IDE 里配个 Copilot。每个 AI 都在自己的孤岛里。
+
+trimum 把这些整合成操作系统级能力：
+
+| 问题 | 方案 |
 |---|---|
-| [Omarchy](https://github.com/omacom/omarchy) | 22 套 Hyprland 主题色板、壁纸、锁屏资产；Snapper 配置脚本参考 |
-| [openai/openai-agents-python](https://github.com/openai/openai-agents-python) | Agent SDK 架构设计、Tool/Guardrail 模式（Phase 3） |
-| [DHH/omakub](https://github.com/dhh/omakub) | 一键安装脚本设计理念 |
-| [obra/superpowers](https://github.com/obra/superpowers) | MCP 服务器管理、Agent 生态编排思路 |
-| [mattpocock/skills](https://github.com/mattpocock/skills) | Skill 系统的轻量模块化设计 |
+| 每个 Agent 都要自己管理权限 | Security Runtime 统一策略 |
+| 想编排多个 Agent 协作 | Workflow Engine DAG 编排 |
+| Agent 间没法通信 | Event Bus pub/sub |
+| 不知道哪个 Agent 能干什么 | Agent Router 能力路由 |
+| 每个 Agent 都要自己写工具调用 | Tool Gateway 统一注册/发现 |
+| 系统滚挂了没人管 | Rollback System 自动快照+回滚 |
+| 没法记住用户偏好 | Memory Tool 持久化 |
 
-> trimum 的核心价值不是「又一个 Hyprland 发行版」，而是**将 AI Agent 深度集成到桌面操作系统层面**——对标 OpenClaw 的 Agent 能力、iOS 的安全体系、Android 的 Runtime 设计、Coze 的智能体生态、Workbuddy 的多智能体协作架构。
+---
 
-## 系统架构
+## 开发状态
 
-```
-                    ┌──────────────────┐
-                    │  AI Linux Desktop│  ← 你看到的东西
-                    │  (Hyprland 预设   │
-                    │   + 主题包       │
-                    │   + Waybar AI    │
-                    │   + AI Launcher) │
-                    └────────┬─────────┘
-                             │
-                    ┌────────┴────────────────────────┐
-                    │  Interface Layer   ★新增  ★     │
-                    │  CLI ── fix / explain / ai      │
-                    │  Socket ── Unix (内部进程通信)  │
-                    │  HTTP API ── 外部插件接入      │
-                    └────────┬────────────────────────┘
-                             │
-                    ┌────────┴────────────────────────┐
-                    │  trimum Core                   │
-                    │  ┌───────────────────────────┐  │
-                    │  │ Agent Manager │ Event Bus │  │
-                    │  ├───────────────────────────┤  │
-                    │  │ Policy Engine │ Tool GW   │  │
-                    │  │   ├── Shell Adapter  ★   │  │
-                    │  │   ├── Git Adapter        │  │
-                    │  │   └── Docker Adapter     │  │
-                    │  └───────────────────────────┘  │
-                    └────────┬────────────────────────┘
-                             │
-                    ┌────────┴────────────────────────┐
-                    │  Agent SDK + Memory Layer       │
-                    │  ├── AI Shell (fix/explain/ai)  │
-                    │  ├── System Healthy Agent       │
-                    │  ├── Theme / File Ops Agent     │
-                    │  └── 长期记忆 + Knowledge 检索 │
-                    └────────┬────────────────────────┘
-                             │
-                    ┌────────┴────────────────────────┐
-                    │  Security Layer                 │
-                    │  ├── Landlock + Seccomp         │
-                    │  └── Docker 沙箱（高风险）     │
-                    ├─────────────────────────────────┤
-                    │  Reliability Layer              │
-                    │  └── Btrfs + Snapper + 健康检查  │
-                    └────────┬────────────────────────┘
-                             │
-                    ┌────────┴────────────────────────┐
-                    │  Arch Linux（底座 + 防滚挂）    │
-                    └─────────────────────────────────┘
-```
-
-## 核心模块
-
-| 层 | 模块 | 职责 | Phase |
-|---|---|---|---|
-| **桌面** | Hyprland 预设 + 主题包 | 开箱即用、美观、一致 | 1.5 |
-| **Interface** | CLI / Unix Socket / HTTP API | 让任何程序都能调用 AI 能力 | 2+ |
-| **Core** | trimum Core (Python) | Agent 生命周期、权限策略、工具网关（含 Shell Adapter） | 2 |
-| **Agent SDK** | Agent SDK (Python) | AI Shell (fix/explain/ai)、System Healthy、文件操作、主题切换 | 1+ |
-| **Memory** | 长期记忆 + Knowledge Store | Agent 间共享状态 + 语义检索 | 5 |
-| **Security** | Landlock + Seccomp + Docker | 权限隔离 + 沙箱执行 | 4 |
-| **Reliability** | Snapper + Landlock | 快照回滚 + 健康检查 | 1.5
-
-## 开发路线
-
-```
-Phase 0 ── 基础环境
-  └── Arch + Python + Docker + Git
-
-Phase 1 ── AI Shell MVP
-  └── 自然语言 → 安全执行
-  └── 产出：trm 命令行工具
-
-Phase 1.5 ── 桌面预设 + 安装脚本（新）
-  └── 5-8 套 Hyprland 主题预设
-  └── Btrfs + Snapper 自动配置
-  └── 一键安装脚本
-
-Phase 2 ── trimum Core (Python)
-  └── Event Bus + Tool Gateway + Policy Engine
-
-Phase 3 ── Agent SDK
-  └── AI Shell + System Healthy Agent
-
-Phase 4 ── Security Runtime
-  └── Landlock + Namespace + Sandbox
-
-Phase 5 ── Knowledge Layer
-  └── 个人知识库
-
-Phase 6 ── ISO / 安装镜像
-  └── 一键安装盘
-```
-
-## 开箱即用清单
-
-安装时通过三步安装界面（联网 → API Key → 软件勾选），决定权在用户手上。
-
-### 锁定（默认必装，不可取消）
-
-| 类别 | 组件 | 用途 |
+| Phase | 组件 | 状态 |
 |---|---|---|
-| **语言** | Python 3.12+ + uv | Harness 自身依赖 |
-| **版本控制** | Git | 代码管理 / AI 修改记录 |
-| **容器** | Docker | Agent 沙箱 / 工具链回滚保障 |
-| **系统工具** | ripgrep / fd / jq / btop/htop | 系统监控与搜索 |
-| **文件系统** | Btrfs + Snapper | 快照回滚（防滚挂核心） |
-| **安全** | Landlock + Seccomp + nftables | 沙箱执行与防火墙 |
+| **Phase 0** | 基础环境（Arch + Python + Docker） | ✅ |
+| **Phase 1** | AI Shell MVP（自然语言→安全执行） | ✅ |
+| **Phase 1.5** | 桌面预设（Hyprland 5 套主题 + 安装脚本） | ✅ |
+| **Phase 2** | **Harness Runtime**（Agent Router + Event Bus + Workflow Engine + Tool Gateway + Security Policy） | ✅ **17 模块，4282 行代码，33 测试全过** |
+| **Phase 3** | Agent SDK（openai-agents-python 封装 + 预装 Agent） | 📝 设计完成 |
+| **Phase 4** | Security Runtime（Landlock + Namespace + Sandbox） | 📝 设计完成 |
+| **Phase 5** | Memory Layer（长期记忆 + Knowledge Store） | 📝 设计完成 |
+| **Phase 6** | ISO / 一键安装镜像 | ⏳ 待开始 |
 
-### 可选（安装模式或手动勾选）
+---
 
-> 为降低选择焦虑，安装界面提供**三档预设模式**，选中后仍可微调。
+## 快速开始
 
-#### 三档安装模式
-
-| 模式 | 内容摘要 | 磁盘占用 | 适合人群 |
-|---|---|---|---|
-| 🌟 **普通模式** | Harness + AI Desktop + Cloud AI + 浏览器 | ~10-20GB | 日常使用 |
-| 🚀 **开发者模式** | 普通模式 + Git/Docker/Cursor/AI编码工具/Shell增强/数据库 | ~40-60GB | 写代码 |
-| 🧪 **AI Engineer** | 开发者模式 + 本地模型/GPU环境/RAG/多Agent/DevOps工具 | 100GB+ | 深度 AI 开发 |
-
-#### 可选软件完整清单
-
-| 类别 | 组件 | 默认模式 |
-|---|---|---|
-| **编辑器** | VS Code / Cursor | 开发者+ |
-| **AI 编码** | Codex CLI / Claude Code | 开发者+ |
-| **浏览器** | Firefox / Chromium | 普通+ |
-| **网络代理** | V2ray / Clash | 开发者+ |
-| **文本编辑器** | Neovim | 开发者+ |
-| **Shell 增强** | zsh / oh-my-zsh / starship / tmux / fzf / zoxide / eza | 开发者+ |
-| **数据库** | PostgreSQL + pgvector / MySQL / Redis | AI Engineer |
-| **本地 AI** | Ollama / llama.cpp / GPU CUDA / ROCm | AI Engineer |
-| **Agent 扩展** | Research / DevOps / Teaching Agent | AI Engineer |
-| **系统增强** | Timeshift（快照替代）/ Ansible（批量部署） | AI Engineer |
-| **桌面组件** | Waybar、Cron、Landlock Hook 等 | 普通+ |
-
-> 可选软件可以安装后通过 `ai "安装 xxx"` 命令随时增删。
-
-## Shell 深度绑定（Interface Layer）
-
-Harness 不是桌面 AI 窗口，而是进入 Shell 生命周期的系统级 AI 服务。
-
-### 三种入口模式
-
-| 模式 | 命令 | 场景 | 阶段 |
-|---|---|---|---|
-| **`ai` 统一入口** | `ai "检查docker为什么启动失败"` | 自然语言→执行 | Phase 1 |
-| **`explain` 管道原语** | `cat server.py \| explain` | 像 grep/awk 一样解释任何输出 | Phase 3 |
-| **`fix` 诊断修复** | `python main.py` 报错后输入 `fix` | 自动捕获 stdout/stderr/exit code，调 Coding Agent 诊断 | Phase 3 |
-
-> **设计原则**：AI 增强 Shell，不替代 Shell。类似 vim 没有消灭键盘、Copilot 没有消灭代码。
-
-### 系统集成
-
-```
-trimum
-      │
-  Interface Layer
-      │
-  ┌───┴───┬─────┬──────┐
-CLI    Socket  HTTP   SDK
-│       │      │      │
-Shell  Neovim 插件  Waybar  Cron
-```
-
-## 资源占用
-
-| 组件 | 空闲内存 | 说明 |
-|---|---|---|
-| Python trmd daemon | ~20-40MB | 系统级守护进程 |
-| Python Agent SDK（常驻） | ~50-100MB | 按需惰性加载 |
-| Embedding 模型 | ~0-500MB | 云端 AI 时 0MB；本地按需加载 |
-| Hyprland 桌面环境 | ~500-800MB | Waybar + 通知 + 壁纸等 |
-| **合计（典型）** | **~0.8-1.5GB** | 含 Hyprland 桌面全开 |
-
-> 云端 AI 是本机零计算负载的关键。对比：Windows 11 空闲 3-5GB、Apple Intelligence 需 16GB RAM。
-
-## 快速开始（Phase 1）
+### 已有 Arch 系统
 
 ```bash
-# 在已有 Arch 上安装
-pip install trm
+# 安装 Core
+pip install trimum-core
 
-# 用法
+# 启动守护进程
+systemctl --user start trimum-core
+
+# 使用
 trm "查看磁盘空间"
-trm "帮我清理缓存，确认后执行"
-trm "换个护眼主题"    # Phase 1.5 后
+trm "帮我清理缓存"
 ```
 
-## 防滚挂机制
-
-## 密钥配置
-
-所有 API Key 和敏感凭据统一通过 `~/.trimum/env` 文件管理，**不写入代码或配置文件**。
+### 一键安装
 
 ```bash
-# ~/.trimum/env — 启动时自动加载
-OPENAI_API_KEY=sk-xxx
-# DEEPSEEK_API_KEY=sk-xxx       # 注释即禁用，取消注释即可切换
-# ANTHROPIC_API_KEY=sk-ant-xxx
-OPENAI_BASE_URL=https://api.openai.com/v1  # 可更换为国产模型地址
-
-# 通知渠道（可选）
-APPRISE_TOKEN=xxx              # Bark / Telegram / 微信等
+curl -fsSL https://get.trimum.sh | bash
 ```
 
-**规则**：
-- 文件权限 `600`，仅当前用户可读
-- `trm` 和 `trmd` 启动时自动加载此文件
-- Agent SDK 提供 `get_secret("OPENAI_API_KEY")` 统一读取
-- 注释 `#` 即禁用该密钥，免删除
+（需 Arch Linux，自动配置 Hyprland 桌面 + trimum Core + AI Shell）
 
-`#` 是注释符，注释即禁用，取消注释即启用，无需删除密钥行。
-
-
-```
-更新触发
-    ↓
-Snapper pre-snapshot
-    ↓
-System Healthy Agent 检查
-    ├── 通过 → 保留新快照
-    └── 失败 → 自动回滚 + 通知用户
-```
+---
 
 ## 项目结构
 
@@ -253,114 +123,45 @@ System Healthy Agent 检查
 trimum/
 ├── README.md
 ├── LICENSE
-├── .gitignore
-├── STATUS.md              # 当前进度一览
+├── STATUS.md
 ├── docs/
-│   ├── ARCHITECTURE.md
+│   ├── ARCH.md              # Phase 2 Core 架构
+│   ├── ARCHITECTURE.md       # 全系统架构（v3.0）
 │   ├── DEVELOPMENT-ROADMAP.md
 │   ├── TECHNICAL-BOM.md
-│   ├── PHASE1-PLAN.md     # Phase 1 详细计划与三文件纪律文档
+│   ├── PHASE1-PLAN.md
 │   ├── REFERENCE-PROJECTS.md
-│   ├── REUSE-STRATEGY.md
-│   └── omarchy-ref/       # Omarchy 参考配置文件（只读参考）
-├── config/
-│   ├── trimum.yaml        # trimum Core 配置
-│   └── policy.yaml        # 安全策略规则
+│   └── REUSE-STRATEGY.md
 ├── src/
-│   └── trimum-mvp/        # Phase 1 AI Shell MVP（Python）
-│       ├── trimum_mvp/    # 核心模块
-│       │   ├── cli.py     # 命令行入口（trm）
-│       │   ├── llm.py     # LLM 适配器
-│       │   ├── planner.py # 离线 fallback 规划器
-│       │   ├── executor.py# 执行器
-│       │   ├── policy.py  # 策略引擎
-│       │   └── output.py  # Rich 格式化输出
-│       ├── test_scenarios.py
-│       ├── config.yaml
-│       ├── policy.yaml
-│       └── pyproject.toml
+│   └── trimum_core/          # Phase 2 Core（17 个模块，4282 行）
+│       ├── agent_registry.py
+│       ├── agent_router.py
+│       ├── planner_agent.py
+│       ├── workflow_engine.py
+│       ├── tool_gateway.py
+│       ├── event_bus.py
+│       ├── policy_engine.py
+│       ├── agent_manager.py
+│       ├── context_manager.py
+│       ├── api_server.py
+│       ├── ipc_handler.py
+│       ├── models.py
+│       ├── config.py
+│       ├── logger.py
+│       ├── main.py
+│       └── trimum_client.py
 ├── desktop/
-│   ├── themes/            # 22 套预设主题（来自 Omarchy）
-│   │   ├── catppuccin/
-│   │   ├── tokyo-night/
-│   │   ├── nord/
-│   │   ├── gruvbox/
-│   │   └── ... (共 22 套)
-│   ├── zsh-ai.sh          # Zsh AI Shell 集成
-│   └── ai.ps1             # PowerShell AI Shell 集成
-├── scripts/
-│   └── setup-btrfs-snapper.sh  # Btrfs + Snapper 自动配置
-├── tmp/                   # 临时文件（gitignore 已排除）
-└── generated/             # 生成文件（gitignore 已排除）
+│   └── themes/               # 22 套预设主题
+└── scripts/
+    └── setup-btrfs-snapper.sh
 ```
-
-## 当前状态
-
-- **Phase 1 (AI Shell MVP)**: ✅ 已完成
-- **Phase 1.5 (桌面预设)**: 🏗️ 主题资产已就绪（22 套），安装脚本待写
-- **Phase 2 (trimum Core)**: 🔲 未开始
-- 详细进度见 [`STATUS.md`](STATUS.md)
-
-## 快速开始
-
-### Phase 1 — AI Shell（实时体验）
-
-```bash
-# 1. 克隆仓库
-git clone https://github.com/guzhujushi/trimum.git
-cd trimum
-
-# 2. 安装依赖
-pip install -e src/trimum-mvp/
-
-# 3. 配置 API Key
-echo 'OPENAI_API_KEY=sk-xxx' > ~/.trimum/env
-
-# 4. 使用
-trm "查看磁盘空间"
-trm --dry-run "清理系统缓存"   # 预览不执行
-trm "更新系统"              # 策略引擎自动风险评估+确认
-```
-
-### 配置环境变量
-
-trimum 通过 `~/.trimum/env` 统一管理所有 API Key，**不写入代码**：
-
-```bash
-# ~/.trimum/env
-OPENAI_API_KEY=sk-xxx
-# DEEPSEEK_API_KEY=sk-xxx    # 注释即禁用
-OPENAI_BASE_URL=https://api.openai.com/v1  # 可更换为国产模型
-```
-
-文件权限建议 `600`。`trm` 启动时自动加载此文件。
-
-## 贡献指南
-
-1. Fork 本仓库
-2. 创建特性分支：`git checkout -b feat/my-feature`
-3. 提交变更：`git commit -m 'feat: add new feature'`
-4. 推送到分支：`git push origin feat/my-feature`
-5. 发起 Pull Request
-
-提交信息格式遵循 [Conventional Commits](https://www.conventionalcommits.org/)：
-
-```
-feat: 新功能
-fix: 修复
-chore: 杂项
-docs: 文档
-refactor: 重构
-style: 代码风格
-```
-
-## 许可
-
-MIT License — 详见 [LICENSE](LICENSE)
-
-Copyright (c) 2026 guzhujushi
 
 ---
 
-> ✨ trimum — 让 Linux 对普通人也可用。  
-> 自然语言操作 · AI 自动维护 · 开箱即用不折腾
+## 许可
+
+MIT License — Copyright (c) 2026 guzhujushi
+
+---
+
+> ✨ trimum — 把 AI Agent 变成操作系统级能力。

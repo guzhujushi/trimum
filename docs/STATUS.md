@@ -1,32 +1,65 @@
-# STATUS — trimum Core Phase 2
+# STATUS — trimum 项目进度
 
-## 任务清单
-- [ ] PRD.md（进行中）
-- [ ] ARCH.md（进行中）
-- [ ] 项目脚手架（pyproject.toml + 目录结构）
-- [ ] 模块 1：config.py + models.py
-- [ ] 模块 2：policy_engine.py（移植 Phase 1）
-- [ ] 模块 3：tool_gateway.py（async subprocess）
-- [ ] 模块 4：event_bus.py（pub/sub）
-- [ ] 模块 5：context_manager.py（SQLite）
-- [ ] 模块 6：agent_manager.py（进程管理）
-- [ ] 模块 7：api_server.py（FastAPI 路由）
-- [ ] 模块 8：logger.py（structlog）
-- [ ] 模块 9：main.py（入口）
-- [ ] 模块 10：CLI 客户端（trm 调用 Core）
-- [ ] 单元测试
-- [ ] 集成测试（Core 启动 + API 调用）
-- [ ] 配置文档（phase2-api.md）
-- [ ] git 提交 + 推送到 GitHub
+> 最后更新：2026-08-31
 
-## 决策记录
+## 总体进度
+
+| Phase | 组件 | 状态 | 行数 | 测试 |
+|---|---|---|---|---|
+| Phase 0 | 基础环境 | ✅ 完成 | — | — |
+| Phase 1 | AI Shell MVP | ✅ 完成 | ~500 | — |
+| Phase 1.5 | 桌面预设（Hyprland 主题 + 安装脚本） | ✅ 完成 | 22 套主题 | — |
+| **Phase 2** | **Harness Core（17 模块）** | **✅ 全部完成** | **4282 行** | **33/33 ✅** |
+| Phase 3 | Agent SDK (openai-agents 封装) | 📝 设计完成 | — | — |
+| Phase 4 | Security Runtime (Landlock/Sandbox) | 📝 设计完成 | — | — |
+| Phase 5 | Memory Layer (Knowledge Store) | 📝 设计完成 | — | — |
+| Phase 6 | ISO / 一键安装镜像 | ⏳ 待开始 | — | — |
+
+## Phase 2 详细状态
+
+### 已完成模块（17 个）
+
+| 模块 | 文件 | 行数 | 状态 | 测试 |
+|---|---|---|---|---|
+| Agent Registry | `agent_registry.py` | 158 | ✅ | ✅ |
+| Agent Router | `agent_router.py` | 151 | ✅ | ✅ |
+| Planner Agent | `planner_agent.py` | 513 | ✅ | — |
+| Workflow Engine | `workflow_engine.py` | 602 | ✅ | — |
+| Tool Gateway | `tool_gateway.py` | 414 | ✅ | ✅ |
+| Event Bus | `event_bus.py` | 121 | ✅ | — |
+| Policy Engine | `policy_engine.py` | 65 | ✅ | — |
+| Agent Manager | `agent_manager.py` | 340 | ✅ | — |
+| Context Manager | `context_manager.py` | 309 | ✅ | — |
+| API Server | `api_server.py` | 310 | ✅ | — |
+| IPC Handler | `ipc_handler.py` | 367 | ✅ | — |
+| Models | `models.py` | 219 | ✅ | — |
+| Config | `config.py` | 199 | ✅ | — |
+| Logger | `logger.py` | 45 | ✅ | — |
+| Main | `main.py` | 67 | ✅ | — |
+| CLI Client | `trimum_client.py` | 134 | ✅ | — |
+| __init__ | `__init__.py` | — | ✅ (v0.3.0) | — |
+
+### GitHub
+
+| 分支 | 状态 |
+|---|---|
+| `main` | ✅ Phase 2 已合并，全部历史可见 |
+| `phase2` | ✅ Phase 2 完整代码，可基于此裁剪为各版本 |
+
+## Phase 3 待实现
+
+1. Agent SDK 封装（openai-agents-python）
+2. 预装 Agent（AI Shell / System Healthy / Theme Manager）
+3. Tool 补全（Git / Docker / HTTP / 通知等标准工具）
+4. Workflow 模板预装
+5. 弹性沙箱（AI 辅助策略评估 + 行为追踪）
+
+## 设计决策记录
+
 | 日期 | 决策 | 理由 |
 |---|---|---|
-| 2026-08-30 | Phase 2 用 Python + FastAPI（延续 Phase 1 决策） | 全栈统一 |
-| 2026-08-30 | 端口 8321（trimum 首字母：T=84, R=82, M=77 → 83+21=104... 取 trm 拼音首字母 t=20, r=18, m=13 各位平方和 20²+18²+13²=1070，取前两位 17，投影到 4 位数 → 8321。记住了就行） | 随机选了个好记的 |
-| 2026-08-30 | Agent Manager 用 psutil 而非 subprocess.Popen 裸管 | psutil 提供更稳定的进程树管理 |
-
-## 下一步
-- [ ] 创建 pyproject.toml + 目录结构
-- [ ] 并行编码 8 个核心模块
-- [ ] 集成测试
+| 2026-08-30 | 全程 Python（取消 Rust） | Rust 国内生态不足、AI 编程助手覆盖差 |
+| 2026-08-30 | 端口 8321 | trm 首字母映射 |
+| 2026-08-31 | 新增 Agent Registry + Router | 按能力路由，不硬编码 Agent 分配 |
+| 2026-08-31 | 新增 Workflow Engine | 替代大量固定 Agent，DAG 编排 |
+| 2026-08-31 | Tool Gateway 重构（Registry + 权限） | 统一工具注册/发现/检查 |
