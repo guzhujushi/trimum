@@ -132,3 +132,32 @@ class PolicyRule(BaseModel):
     risk: RiskLevel = RiskLevel.MEDIUM
     action: Action = Action.CONFIRM
     description: str = ""
+
+
+class AgentPermissions(BaseModel):
+    """Permissions declared by an agent manifest."""
+
+    read: list[str] = []
+    write: list[str] = []
+    exec: list[str] = []
+    deny_exec: list[str] = []
+
+
+class AgentEvents(BaseModel):
+    """Events an agent publishes or subscribes to."""
+
+    publishes: list[str] = []
+    subscribes: list[str] = []
+
+
+class AgentManifest(BaseModel):
+    """Agent type manifest loaded from agent.json."""
+
+    name: str
+    version: str
+    description: str = ""
+    capabilities: list[str]
+    permissions: AgentPermissions
+    events: AgentEvents
+    entry: str
+    risk_level: RiskLevel = RiskLevel.MEDIUM
