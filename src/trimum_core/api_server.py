@@ -14,6 +14,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from typing import Any
+
 from .models import (
     ExecuteRequest,
     ExecuteResponse,
@@ -22,7 +24,10 @@ from .models import (
     AgentInfo,
     SystemEvent,
     ContextEntry,
+    ToolType,
 )
+from .planner_agent import PlannerAgent
+from .workflow_engine import NodeDefinition, WorkflowDefinition, WorkflowEngine
 from .tool_gateway import ToolGateway
 from .policy_engine import PolicyEngine
 from .event_bus import EventBus
@@ -50,6 +55,8 @@ class AppState:
         self.context: Optional[ContextManager] = None
         self.socket_server: Optional[stdlib_socket.socket] = None
         self.ipc: Optional[IpcHandler] = None
+        self.workflow_engine: Optional[WorkflowEngine] = None
+        self.planner: Optional[PlannerAgent] = None
 
 
 def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
@@ -171,6 +178,67 @@ def create_app(config: Config) -> FastAPI:
         risk, action, reason = state.policy.evaluate(cmd_str)
         return {"command": cmd_str, "risk": risk.value, "action": action.value, "reason": reason}
 
+    # ── Workflow Engine ────────────────────────────────────────
+
+    @app.post("/api/workflow/run")
+    async def run_workflow(request: WorkflowDefinition):
+        """执行一个 Workflow."""
+        if not state.workflow_engine:
+            raise HTTPException(status_code=503, detail="Workflow Engine 未初始化")
+        result = await state.workflow_engine.run(request)
+        return result.model_dump()
+
+    @app.get("/api/workflow/list")
+    async def list_workflows():
+        """列出所有已固化的 workflow."""
+        if not state.planner:
+            return []
+        return state.planner.list_workflows()
+
+    @app.get("/api/workflow/{name}")
+    async def get_workflow(name: str):
+        """加载指定 workflow."""
+        if not state.planner:
+            raise HTTPException(status_code=503, detail="Planner Agent 未初始化")
+        wf = state.planner.load_workflow(name)
+        if not wf:
+            raise HTTPException(status_code=404, detail=f"Workflow '{name}' 未找到")
+        return wf.model_dump()
+
+    # ── Planner Agent ───────────────────────────────────────────
+
+    class PlanRequest(BaseModel):
+        request: str
+        context: dict = {}
+
+    @app.post("/api/planner/plan")
+    async def plan_workflow(req: PlanRequest):
+        """使用 Planner Agent 将自然语言请求拆解为 Workflow."""
+        if not state.planner:
+            raise HTTPException(status_code=503, detail="Planner Agent 未初始化")
+        wf = await state.planner.run(req.request, req.context)
+        if wf is None:
+            raise HTTPException(status_code=400, detail="Planner 无法拆解此请求")
+        return wf.model_dump()
+
+    @app.post("/api/planner/plan-and-run")
+    async def plan_and_run(req: PlanRequest):
+        """Planner 拆解 → WorkflowEngine 自动执行."""
+        if not state.planner or not state.workflow_engine:
+            raise HTTPException(status_code=503, detail="Planner 或 Workflow Engine 未初始化")
+
+        wf = await state.planner.run(req.request, req.context)
+        if wf is None:
+            raise HTTPException(status_code=400, detail="Planner 无法拆解此请求")
+
+        result = await state.workflow_engine.run(wf)
+        return {
+            "workflow": wf.model_dump(),
+            "result": result.model_dump(),
+        }
+
+    # ── Agent 管理 ──────────────────────────────────────────────
+
     @app.get("/api/agents", response_model=list[AgentInfo])
     async def list_agents():
         """List all agents."""
@@ -270,6 +338,48 @@ def create_app(config: Config) -> FastAPI:
         _register_ipc_routes(ipc, state)
         state.ipc = ipc
         asyncio.create_task(ipc.start())
+
+        # Init Workflow Engine
+        state.workflow_engine = WorkflowEngine(state.event_bus)
+
+        # Init Planner Agent (按需启动, 但保留单例引用)
+        state.planner = PlannerAgent(
+            state.event_bus,
+            available_capabilities=[
+                "shell.exec",
+                "file.read",
+                "file.write",
+                "system.monitor",
+                "system.diagnose",
+            ],
+        )
+
+        # Register default node handler (shell.exec 等)
+        async def _shell_exec_handler(
+            workflow_id: str,
+            node: NodeDefinition,
+            context: dict,
+        ) -> Any:
+            """默认节点处理器: 通过 Tool Gateway 执行 shell 命令."""
+            cmd = node.config.get("command", "")
+            if not cmd:
+                return {"error": "no command in node config"}
+            parts = cmd.split()
+            req = ExecuteRequest(
+                tool=ToolType.SHELL,
+                args=parts,
+                agent_id=f"workflow:{workflow_id}",
+                timeout_seconds=node.timeout_seconds,
+            )
+            resp = await state.tool_gateway.execute(req)
+            return {
+                "output": resp.output,
+                "error": resp.error,
+                "exit_code": resp.exit_code,
+                "status": resp.status,
+            }
+
+        state.workflow_engine.set_default_handler(_shell_exec_handler)
 
         logger.info("trimum_core_started", host=config.host, port=config.port)
 
