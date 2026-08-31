@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-08-31（v10 — Phase 2 Agent Registry + Agent Router 完成）
+> 最后更新：2026-08-31（v11 — Tool Gateway 重构：ToolRegistry + Agent 权限集成）
 >
 > 当前阶段：Phase 2 进行中（Agent Registry + Router 已完成）
 
@@ -42,7 +42,8 @@
 
 ### Phase 2 — trimum Core（Python + FastAPI）
 - [x] **Agent Registry + Agent Router**（2026-08-31，pr #4 已合并）
-- [ ] API Server 框架 + Tool Gateway
+- [x] **Tool Gateway 重构**（2026-08-31，ToolRegistry + Agent 权限双层检查）
+- [ ] API Server 框架
 - [ ] Policy Engine + Agent Manager（Supervisor）
 - [ ] Event Bus + Context Manager（SQLite，atuin Schema）
 - [ ] Unix Socket / HTTP 接口
@@ -83,7 +84,9 @@
 |---|---|---|
 | Agent Registry + Router 实现 | ✅ | agent_registry.py / agent_router.py / models 更新 / __init__.py 0.3.0 |
 | 代码审查 | ✅ | 15 文件检查，1 minor warning，已写入 tmp/code-review-agent.md |
-| 推 Git（phase2 分支） | ✅ | origin/phase2 c239d56 |
+| Tool Gateway 重构 | ✅ | ToolRegistry / Agent_permission_check / load_tools_from_config |
+| 测试 | ✅ | 23/23 全部通过 |
+| 推 Git（phase2 分支） | ✅ | origin/phase2 b393c2c |
 
 ## 今日进度（2026-08-30）
 | 完成项 | 状态 | 备注 |
