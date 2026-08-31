@@ -25,7 +25,8 @@
 | Agent Router | `agent_router.py` | 151 | ✅ | ✅ |
 | Planner Agent | `planner_agent.py` | 513 | ✅ | — |
 | Workflow Engine | `workflow_engine.py` | 602 | ✅ | — |
-| Tool Gateway | `tool_gateway.py` | 414 | ✅ | ✅ |
+| Tool Gateway | `tool_gateway.py` | ~420 | ✅ (v2) | ✅ |
+| Tool Dispatchers | `tool_dispatchers.py` | ~600 | ✅ | — |
 | Event Bus | `event_bus.py` | 121 | ✅ | — |
 | Policy Engine | `policy_engine.py` | 65 | ✅ | — |
 | Agent Manager | `agent_manager.py` | 340 | ✅ | — |
@@ -37,7 +38,7 @@
 | Logger | `logger.py` | 45 | ✅ | — |
 | Main | `main.py` | 67 | ✅ | — |
 | CLI Client | `trimum_client.py` | 134 | ✅ | — |
-| __init__ | `__init__.py` | — | ✅ (v0.3.0) | — |
+| __init__ | `__init__.py` | — | ✅ (v0.3.1) | — |
 
 ### GitHub
 
@@ -50,11 +51,41 @@
 
 1. Agent SDK 封装（openai-agents-python）
 2. 预装 Agent（AI Shell / System Healthy / Theme Manager）
-3. Tool 补全（Git / Docker / HTTP / 通知等标准工具）
+3. Tool 补全（更多标准工具）
 4. Workflow 模板预装
 5. 弹性沙箱（AI 辅助策略评估 + 行为追踪）
 
+## Phase 2.5 — Tool Dispatcher Refactor（2026-08-31）
+
+将 Tool Gateway 的 `_run_subprocess` shell 统一调用改为每种工具类型对应独立 Dispatcher：
+
+| Dispatcher | 实现方式 | 状态 |
+|---|---|---|
+| FileDispatcher | Python open()/shutil/os — 原生读写文件 | ✅ |
+| GitDispatcher | asyncio.create_subprocess_exec('git', …) — 无 shell | ✅ |
+| HttpDispatcher | urllib（stdlib）— GET/POST | ✅ |
+| ProcessDispatcher | tasklist/ps + subprocess_exec | ✅ |
+| SystemDispatcher | os / platform / shutil — 系统信息 | ✅ |
+| ShellDispatcher | asyncio.create_subprocess_shell — 保留 fallback | ✅ |
+| EnvDispatcher | os.environ — 环境变量查/列 | ✅ |
+| KnowledgeDispatcher | 预留（Phase 5） | ✅ 存根 |
+| NotificationDispatcher | 预留 | ✅ 存根 |
+| MCPDispatcher | 预留 | ✅ 存根 |
+| CustomDispatcher | 预留 | ✅ 存根 |
+| **DispatcherRegistry** | ToolType → Dispatcher 映射 + dispatch() | ✅ |
+
+**改动文件**：
+- 新增 `tool_dispatchers.py`（~600 行）
+- 重写 `tool_gateway.py` execute() 使用 DispatcherRegistry
+- 更新 `__init__.py` 导出所有新类（v0.3.1）
+
 ## 设计决策记录
+
+| 日期 | 决策 | 理由 |
+|---|---|---|
+| 2026-08-31 | Tool Dispatchers 原生 Python 实现 | shell subprocess 不安全/不可靠；Python open() 更快且可控 |
+| 2026-08-31 | HttpDispatcher 用 urllib 不用 httpx | 零外部依赖；后续可覆盖替换 |
+| 2026-08-31 | GitDispatcher 用 create_subprocess_exec | 避免 shell injection；直接控制 git 参数 |
 
 | 日期 | 决策 | 理由 |
 |---|---|---|

@@ -22,6 +22,20 @@ from trimum_core.models import (
     ToolDefinition,
     ToolType,
 )
+from trimum_core.tool_dispatchers import (
+    DispatcherRegistry,
+    FileDispatcher,
+    GitDispatcher,
+    HttpDispatcher,
+    ProcessDispatcher,
+    SystemDispatcher,
+    ShellDispatcher,
+    EnvDispatcher,
+    KnowledgeDispatcher,
+    NotificationDispatcher,
+    MCPDispatcher,
+    CustomDispatcher,
+)
 from trimum_core.workflow_engine import (
     EdgeDefinition,
     NodeDefinition,
@@ -32,7 +46,7 @@ from trimum_core.workflow_engine import (
     WorkflowStatus,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     "Action",
@@ -44,16 +58,28 @@ __all__ = [
     "AgentRouter",
     "AgentStatus",
     "ContextEntry",
+    "CustomDispatcher",
+    "DispatcherRegistry",
     "EdgeDefinition",
+    "EnvDispatcher",
     "EventSeverity",
     "ExecuteRequest",
     "ExecuteResponse",
+    "FileDispatcher",
+    "GitDispatcher",
+    "HttpDispatcher",
+    "KnowledgeDispatcher",
+    "MCPDispatcher",
     "NodeDefinition",
     "NodeStatus",
+    "NotificationDispatcher",
     "PlannerAgent",
     "PolicyRule",
+    "ProcessDispatcher",
     "RiskLevel",
     "RouteEntry",
+    "ShellDispatcher",
+    "SystemDispatcher",
     "ToolDefinition",
     "SpawnRequest",
     "SpawnResponse",

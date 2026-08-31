@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=64.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "trimum-core"
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-trmd = "trimum_core.main:run
+trmd = "trimum_core.main:run"
 trimum-client = "trimum_core.trimum_client:main"
 
 [tool.setuptools.packages.find]

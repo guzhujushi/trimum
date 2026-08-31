@@ -27,6 +27,7 @@ from .models import (
     AgentManifest,
 )
 from .policy_engine import PolicyEngine
+from .tool_dispatchers import DispatcherRegistry
 from .logger import get_logger
 
 logger = get_logger("tool_gateway")
@@ -128,23 +129,37 @@ class ToolGateway:
         self,
         policy_engine: Optional[PolicyEngine] = None,
         tool_registry: Optional[ToolRegistry] = None,
+        dispatcher_registry: Optional[DispatcherRegistry] = None,
     ) -> None:
         self.policy = policy_engine or PolicyEngine()
         self.tools = tool_registry or ToolRegistry()
+        self.dispatchers = dispatcher_registry or DispatcherRegistry()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
+    # ── Only need for cmd_str-based permission check helper ──
+    @staticmethod
+    def _build_cmd_str(request: ExecuteRequest) -> str:
+        """Build a human-readable command string from the request for policy checks."""
+        if isinstance(request.args, list):
+            return " ".join(request.args).strip()
+        return str(request.args).strip() if request.args else ""
+
     async def execute(self, request: ExecuteRequest) -> ExecuteResponse:
-        """Execute a tool command with two-layer permission check."""
+        """Execute a tool command with two-layer permission check.
+
+        Layer 1: Global PolicyEngine check (regex rules from policy.yaml).
+        Layer 2: Agent permissions check (from AgentManifest if available).
+        Execution: Dispatched via DispatcherRegistry to the appropriate
+                   dispatcher (FileDispatcher, GitDispatcher, ShellDispatcher, etc.).
+        """
         execution_id = uuid.uuid4().hex[:12]
 
-        # Build command string
-        cmd_str = " ".join(request.args) if isinstance(request.args, list) else request.args
-        cmd_str = cmd_str.strip()
-
-        if not cmd_str:
+        # Build command string for policy checks
+        cmd_str = self._build_cmd_str(request)
+        if not cmd_str and request.tool == ToolType.SHELL:
             return ExecuteResponse(
                 execution_id=execution_id,
                 status="denied",
@@ -155,7 +170,7 @@ class ToolGateway:
                 reason="No command provided",
             )
 
-        # Resolve tool definition
+        # Resolve tool definition (optional, used for agent permission check)
         tool_def = self.tools.get(request.tool.value)
 
         # ------------------------------------------------------------------
@@ -168,6 +183,7 @@ class ToolGateway:
                 "gateway.layer1_denied",
                 command=cmd_str,
                 reason=reason,
+                tool=request.tool.value,
                 risk=risk.value,
             )
             return ExecuteResponse(
@@ -208,35 +224,31 @@ class ToolGateway:
             )
 
         # ------------------------------------------------------------------
-        # Execute
+        # Execute via DispatcherRegistry
         # ------------------------------------------------------------------
         status = "allowed" if action == Action.AUTO else "confirmed"
         logger.info(
             "gateway.executing",
-            command=cmd_str,
+            tool=request.tool.value,
+            args=cmd_str[:200] if len(cmd_str) > 200 else cmd_str,
             risk=risk.value,
             action=action.value,
             execution_id=execution_id,
             agent_id=request.agent_id,
         )
 
-        result = await self._run_subprocess(
-            cmd=cmd_str,
-            timeout=request.timeout_seconds,
-            env=request.env if request.env else None,
-            cwd=request.cwd,
-        )
+        # Dispatch to the appropriate tool dispatcher
+        result = await self.dispatchers.dispatch(request)
 
-        return ExecuteResponse(
-            execution_id=execution_id,
-            status=status,
-            output=result["stdout"],
-            error=result["stderr"],
-            exit_code=result["exit_code"],
-            risk=risk,
-            action=action,
-            reason=reason,
-        )
+        # Merge policy decisions into the dispatcher's response
+        result.execution_id = result.execution_id or execution_id
+        if result.status in ("", "allowed"):
+            result.status = status
+        result.risk = result.risk or risk
+        result.action = result.action or action
+        result.reason = result.reason or reason
+
+        return result
 
     # ------------------------------------------------------------------
     # Agent Permission Check

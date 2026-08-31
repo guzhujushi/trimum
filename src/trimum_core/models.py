@@ -28,9 +28,40 @@ class Action(str, Enum):
 class ToolType(str, Enum):
     """Supported tool types."""
 
-    SHELL = "shell"
-    GIT = "git"
-    DOCKER = "docker"
+    SHELL = "shell"          # Raw shell command execution
+    FILE_READ = "file.read"   # Read file contents
+    FILE_WRITE = "file.write"  # Write file contents
+    FILE_DELETE = "file.delete"
+    FILE_LIST = "file.list"   # List directory contents
+    FILE_MOVE = "file.move"
+    FILE_COPY = "file.copy"
+    FILE_SEARCH = "file.search"  # grep/rg search in files
+    GIT = "git"               # Generic git operations
+    GIT_STATUS = "git.status"
+    GIT_DIFF = "git.diff"
+    GIT_LOG = "git.log"
+    GIT_COMMIT = "git.commit"
+    GIT_PUSH = "git.push"
+    GIT_PULL = "git.pull"
+    GIT_BRANCH = "git.branch"
+    HTTP = "http"             # Generic HTTP
+    HTTP_GET = "http.get"
+    HTTP_POST = "http.post"
+    PROCESS = "process"       # Generic process operations
+    PROCESS_LIST = "process.list"
+    PROCESS_KILL = "process.kill"
+    SYSTEM = "system"         # Generic system info
+    SYSTEM_INFO = "system.info"
+    SYSTEM_DISK = "system.disk"
+    SYSTEM_MEMORY = "system.memory"
+    KNOWLEDGE_SEARCH = "knowledge.search"
+    KNOWLEDGE_STORE = "knowledge.store"
+    NOTIFICATION = "notification"
+    NOTIFICATION_SEND = "notification.send"
+    MCP_TOOLS_LIST = "mcp.tools.list"
+    MCP_TOOLS_CALL = "mcp.tools.call"
+    ENV_GET = "env.get"
+    ENV_LIST = "env.list"
     CUSTOM = "custom"
 
 
