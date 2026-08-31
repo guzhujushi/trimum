@@ -7,7 +7,13 @@ import time
 from collections import deque
 from typing import Any, Callable, Coroutine
 
-from trimum_core.models import SystemEvent
+from trimum_core.models import EventSeverity, SystemEvent
+
+
+# ── 命名空间常量 ─────────────────────────────────────────
+# 用于事件/任务类型的命名空间前缀，确保不与其它系统冲突
+NAMESPACE_EVENT = "event."       # 如 event.planner.failed
+NAMESPACE_TASK = "task."         # 如 task.node.completed
 
 
 Callback = Callable[[SystemEvent], Coroutine[Any, Any, None] | None]
@@ -31,6 +37,45 @@ class EventBus:
     # ------------------------------------------------------------------
     # Publish
     # ------------------------------------------------------------------
+
+    async def emit_event(
+        self,
+        event_type: str,
+        source: str,
+        payload: dict | None = None,
+    ) -> None:
+        """Convenience: create and publish a SystemEvent in one call.
+
+        Automatically prepends NAMESPACE_EVENT.
+        """
+        event = SystemEvent(
+            event_type=f"{NAMESPACE_EVENT}{event_type}",
+            source=source,
+            severity=EventSeverity.INFO,
+            payload=payload or {},
+            timestamp=time.time(),
+        )
+        await self.publish(event)
+
+    async def emit_task(
+        self,
+        task_type: str,
+        payload: dict | None = None,
+        source: str = "workflow",
+    ) -> None:
+        """Convenience: create and publish a task SystemEvent.
+
+        Automatically prepends NAMESPACE_TASK.
+        Used by WorkflowEngine for node/workflow lifecycle events.
+        """
+        event = SystemEvent(
+            event_type=f"{NAMESPACE_TASK}{task_type}",
+            source=source,
+            severity=EventSeverity.INFO,
+            payload=payload or {},
+            timestamp=time.time(),
+        )
+        await self.publish(event)
 
     async def publish(self, event: SystemEvent) -> None:
         """Publish an event to all matching subscribers.
@@ -66,7 +111,7 @@ class EventBus:
     def subscribe(self, event_type: str, callback: Callback) -> None:
         """Register *callback* for *event_type*.
 
-        Pass `\*` to receive *all* events.
+        Pass `*` to receive *all* events.
         """
         self._subscribers.setdefault(event_type, []).append(callback)
 
