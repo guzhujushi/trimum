@@ -4,7 +4,9 @@ from trimum_core.agent_registry import AgentRegistry
 from trimum_core.agent_router import AgentRouter, RouteEntry
 from trimum_core.agent_runtime import AgentRuntime
 from trimum_core.agent_socket import AgentSocketServer, AgentSocketClient, SocketMessage
+from trimum_core.behavior_monitor import BehaviorMonitor
 from trimum_core.planner_agent import PlannerAgent
+from trimum_core.security_agent import SecurityAgent, DecisionResult
 from trimum_core.models import (
     Action,
     AgentEvents,
@@ -69,8 +71,7 @@ __all__ = [
     "AgentStatus",
     "AgentTask",
     "AgentTaskResult",
-    "AgentTask",
-    "AgentTaskResult",
+    "BehaviorMonitor",
     "ContextEntry",
     "CustomDispatcher",
     "DispatcherRegistry",
@@ -99,6 +100,8 @@ __all__ = [
     "SpawnResponse",
     "SocketMessage",
     "SystemEvent",
+    "SecurityAgent",
+    "DecisionResult",
     "ToolType",
     "WorkflowDefinition",
     "WorkflowDefV2",
