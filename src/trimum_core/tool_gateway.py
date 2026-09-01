@@ -28,6 +28,7 @@ from .models import (
 )
 from .policy_engine import PolicyEngine
 from .tool_dispatchers import DispatcherRegistry
+from .tool_file_loader import scan_tools
 from .logger import get_logger
 
 logger = get_logger("tool_gateway")
@@ -41,17 +42,44 @@ logger = get_logger("tool_gateway")
 class ToolRegistry:
     """Central registry for tool definitions.
 
-    Ships with three built-in tools (shell, file.read, file.write).
-    Agents or the SDK may register additional tools at runtime.
+    Two-tier loading:
+    1. Scan ~/.trimum/tools/<name>/tool.json5 for file-based tools
+    2. If a tool has no file-based definition, fall back to built-in defaults
+
+    Ships with three built-in tools (shell, file.read, file.write)
+    as fallbacks when no file-based manifest is found.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, tools_path: str | None = None) -> None:
         self._tools: dict[str, ToolDefinition] = {}
+        self._tools_path = tools_path
+        self.load_all()
+
+    def load_all(self) -> int:
+        """Reload all tool definitions from files + built-in fallbacks.
+
+        Clears current registry, then:
+        1. Loads from ~/.trimum/tools/<name>/tool.json5
+        2. Fills missing tools with built-in defaults
+
+        Returns number of file-based tools loaded.
+        """
+        self._tools.clear()
+
+        # 1. File-based tools
+        file_count = 0
+        for tool in scan_tools(self._tools_path):
+            self._tools[tool.name] = tool
+            file_count += 1
+
+        # 2. Built-in fallbacks for tools not registered via file
         self._register_defaults()
 
+        return file_count
+
     def _register_defaults(self) -> None:
-        """Register the three built-in tools."""
-        self.register(
+        """Register built-in tool fallbacks (only if not already loaded from file)."""
+        defaults: list[ToolDefinition] = [
             ToolDefinition(
                 name="shell",
                 description="Execute arbitrary shell commands",
@@ -60,20 +88,16 @@ class ToolRegistry:
                 allowed_flags=[],
                 timeout_default=30.0,
                 risk_level=RiskLevel.MEDIUM,
-            )
-        )
-        self.register(
+            ),
             ToolDefinition(
-                name=_FILE_READ,
+                name="file.read",
                 description="Read file contents via shell (cat, head, tail, etc.)",
                 tool_type=ToolType.CUSTOM,
                 executable="",
                 allowed_flags=["-n", "-c", "-f"],
                 timeout_default=10.0,
                 risk_level=RiskLevel.LOW,
-            )
-        )
-        self.register(
+            ),
             ToolDefinition(
                 name="file.write",
                 description="Write to files via shell (echo >, tee, sed -i, etc.)",
@@ -82,8 +106,102 @@ class ToolRegistry:
                 allowed_flags=[],
                 timeout_default=10.0,
                 risk_level=RiskLevel.HIGH,
-            )
-        )
+            ),
+            ToolDefinition(
+                name="file",
+                description="File operations: read, write, delete, list, move, copy, search",
+                tool_type=ToolType.FILE_READ,
+                executable="",
+                allowed_flags=[],
+                timeout_default=10.0,
+                risk_level=RiskLevel.MEDIUM,
+            ),
+            ToolDefinition(
+                name="git",
+                description="Git operations: status, diff, log, commit, push, pull, branch",
+                tool_type=ToolType.GIT,
+                executable="",
+                allowed_flags=[],
+                timeout_default=30.0,
+                risk_level=RiskLevel.LOW,
+            ),
+            ToolDefinition(
+                name="http",
+                description="HTTP requests: GET and POST",
+                tool_type=ToolType.HTTP,
+                executable="",
+                allowed_flags=[],
+                timeout_default=30.0,
+                risk_level=RiskLevel.MEDIUM,
+            ),
+            ToolDefinition(
+                name="process",
+                description="Process operations: list and kill",
+                tool_type=ToolType.PROCESS,
+                executable="",
+                allowed_flags=[],
+                timeout_default=10.0,
+                risk_level=RiskLevel.HIGH,
+            ),
+            ToolDefinition(
+                name="system",
+                description="System information: info, disk, memory",
+                tool_type=ToolType.SYSTEM,
+                executable="",
+                allowed_flags=[],
+                timeout_default=10.0,
+                risk_level=RiskLevel.LOW,
+            ),
+            ToolDefinition(
+                name="env",
+                description="Environment variable operations: get and list",
+                tool_type=ToolType.ENV_GET,
+                executable="",
+                allowed_flags=[],
+                timeout_default=5.0,
+                risk_level=RiskLevel.MEDIUM,
+            ),
+            ToolDefinition(
+                name="knowledge",
+                description="Knowledge base operations: search and store",
+                tool_type=ToolType.KNOWLEDGE_SEARCH,
+                executable="",
+                allowed_flags=[],
+                timeout_default=10.0,
+                risk_level=RiskLevel.LOW,
+            ),
+            ToolDefinition(
+                name="notification",
+                description="Send notifications (apprise)",
+                tool_type=ToolType.NOTIFICATION,
+                executable="",
+                allowed_flags=[],
+                timeout_default=10.0,
+                risk_level=RiskLevel.LOW,
+            ),
+            ToolDefinition(
+                name="mcp",
+                description="MCP tools: list and call",
+                tool_type=ToolType.MCP_TOOLS_LIST,
+                executable="",
+                allowed_flags=[],
+                timeout_default=30.0,
+                risk_level=RiskLevel.MEDIUM,
+            ),
+            ToolDefinition(
+                name="custom",
+                description="Custom tool dispatcher",
+                tool_type=ToolType.CUSTOM,
+                executable="",
+                allowed_flags=[],
+                timeout_default=30.0,
+                risk_level=RiskLevel.MEDIUM,
+            ),
+        ]
+
+        for tool in defaults:
+            if tool.name not in self._tools:
+                self._tools[tool.name] = tool
 
     def register(self, tool: ToolDefinition) -> None:
         """Register or replace a tool definition."""

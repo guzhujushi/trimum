@@ -12,6 +12,22 @@ from typing import Optional
 
 from trimum_core.models import AgentManifest
 
+# Try json5 for comment support
+HAS_JSON5 = False
+try:
+    import json5  # noqa: F401
+    HAS_JSON5 = True
+except ImportError:
+    pass
+
+
+def _strip_json_comments(text: str) -> str:
+    """Strip JS-style comments from JSON text."""
+    import re
+    text = re.sub(r'//[^\n]*', '', text)
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    return text
+
 
 class AgentRegistry:
     """In-memory agent type registry backed by agent.json manifests.
@@ -94,7 +110,8 @@ class AgentRegistry:
     def load_from_dir(self, base_path: Optional[str] = None) -> int:
         """Scan a directory for agent manifests and register them.
 
-        Scans ``<base_path>/<name>/agent.json`` for each subdirectory.
+        Scans ``<base_path>/<name>/agent.json5`` (preferred) or
+        ``<base_path>/<name>/agent.json`` for each subdirectory.
         Returns the number of manifests successfully loaded.
 
         Loading is idempotent: reloading a directory replaces previously
@@ -111,11 +128,22 @@ class AgentRegistry:
         for agent_dir in sorted(agents_dir.iterdir()):
             if not agent_dir.is_dir():
                 continue
-            manifest_path = agent_dir / "agent.json"
+            # Try .json5 first, fallback to .json
+            manifest_path = agent_dir / "agent.json5"
+            is_json5 = True
+            if not manifest_path.is_file():
+                manifest_path = agent_dir / "agent.json"
+                is_json5 = False
             if not manifest_path.is_file():
                 continue
             try:
-                data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                raw = manifest_path.read_text(encoding="utf-8")
+                if is_json5 and not HAS_JSON5:
+                    raw = _strip_json_comments(raw)
+                if HAS_JSON5:
+                    data = json5.loads(raw) if is_json5 else json.loads(raw)
+                else:
+                    data = json.loads(raw) if not is_json5 else json.loads(_strip_json_comments(raw))
                 manifest = AgentManifest(**data)
                 self.register(manifest)
                 count += 1

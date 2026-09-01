@@ -1,6 +1,7 @@
 """trimum Core."""
 
 from trimum_core.agent_registry import AgentRegistry
+from trimum_core.tool_file_loader import scan_tools, parse_tool_manifest
 from trimum_core.agent_router import AgentRouter, RouteEntry
 from trimum_core.agent_runtime import AgentRuntime
 from trimum_core.agent_socket import AgentSocketServer, AgentSocketClient, SocketMessage
@@ -97,6 +98,9 @@ __all__ = [
     "ShellDispatcher",
     "SystemDispatcher",
     "ToolDefinition",
+    "ToolFileLoader",
+    "parse_tool_manifest",
+    "scan_tools",
     "SpawnRequest",
     "SpawnResponse",
     "SocketMessage",
