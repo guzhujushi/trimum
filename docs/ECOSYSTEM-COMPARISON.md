@@ -15,13 +15,13 @@
 
 ## 参考项目概览
 
-| 项目 | 语言 | Stars | 定位 | 与 trimum 的关系 |
-|---|---|---|---|---|
-| **SemaClaw** | TypeScript | 83★ | 通用个人 AI Agent 框架（全栈） | 功能重叠最大的参考系 |
-| **skelm** | TypeScript | 0★ | 安全 Agent 工作流框架 | 理念最接近的参考系 |
-| **Sandcastle** | TypeScript | 7780★ | 沙箱化编码 Agent | 领域不同，参考其沙箱设计 |
-| **Warp** | Rust | - | GPU 加速的 AI 终端 | 借鉴 TARL 理念和 Handoff 模型 |
-| **LangChain / CrewAI / n8n** | Python/TS | - | 主流 Agent/工作流框架 | 对标竞品（但不是直接竞争） |
+| 项目 | 语言 | Stars | 定位 | 我的评价 | 与 trimum 的关系 |
+|---|---|---|---|---|---|
+| **skelm** | TypeScript | 0★ | 安全 Agent 工作流框架 | ⭐⭐⭐⭐⭐ | 理念最接近的参考系 |
+| **SemaClaw** | TypeScript | 83★ | 通用个人 AI Agent 框架（全栈） | ⭐⭐⭐⭐ | 功能重叠最大的参考系 |
+| **Sandcastle** | TypeScript | 7780★ | 沙箱化编码 Agent | ⭐⭐⭐ | 参考其沙箱设计 |
+| **Warp** | Rust | - | GPU 加速的 AI 终端 | — | 借鉴 TARL 理念和 Handoff 模型 |
+| **LangChain / CrewAI / n8n** | Python/TS | - | 主流 Agent/工作流框架 | — | 对标竞品（但不是直接竞争） |
 
 ---
 
@@ -31,11 +31,11 @@
 
 ### 核心亮点
 
-- **三层上下文管理**：工作上下文 + 长期记忆检索 + 每 Agent 角色分区，统一成一个模型
-- **Human-in-the-Loop 权限桥**：`PermissionBridge` 原生内置，支持用户授权 + Agent 主动澄清请求
+- **三层上下文管理**（⭐⭐⭐⭐）：工作上下文 + 长期记忆检索 + 每 Agent 角色分区，统一成一个模型。trimum 的三重记忆（私有/共享/全局）思路类似但实现路径不同——SemaClaw 的统一模型更优雅，trimum 的三层更贴近文件系统直觉。
+- **Human-in-the-Loop PermissionBridge**（⭐⭐⭐⭐）：`PermissionBridge` 是 Harness 原生原语，同时支持用户授权 + Agent 主动澄清请求。trimum Security Agent 的 `confirm()` 接口参考了此设计。
+- **DAG Teams 两阶段动态分解**（⭐⭐⭐⭐）：LLM 做动态任务分解（Plan）→ 确定 DAG 执行（Dispatch）。这和 trimum 的 Router(Plan→Dispatch)+WorkflowEngine 在概念层面完全一致，说明这条路线是对的。SemaClaw 的 DAG Teams 更进一步支持混合团队（持久 Agent + 虚拟子 Agent），5 个内置虚拟子 Agent 开箱即用。
 - **四层插件架构**：MCP 工具 / 子 Agent / Skills / Hooks，各层解决独立工程问题
 - **Plugin Marketplace**：Git 仓库 / 本地目录安装第三方插件包，Web UI 开关控制
-- **DAG Teams**：两阶段混合编排（LLM 动态分解 → 确定 DAG 执行）
 - **Reusable Workflows**：Markdown + YAML 定义，`{{…}}` 模板，`guidance` 规则层
 - **Agentic Wiki**：Task 输出结构化存入可检索知识库
 - **多通道**：Telegram / Feishu / QQ / WebSocket Web UI
@@ -78,12 +78,14 @@
 
 ### 核心亮点
 
-- **Default-Deny 权限模型**：每一步都要声明 allowedTools / networkEgress / fsRead / fsWrite
-- **三种 Step 类型**：`code()` / `llm()` / `agent()`，各自原生，非某者包装另一者
+- **Pipeline step 三分类**（⭐⭐⭐⭐⭐ 最高价值）：`code()` / `llm()` / `agent()` 三种 Step 类型，各自原生，非某者包装另一者。`code()` 跑 Python 脚本、`llm()` 做单次推理、`agent()` 执行完整 Agent 循环——类型在 DSL 层面就是一等公民，Pipeline 是这些 Step 的编排容器。这是我给五颗星的第一原因。
+- **Per-step 权限声明**（⭐⭐⭐⭐⭐）：每一步单独声明 `allowedTools` / `networkEgress` / `fsRead` / `fsWrite`——权限粒度到 Step 级别，不是到 Workflow 级别。trimum 当前的权限是 Agent 级，skelm 的做法是未来方向。
+- **持久化 KV Store + 审计日志**（⭐⭐⭐⭐⭐）：类型化 KV 存储 + 附加单写者哈希链日志（Tamper-Evident Audit），与 Run History 分离。EventBus 持久化和审计是 trimum 当前缺失的重要能力。
+- **控制流操作符**（⭐⭐⭐⭐⭐）：`parallel` / `forEach` / `branch` / `loop` / `wait` / 嵌套 `pipelineStep` 是核心原语，不是事后补的。trimum 的 DAG 只支持依赖链，控制流操作符是 Phase 4 可以考虑的扩展方向。
+- **Default-Deny 权限模型**：每一步都要声明，不声明默认为空。
 - **MCP 原生**：MCP Server 是一等公民，生命周期由 Gateway 管理
 - **Per-Agent Workspace**：每个 Agent 步骤有自己的文件系统根，持久或临时
 - **三信条**：安全 > 可维护 > 健壮性（在安全性上绝不妥协）
-- **Tamper-Evident Audit**：单写者、哈希链日志
 - **Markdown Agent 定义**：`AGENTS.md`（角色） / `SOUL.md`（人格） / `SKILL.md`（能力）
 
 ### 与 trimum 的异同
@@ -155,6 +157,22 @@ LangChain、CrewAI、AutoGPT 在 Python 生态里有，但它们不是 Harness�
 - 个人开发者、DevOps 工程师、数据科学家 — Python 是第一选择
 - 一个 Python Harness 可以让这些人**用自己最熟悉的语言配置和扩展 AI 自动化**
 - 不需要为了 Agent 编排去学 TypeScript / Rust，直接在 Python 里 import trimum
+
+---
+
+## 三·五、Sandcastle — 沙箱编码 Agent 参考（⭐⭐⭐）
+
+**仓库**：https://github.com/mattpocock/sandcastle（7780★，MIT，TypeScript）
+
+### 核心亮点
+
+- **SandboxProvider 抽象**（⭐⭐⭐）：Sandcastle 的核心是抽象的沙箱提供者——每种沙箱（Node VM / Docker / 远程）实现同一接口，Agent 不感知底层。trimum 当前的安全是三层决策+Behavior Monitor，没有沙箱层隔离；SandboxProvider 是 Phase 4 Landlock/Seccomp 集成时的参考抽象。
+- **git worktree 隔离策略**（⭐⭐⭐）：Sandcastle 用 git worktree 为每个任务创建隔离的文件系统副本，避免污染主仓库。这个策略我在之前的 trimum codex 委派中也实际用过（`git worktree add` 隔离再合并清理）——它不需要沙箱就能实现文件系统级别的任务隔离，值得推广到 trimum 的设计中。
+- **Sandbox Lifecycle**（⭐⭐⭐，远期）：沙箱有完整的生命周期——创建→预热→执行→回收。trimum 在 Phase 4 引入容器/命名空间沙箱时可以借鉴这个生命周期模型。
+
+### 为什么只给三颗星
+
+Sandcastle 的核心场景是**编码 Agent 沙箱**（一条 prompt → 生成/修改代码），不是通用 Agent Harness。它的沙箱设计和 worktree 策略值得借鉴，但 DAG / Workflow / 多 Agent 编排这些 trimum 的核心能力它不涉及。
 
 ---
 
