@@ -222,6 +222,60 @@ class SecurityAgent:
 
         return DecisionResult("allow", reason, risk_level=risk.value)
 
+    # ── TARL 接入 ────────────────────────────────────────
+
+    async def can_execute_tarl(
+        self,
+        agent_id: str,
+        tarl_line: str,
+        sandbox: str = "default",
+    ) -> DecisionResult:
+        """TARL-aware execution check: parse ``cmd:`` prefix from TARL line
+        and run policy matching on the extracted command.
+
+        If the TARL line contains a ``cmd:`` key, the value is extracted
+        and checked via ``can_execute()``.  Additional TARL keys
+        (``sandbox:``, ``resource:``) can override defaults.
+
+        Args:
+            agent_id: Source agent identifier.
+            tarl_line: TARL line, e.g. ``cmd:restart_nginx sandbox:production``.
+            sandbox: Default sandbox if TARL doesn't specify one.
+
+        Returns:
+            DecisionResult from the standard ``can_execute()`` chain.
+        """
+        from .tarl_parser import extract_prefix, parse_line
+
+        # Parse TARL to extract command and overrides
+        kvs = parse_line(tarl_line)
+        cmd_values = extract_prefix(tarl_line, "cmd")
+        command = cmd_values[0] if cmd_values else tarl_line
+
+        # TARL can override sandbox via sandbox: key
+        effective_sandbox = kvs.get("sandbox", sandbox)
+
+        # Build resource context from TARL resource: key
+        resource_ctx: dict[str, Any] = {}
+        resource_str = kvs.get("resource", "")
+        if resource_str:
+            from .tarl_parser import parse_line as _pl
+            resource_ctx = _pl(resource_str)
+            # Convert numeric strings
+            for k in ("cpu_percent", "memory_mb"):
+                if k in resource_ctx:
+                    try:
+                        resource_ctx[k] = float(resource_ctx[k])
+                    except ValueError:
+                        pass
+
+        return await self.can_execute(
+            agent_id=agent_id,
+            command=command,
+            sandbox=effective_sandbox,
+            resource_ctx=resource_ctx,
+        )
+
     # ------------------------------------------------------------------
     # 弹窗确认接口
     # ------------------------------------------------------------------

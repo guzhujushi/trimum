@@ -23,6 +23,8 @@ __all__ = [
     "serialize_multi",
     "extract_prefix",
     "match_prefix",
+    "build_snapshot",
+    "merge_snapshot",
 ]
 
 
@@ -180,6 +182,75 @@ def match_prefix(text: str, prefix: str) -> bool:
         False
     """
     return len(extract_prefix(text, prefix)) > 0
+
+
+def build_snapshot(
+    ctx_id: str,
+    workspace: str = "",
+    error: str = "",
+    target: str = "",
+    permission: str = "",
+    artifacts: str = "",
+) -> str:
+    """Build a Handoff Snapshot TARL line (Minimum Context Principle).
+
+    Child Agent receives only what it needs — not the full parent context.
+
+    Args:
+        ctx_id: Unique context identifier.
+        workspace: Working directory or repo path.
+        error: Error description if resuming from failure.
+        target: Target objective for the child agent.
+        permission: Required permission level.
+        artifacts: Comma-separated artifact paths.
+
+    Returns:
+        TARL line with ``snapshot:`` metadata.
+
+    Example::
+
+        >>> build_snapshot("ctx_abc123", workspace="/var/www/blog",
+        ...               error="nginx_502", target="restore_api")
+        "snapshot:ctx_abc123 workspace:/var/www/blog error:nginx_502 target:restore_api"
+    """
+    data: dict[str, str] = {"snapshot": ctx_id}
+    if workspace:
+        data["workspace"] = workspace
+    if error:
+        data["error"] = error
+    if target:
+        data["target"] = target
+    if permission:
+        data["permission"] = permission
+    if artifacts:
+        data["artifacts"] = artifacts
+    return serialize(data)
+
+
+def merge_snapshot(parent_tarl: str, child_tarl: str) -> str:
+    """Merge parent snapshot into child TARL, preserving child's values on conflict.
+
+    Child values take priority over parent values. ``snapshot`` key always uses
+    the child's context id.  This allows stacking snapshots across agent hops.
+
+    Args:
+        parent_tarl: Parent TARL line (less specific, outer scope).
+        child_tarl: Child TARL line (more specific, takes priority).
+
+    Returns:
+        Merged TARL line.
+
+    Example::
+
+        >>> merge_snapshot("snapshot:ctx_a workspace:/var/www",
+        ...                "snapshot:ctx_b target:restore permission:write")
+        "permission:write snapshot:ctx_b target:restore workspace:/var/www"
+    """
+    parent = parse_line(parent_tarl)
+    child = parse_line(child_tarl)
+    # Child wins on conflict, parent fills gaps
+    merged = {**parent, **child}
+    return serialize(merged)
 
 
 # ===================================================================

@@ -1,4 +1,4 @@
-"""Workflow Engine — DAG 执行器（节点/边/状态机）.
+﻿"""Workflow Engine — DAG 执行器（节点/边/状态机）.
 
 职责:
 - 定义 Workflow / Node / Edge 数据结构 (Pydantic)
@@ -19,53 +19,38 @@ from typing import Any, Awaitable, Callable, Optional
 from pydantic import BaseModel, Field
 
 from .event_bus import EventBus
-
-
-# ── 节点状态 ──────────────────────────────────────────────
-
-class NodeStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    TIMEOUT = "timeout"
-
-
-class WorkflowStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-# ── 数据结构 ──────────────────────────────────────────────
-
-
-
-
-from .event_bus import EventBus
 from .models import AgentTask
 
 
-# ── 节点状态 ──────────────────────────────────────────────
+# ── 节点状态（Phase 3: Task State Machine）───────────────
 
 class NodeStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    TIMEOUT = "timeout"
+    """Task/节点状态机.
+
+    Phase 3 扩展自 Warp 设计:
+    CREATED  → QUEUED → DISPATCHING → RUNNING → COMPLETED | FAILED
+                                                   → TIMEOUT | CANCELLED | BLOCKED
+    """
+    CREATED = "created"           # 任务已创建（初始状态）
+    QUEUED = "queued"             # 任务已入队等待
+    DISPATCHING = "dispatching"    # 正在分派给 Agent
+    RUNNING = "running"           # Agent 正在执行
+    COMPLETED = "completed"       # 执行成功
+    FAILED = "failed"             # 执行失败
+    SKIPPED = "skipped"           # 条件不满足跳过
+    TIMEOUT = "timeout"           # 超时
+    CANCELLED = "cancelled"       # 用户/系统取消
+    BLOCKED = "blocked"           # 权限/资源阻塞
 
 
 class WorkflowStatus(str, Enum):
-    PENDING = "pending"
+    CREATED = "created"
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    BLOCKED = "blocked"
 
 
 # ── 数据结构 ──────────────────────────────────────────────
@@ -121,7 +106,7 @@ class NodeRuntime(BaseModel):
     """节点的运行时状态."""
 
     id: str
-    status: NodeStatus = NodeStatus.PENDING
+    status: NodeStatus = NodeStatus.CREATED
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
     result: Any = None
@@ -304,7 +289,7 @@ class WorkflowEngine:
         cancel = cancel_event or asyncio.Event()
 
         node_runtimes: dict[str, NodeRuntime] = {
-            n.id: NodeRuntime(id=n.id) for n in workflow.nodes
+            n.id: NodeRuntime(id=n.id, status=NodeStatus.CREATED) for n in workflow.nodes
         }
         node_map: dict[str, NodeDefinition] = {n.id: n for n in workflow.nodes}
         edge_to_target: dict[str, list[EdgeDefinition]] = {n.id: [] for n in workflow.nodes}
@@ -316,6 +301,13 @@ class WorkflowEngine:
 
         topo_order = self.topological_sort(workflow)
         started_at = time.time()
+
+        # 初始状态: 所有节点 CREATED，入队前切换为 QUEUED
+        for n in workflow.nodes:
+            await self._bus.emit_task("node.created", {
+                "workflow_id": workflow_id, "node_id": n.id,
+                "label": n.label, "handler": n.handler,
+            })
 
         await self._bus.emit_task("workflow.started", {
             "workflow_id": workflow_id,
@@ -351,9 +343,15 @@ class WorkflowEngine:
         completed_nodes: set[str] = set()
         workflow_status = WorkflowStatus.RUNNING
 
-        ready_queue: list[str] = [
-            nid for nid in topo_order if not predecessors[nid]
-        ]
+        # 初始入队: 无前驱的节点 QUEUED
+        ready_queue: list[str] = []
+        for nid in topo_order:
+            if not predecessors[nid]:
+                node_runtimes[nid].status = NodeStatus.QUEUED
+                await self._bus.emit_task("node.queued", {
+                    "workflow_id": workflow_id, "node_id": nid,
+                })
+                ready_queue.append(nid)
 
         while ready_queue and not cancel.is_set():
             # ── 识别并行组 ──
@@ -366,6 +364,13 @@ class WorkflowEngine:
                     parallel_group.append(nid)
 
             if parallel_group:
+                # DISPATCHING 信号
+                for nid in parallel_group:
+                    node_runtimes[nid].status = NodeStatus.DISPATCHING
+                    await self._bus.emit_task("node.dispatching", {
+                        "workflow_id": workflow_id, "node_id": nid,
+                    })
+
                 # 并行执行全部就绪节点
                 tasks = {
                     nid: asyncio.create_task(
@@ -380,34 +385,44 @@ class WorkflowEngine:
 
                 for nid in parallel_group:
                     completed_nodes.add(nid)
-                    self._add_ready_successors(
+                    await self._add_ready_successors(
                         nid, ready_queue, completed_nodes,
                         edge_to_target, predecessors, node_runtimes,
+                        workflow_id=workflow_id,
                     )
                 continue
 
             # ── 单个顺序节点 ──
             nid = ready_queue.pop(0)
+            runtime = node_runtimes[nid]
             if not self._is_node_ready(nid, predecessors, node_runtimes):
-                runtime = node_runtimes[nid]
-                runtime.status = NodeStatus.SKIPPED
-                await self._bus.emit_task("node.skipped", {
+                # 前驱未完成 → BLOCKED（资源/条件阻塞）
+                runtime.status = NodeStatus.BLOCKED
+                await self._bus.emit_task("node.blocked", {
                     "workflow_id": workflow_id, "node_id": nid,
                     "reason": "predecessors_not_complete",
-                })
+                }, severity="warning")
                 completed_nodes.add(nid)
-                self._add_ready_successors(nid, ready_queue, completed_nodes,
-                                           edge_to_target, predecessors, node_runtimes)
+                await self._add_ready_successors(nid, ready_queue, completed_nodes,
+                                                 edge_to_target, predecessors, node_runtimes,
+                                                 workflow_id=workflow_id)
                 continue
+
+            # DISPATCHING → RUNNING
+            runtime.status = NodeStatus.DISPATCHING
+            await self._bus.emit_task("node.dispatching", {
+                "workflow_id": workflow_id, "node_id": nid,
+            })
 
             await self._execute_single_node(
                 workflow_id, nid, node_map, node_runtimes,
                 predecessors, edge_to_target, context, cancel,
             )
             completed_nodes.add(nid)
-            self._add_ready_successors(
+            await self._add_ready_successors(
                 nid, ready_queue, completed_nodes,
                 edge_to_target, predecessors, node_runtimes,
+                workflow_id=workflow_id,
             )
 
             if cancel.is_set():
@@ -418,12 +433,23 @@ class WorkflowEngine:
         if cancel.is_set():
             workflow_status = WorkflowStatus.CANCELLED
         else:
-            all_done = all(
-                rt.status in (NodeStatus.COMPLETED, NodeStatus.SKIPPED)
+            terminal_ok = {NodeStatus.COMPLETED, NodeStatus.SKIPPED}
+            terminal_fail = {NodeStatus.FAILED, NodeStatus.TIMEOUT, NodeStatus.CANCELLED, NodeStatus.BLOCKED}
+            all_terminal = all(
+                rt.status in terminal_ok | terminal_fail
                 for rt in node_runtimes.values()
             )
-            any_failed = any(rt.status == NodeStatus.FAILED for rt in node_runtimes.values())
-            workflow_status = WorkflowStatus.FAILED if any_failed else WorkflowStatus.COMPLETED
+            any_failed = any(rt.status in terminal_fail for rt in node_runtimes.values())
+            any_blocked = any(rt.status == NodeStatus.BLOCKED for rt in node_runtimes.values())
+
+            if any_blocked:
+                workflow_status = WorkflowStatus.BLOCKED
+            elif any_failed:
+                workflow_status = WorkflowStatus.FAILED
+            elif all_terminal:
+                workflow_status = WorkflowStatus.COMPLETED
+            else:
+                workflow_status = WorkflowStatus.RUNNING
 
         duration = time.time() - started_at
 
@@ -432,9 +458,16 @@ class WorkflowEngine:
             "status": workflow_status.value,
             "duration": duration,
             "node_count": len(node_runtimes),
+            "created": sum(1 for rt in node_runtimes.values() if rt.status == NodeStatus.CREATED),
+            "queued": sum(1 for rt in node_runtimes.values() if rt.status == NodeStatus.QUEUED),
+            "dispatching": sum(1 for rt in node_runtimes.values() if rt.status == NodeStatus.DISPATCHING),
+            "running": sum(1 for rt in node_runtimes.values() if rt.status == NodeStatus.RUNNING),
             "completed": sum(1 for rt in node_runtimes.values() if rt.status == NodeStatus.COMPLETED),
             "failed": sum(1 for rt in node_runtimes.values() if rt.status == NodeStatus.FAILED),
             "skipped": sum(1 for rt in node_runtimes.values() if rt.status == NodeStatus.SKIPPED),
+            "timeout": sum(1 for rt in node_runtimes.values() if rt.status == NodeStatus.TIMEOUT),
+            "cancelled": sum(1 for rt in node_runtimes.values() if rt.status == NodeStatus.CANCELLED),
+            "blocked": sum(1 for rt in node_runtimes.values() if rt.status == NodeStatus.BLOCKED),
         })
 
         return WorkflowResult(
@@ -457,9 +490,23 @@ class WorkflowEngine:
         context: dict[str, Any],
         cancel: asyncio.Event,
     ) -> None:
-        """执行单个节点（含条件检查、输入聚合、超时/重试）。"""
+        """执行单个节点（含条件检查、输入聚合、超时/重试）。
+
+        Node 状态机 transform（由 caller 设置 DISPATCHING 后调用）:
+        DISPATCHING → RUNNING → COMPLETED | FAILED | TIMEOUT | CANCELLED
+        """
         node = node_map[nid]
         runtime = node_runtimes[nid]
+
+        # ── 检查取消信号 ──
+        if cancel.is_set():
+            runtime.status = NodeStatus.CANCELLED
+            runtime.completed_at = time.time()
+            await self._bus.emit_task("node.cancelled", {
+                "workflow_id": workflow_id, "node_id": nid,
+                "reason": "workflow_cancelled",
+            }, severity="warning")
+            return
 
         # ── 检查入边条件 ──
         edges_into = edge_to_target.get(nid, [])
@@ -469,10 +516,16 @@ class WorkflowEngine:
                 continue
             ok, reason = self._evaluate_condition(edge.condition, pred_runtime)
             if not ok:
-                runtime.status = NodeStatus.SKIPPED
-                await self._bus.emit_task("node.skipped", {
-                    "workflow_id": workflow_id, "node_id": nid, "reason": reason,
-                })
+                if pred_runtime.status in (NodeStatus.CANCELLED, NodeStatus.BLOCKED):
+                    runtime.status = NodeStatus.BLOCKED
+                    await self._bus.emit_task("node.blocked", {
+                        "workflow_id": workflow_id, "node_id": nid, "reason": reason,
+                    }, severity="warning")
+                else:
+                    runtime.status = NodeStatus.SKIPPED
+                    await self._bus.emit_task("node.skipped", {
+                        "workflow_id": workflow_id, "node_id": nid, "reason": reason,
+                    })
                 return
 
         # ── 聚合前驱输入 ──
@@ -513,14 +566,22 @@ class WorkflowEngine:
 
         except asyncio.TimeoutError:
             runtime.status = NodeStatus.TIMEOUT
-            runtime.error = f"超时 {node.timeout_seconds}s"
+            runtime.error = f"timeout {node.timeout_seconds}s"
+            runtime.completed_at = time.time()
             await self._bus.emit_task("node.timeout", {
                 "workflow_id": workflow_id, "node_id": nid,
                 "timeout": node.timeout_seconds,
-            })
+            }, severity="warning")
             if runtime.attempts < node.retry_count:
                 await asyncio.sleep(node.retry_delay)
-                # 重新入队 (由 caller 处理)
+
+        except asyncio.CancelledError:
+            runtime.status = NodeStatus.CANCELLED
+            runtime.completed_at = time.time()
+            await self._bus.emit_task("node.cancelled", {
+                "workflow_id": workflow_id, "node_id": nid,
+                "reason": "task_cancelled",
+            }, severity="warning")
 
         except Exception as e:
             runtime.status = NodeStatus.FAILED
@@ -531,7 +592,7 @@ class WorkflowEngine:
             await self._bus.emit_task("node.failed", {
                 "workflow_id": workflow_id, "node_id": nid,
                 "error": str(e), "attempt": runtime.attempts,
-            })
+            }, severity="warning")
             if runtime.attempts <= node.retry_count:
                 await asyncio.sleep(node.retry_delay)
 
@@ -591,16 +652,17 @@ class WorkflowEngine:
             for p in preds
         )
 
-    @staticmethod
-    def _add_ready_successors(
+    async def _add_ready_successors(
+        self,
         nid: str,
         ready_queue: list[str],
         completed: set[str],
         edge_to_target: dict[str, list[EdgeDefinition]],
         predecessors: dict[str, list[str]],
         runtimes: dict[str, NodeRuntime],
+        workflow_id: str = "",
     ) -> None:
-        """当 nid 完成后, 检查其后继是否已全部就绪."""
+        """当 nid 完成后, 检查其后继是否已全部就绪并标记 QUEUED."""
         for successor_nid, preds in predecessors.items():
             if successor_nid in completed or successor_nid in ready_queue:
                 continue
@@ -609,7 +671,102 @@ class WorkflowEngine:
                 for p in preds
             )
             if all_preds_done and successor_nid not in ready_queue and successor_nid not in completed:
+                # 后继所有前驱已就绪 → QUEUED
+                if successor_nid in runtimes and runtimes[successor_nid].status == NodeStatus.CREATED:
+                    runtimes[successor_nid].status = NodeStatus.QUEUED
+                    if workflow_id:
+                        await self._bus.emit_task("node.queued", {
+                            "workflow_id": workflow_id, "node_id": successor_nid,
+                        })
                 ready_queue.append(successor_nid)
+
+    # ── TARL Workflow Matching ───────────────────────────
+
+    def register_tarl_workflow(
+        self,
+        tarl_pattern: str,
+        workflow: WorkflowDefinition,
+    ) -> None:
+        """Register a workflow to be matched by TARL key-value pattern.
+
+        The *tarl_pattern* is a TARL line defining which keys must match
+        for the workflow to fire.  Keys support exact match or prefix
+        matching via trailing ``.*``.
+
+        Examples::
+
+            # Exact cmd match
+            register_tarl_workflow("cmd:restart_nginx", restart_wf)
+
+            # Prefix match: any cmd starting with "blog_"
+            register_tarl_workflow("cmd.*", blog_wf)
+
+            # Multi-key match
+            register_tarl_workflow("cmd:deploy target:blog", deploy_wf)
+        """
+        if not hasattr(self, "_tarl_workflows"):
+            self._tarl_workflows: list[tuple[dict[str, str | None], WorkflowDefinition]] = []
+
+        # Parse the TARL pattern into {key: value_or_None} dict
+        #   None  = prefix match (key.*)
+        #   str   = exact value match
+        from .tarl_parser import parse_line
+
+        parsed = parse_line(tarl_pattern)
+        rules: dict[str, str | None] = {}
+        from .tarl_parser import extract_prefix
+
+        for key, value in parsed.items():
+            if key.endswith(".*"):
+                rules[key[:-2]] = None  # prefix match
+            else:
+                rules[key] = value
+        self._tarl_workflows.append((rules, workflow))
+
+    def match_workflow_by_tarl(self, tarl_line: str) -> WorkflowDefinition | None:
+        """Match a TARL line against registered workflows using KV prefix index.
+
+        Returns the best-matching WorkflowDefinition or ``None``.
+
+        Matching rules:
+        1. All keys in the registered pattern must be present in *tarl_line*
+        2. Exact-value keys must match exactly
+        3. Prefix-match keys (value=None) match if key prefix exists
+        4. If multiple workflows match, the one with the most keys wins
+           (most specific match)
+        """
+        if not hasattr(self, "_tarl_workflows") or not self._tarl_workflows:
+            return None
+
+        from .tarl_parser import extract_prefix, parse_line
+
+        line_kvs = parse_line(tarl_line)
+        best_match: tuple[int, WorkflowDefinition | None] = (0, None)
+
+        for rules, workflow in self._tarl_workflows:
+            matched_keys = 0
+            all_match = True
+
+            for key, expected_value in rules.items():
+                if expected_value is None:
+                    # Prefix match: key.* → check if any key starts with key
+                    found = extract_prefix(tarl_line, key)
+                    if not found:
+                        all_match = False
+                        break
+                    matched_keys += 1
+                else:
+                    # Exact match
+                    if line_kvs.get(key) == expected_value:
+                        matched_keys += 1
+                    else:
+                        all_match = False
+                        break
+
+            if all_match and matched_keys > best_match[0]:
+                best_match = (matched_keys, workflow)
+
+        return best_match[1]
 
 
 # ===================================================================

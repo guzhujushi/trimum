@@ -15,12 +15,18 @@ from trimum_core.models import EventSeverity, SystemEvent
 NAMESPACE_EVENT = "event."       # 如 event.planner.failed
 NAMESPACE_TASK = "task."         # 如 task.node.completed
 
-# ── Agent 消息类型（Phase 3）──────────────────────────────
+# ── Agent / Task 消息类型（Phase 3: Task State Machine）───
 # Workflow Engine → Event Bus → Agent Runtime / Sub-Agent
+TASK_CREATED = "task.created"            # 任务已创建
+TASK_QUEUED = "task.queued"              # 任务已入队
+TASK_DISPATCHING = "task.dispatching"    # 正在分派
 TASK_ASSIGNED = "task.assigned"          # Workflow 下发任务给 Agent
 TASK_STARTED = "task.started"            # Agent 确认开始执行
 TASK_COMPLETED = "task.completed"        # Agent 报告执行完成
 TASK_FAILED = "task.failed"              # Agent 报告执行失败
+TASK_TIMEOUT = "task.timeout"            # 任务超时
+TASK_CANCELLED = "task.cancelled"        # 任务被取消
+TASK_BLOCKED = "task.blocked"            # 任务被阻塞（权限/资源）
 AGENT_STATUS_CHANGED = "agent.status_changed"  # Runtime 报告 Agent 状态
 
 
@@ -70,16 +76,23 @@ class EventBus:
         task_type: str,
         payload: dict | None = None,
         source: str = "workflow",
+        severity: str | None = None,
     ) -> None:
         """Convenience: create and publish a task SystemEvent.
 
         Automatically prepends NAMESPACE_TASK.
         Used by WorkflowEngine for node/workflow lifecycle events.
+
+        Args:
+            task_type: Type string (e.g. "node.completed", "workflow.started")
+            payload: Event payload dict
+            source: Event source identifier
+            severity: Override severity (default INFO). Use "warn" for blocked/timeout.
         """
         event = SystemEvent(
             event_type=f"{NAMESPACE_TASK}{task_type}",
             source=source,
-            severity=EventSeverity.INFO,
+            severity=EventSeverity(severity) if severity else EventSeverity.INFO,
             payload=payload or {},
             timestamp=time.time(),
         )
