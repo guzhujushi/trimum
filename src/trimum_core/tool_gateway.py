@@ -64,7 +64,7 @@ class ToolRegistry:
         )
         self.register(
             ToolDefinition(
-                name="file.read",
+                name=_FILE_READ,
                 description="Read file contents via shell (cat, head, tail, etc.)",
                 tool_type=ToolType.CUSTOM,
                 executable="",
@@ -110,6 +110,10 @@ class ToolRegistry:
 # ---------------------------------------------------------------------------
 # Tool Gateway
 # ---------------------------------------------------------------------------
+
+
+_FILE_READ = "file.read"
+_FILE_WRITE = "file.write"
 
 
 class ToolGateway:
@@ -296,14 +300,14 @@ class ToolGateway:
                 )
 
         # --- 2c. File read/write path check ---
-        if tool_def and tool_def.name in ("file.read", "file.write"):
+        if tool_def and tool_def.name in (_FILE_READ, _FILE_WRITE):
             # Extract paths from command (crude heuristic: last arg that looks like a path)
             parts = cmd_str.split()
             paths = [p for p in parts if "/" in p or "\\" in p or p.startswith(".")]
             if paths:
-                allowed_paths = perms.read if tool_def.name == "file.read" else perms.write
+                allowed_paths = perms.read if tool_def.name == _FILE_READ else perms.write
                 if not allowed_paths:
-                    return f"Agent '{manifest.name}' has no {tool_def.name.split('.')[1]} path permissions"
+                    return f"Agent '{manifest.name}' has no {(tool_def.name.split('.'))[1]} path permissions"
                 for p in paths:
                     matched = any(
                         p.startswith(ap.rstrip("*").rstrip("/"))

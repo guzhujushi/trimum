@@ -566,7 +566,7 @@ class SystemDispatcher:
                 return _ok(self._get_disk_info())
             elif sub == "memory":
                 return _ok(self._get_memory_info())
-            return _err(f"Usage: system [info|disk|memory]")
+            return _err("Usage: system [info|disk|memory]")
         return _err(f"Unsupported system tool: {tool}", risk=RiskLevel.LOW)
 
     @staticmethod
@@ -609,7 +609,7 @@ class SystemDispatcher:
     def _get_memory_info() -> str:
         try:
             import shutil
-            total, used, free = shutil.disk_usage("/")
+            shutil.disk_usage("/")  # validate path
             # Not real memory, just placeholder until psutil available
             return "Memory info requires psutil. System info available via `system info`."
         except Exception as e:

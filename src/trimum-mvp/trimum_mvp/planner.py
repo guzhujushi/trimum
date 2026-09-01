@@ -229,7 +229,7 @@ class Planner:
             return None
         stripped = text.strip()
         if stripped.startswith("```"):
-            stripped = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", stripped)
+            stripped = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", stripped, count=1)
         try:
             data = json.loads(stripped)
             return data if isinstance(data, dict) else None
