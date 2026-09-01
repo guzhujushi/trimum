@@ -101,6 +101,10 @@ pkg/
 node_modules/
 *.js.map
 
+# ---- Analysis dumps ----
+issues.csv
+*.issues.csv
+
 # ---- AI / LLM cache ----
 embeddings-cache/
 chroma-data/
