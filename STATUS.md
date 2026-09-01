@@ -135,15 +135,23 @@
 | Context Manager 扩展（项目上下文/记忆/确认） | ✅ | set/get/list_project_context + requires_confirmation() |
 | Event Bus Agent 消息类型 | ✅ | TASK_ASSIGNED / STARTED / COMPLETED / FAILED / STATUS_CHANGED |
 | **Security Agent + Behavior Monitor** | ✅ | 新增 2 文件（~620 行），完整的弹性沙箱决策体系 |
+| **Agent 文件化** | ✅ | `~/.trimum/agents/` 扫描 + auto-load |
+| **工具文件化（11 tools）** | ✅ | `~/.trimum/tools/<name>/tool.json5 + main.py` |
+| **TARL-SPEC.md** | ✅ | KV 行格式规范 v1.0（Scheme B）|
+| **tarl_parser.py** | ✅ | parse_line / parse_multi / serialize / match_prefix / 12 测试通过 |
+| **transform_agent.py** | ✅ | Transform Agent 骨架（NL→TARL 输出 Phase 1 stub）|
+| **docs/PHASE1-PLAN.md 删除** | ✅ | 内容已合并到 ARCHITECTURE.md + TARL-SPEC.md |
+| **GitHub 推送** | ✅ | 5 commits 已推：bf9c7b4 → 5c8250d |
 | 版本升级 | ✅ | v0.3.1 → v0.4.0 |
-| GitHub 推送 | ⏳ | commit 已提交，网络不通待推 |
 
 ---
 
-## 下一步
+## 下一步（优先级排序）
 
 1. **全链路集成** — Security Agent ↔ Agent Router / Tool Gateway / API Server 连接起来
 2. **弹窗确认的 API/UI 入口** — 用户如何收到弹窗、如何确认
 3. **Agent SDK 封装** — 集成 openai-agents-python 预设 Agent
-4. **网络恢复后推 GitHub**
-5. **SonarQube 重扫** — 确认修复效果，无回归
+4. **Transform Agent 稳定性测试** — 不同输入生成 TARL 正确率验证
+5. **Workflow Engine TARL 接入** — match() 用 KV 前缀索引替代正则
+6. **Security Agent TARL 接入** — `cmd:` 前缀直接映射策略规则
+7. **SonarQube 重扫** — 确认修复效果，无回归
