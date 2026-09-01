@@ -1,6 +1,6 @@
 # trimum — 系统架构
 
-版本：v4.0（2026-09-01）
+版本：v5.0（2026-09-01）
 
 ---
 
@@ -285,7 +285,101 @@ IPC:
 
 ---
 
-## 4. 设计原则
+## 4. Task State Machine
+
+每个 Task（任务）是一个有生命周期的一等对象，而非模糊的消息。
+
+```
+CREATED
+   │
+   ▼
+QUEUED
+   │
+   ▼
+DISPATCHING
+   │
+   ▼
+RUNNING
+   │
+   ├────────────────┐
+   │                │
+   ▼                ▼
+COMPLETED         FAILED
+   │
+   ▼
+ARCHIVED
+
+Error states (from RUNNING):
+├── TIMEOUT      — exceeded time limit
+├── CANCELLED    — user or system interrupt
+└── BLOCKED      — missing permission / resource
+```
+
+**状态归谁管**：
+- `Workflow Engine` 拥有 Task 状态机，负责状态转换
+- `Event Bus` 只负责状态变更事件的发布与投递，不做状态管理
+- `Agent Runtime` 负责 Agent 进程 spawn/monitor/kill
+
+## 5. Handoff Snapshot
+
+Agent 间传递上下文时，遵循 **Minimum Context Principle**：Child Agent 只接收完成任务真正需要的最小上下文，不传输整个 Parent History。
+
+```
+Parent Context (10000 tokens)
+       │
+       │ Select — only what child needs
+       ▼
+Context Snapshot (500 tokens)
+       │
+       ▼
+Child Agent
+```
+
+Snapshot 通过 TARL 的 `snapshot:` 元信息字段传递：
+
+```
+snapshot:ctx_abc123
+workspace:/var/www/blog
+error:nginx_502
+target:restore_api
+permission:project_write
+artifacts:logs/nginx_error.log
+```
+
+## 6. 两个最小原则
+
+| 原则 | 含义 | 类比 |
+|---|---|---|
+| **Minimum Context** | Agent 只接收完成任务所需的最小上下文 | 不复制整个 History，只传 Task Context |
+| **Minimum Permission** | Agent 只拥有完成任务所需的最小权限 | Least Privilege 原则 |
+
+## 7. Trigger → Workflow
+
+系统自动化不依赖 Agent，而是通过 Event → Trigger → Workflow 链路。
+
+```
+File Change / CPU Spike / Git Push
+              │
+              ▼
+          Trigger
+              │
+              ▼
+      Workflow Engine
+              │
+              ▼
+          Runtime
+```
+
+支持的触发源（Phase 1）：
+| 源 | 描述 |
+|---|---|
+| Filesystem Event | inotify 文件变化 |
+| Process Event | 进程退出/异常 |
+| System Event | CPU/RAM 达到阈值 |
+| Cron | 定时触发 |
+| Webhook | 外部 HTTP 回调 |
+
+## 8. 设计原则
 
 1. **Harness 不含 AI**：只管生命周期、权限、通信。Agent 负责智能。
 2. **Agent 不能绕过权限**：所有工具调用必须经过 Tool Gateway 的权限检查。
