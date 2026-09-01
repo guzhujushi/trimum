@@ -109,7 +109,7 @@ class AgentRouter:
     # Convenience
     # ------------------------------------------------------------------
 
-    def route_with_event(
+    async def route_with_event(
         self, capability: str, event_source: str = "router"
     ) -> Optional[AgentManifest]:
         """Route a capability and emit a routing event.
@@ -119,7 +119,7 @@ class AgentRouter:
         """
         agent = self.route(capability)
         if agent is not None:
-            self.event_bus.publish(
+            await self.event_bus.publish(
                 self._make_event(
                     event_type="router.routed",
                     source=event_source,
