@@ -61,6 +61,17 @@ class ContextManager:
                 UNIQUE(agent_id, namespace, key)
             );
 
+            CREATE TABLE IF NOT EXISTS global_context (
+                key            TEXT   PRIMARY KEY,
+                value          TEXT   NOT NULL,
+                updated_at     REAL   NOT NULL
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS context_fts USING fts5(
+                agent_id, namespace, key, value,
+                tokenize="unicode61"
+            );
+
             CREATE TABLE IF NOT EXISTS sessions (
                 agent_id       TEXT   PRIMARY KEY,
                 type           TEXT   NOT NULL,
@@ -272,6 +283,10 @@ class ContextManager:
             "DELETE FROM context WHERE agent_id = ?",
             (agent_id,),
         )
+        await self._conn.execute(
+            "DELETE FROM context_fts WHERE agent_id = ?",
+            (agent_id,),
+        )
         await self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -364,6 +379,103 @@ class ContextManager:
             }
             for row in rows
         ]
+
+    # ------------------------------------------------------------------
+    # FTS5 Full-text search
+    # ------------------------------------------------------------------
+
+    async def search(
+        self,
+        query: str,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Full-text search across all context entries.
+
+        Uses FTS5 with unicode61 tokenizer.
+        Supports standard FTS5 query syntax (AND, OR, NOT, phrases).
+        Returns list of {agent_id, namespace, key, value, rank}.
+        """
+        try:
+            cursor = await self._conn.execute(
+                """SELECT c.agent_id, c.namespace, c.key, c.value, fts.rank
+                FROM context_fts fts
+                JOIN context c ON c.agent_id = fts.agent_id
+                    AND c.namespace = fts.namespace
+                    AND c.key = fts.key
+                WHERE context_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?""",
+                (query, limit),
+            )
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "agent_id": r["agent_id"],
+                    "namespace": r["namespace"],
+                    "key": r["key"],
+                    "value": json.loads(r["value"]),
+                    "rank": r[4],
+                }
+                for r in rows
+            ] if rows else []
+        except Exception:
+            return []
+
+    async def search_by_namespace(
+        self,
+        query: str,
+        namespace: str,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Full-text search scoped to a specific namespace."""
+        return await self.search(f"namespace:\"{namespace}\" AND ({query})", limit=limit)
+
+    # ------------------------------------------------------------------
+    # Global context (Planner long-term / 总上下文)
+    # ------------------------------------------------------------------
+
+    async def set_global(
+        self,
+        key: str,
+        value: Any,
+    ) -> None:
+        """Store a global context entry (Planner long-term / 总上下文)."""
+        await self._conn.execute(
+            """INSERT INTO global_context (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at""",
+            (key, json.dumps(value, ensure_ascii=False), time.time()),
+        )
+        await self._conn.commit()
+
+    async def get_global(self, key: str) -> Any | None:
+        """Retrieve a global context entry."""
+        cursor = await self._conn.execute(
+            "SELECT value FROM global_context WHERE key = ?",
+            (key,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return json.loads(row["value"])
+
+    async def list_global(self) -> dict[str, Any]:
+        """List all global context entries."""
+        cursor = await self._conn.execute(
+            "SELECT key, value FROM global_context",
+        )
+        rows = await cursor.fetchall()
+        return {r["key"]: json.loads(r["value"]) for r in rows}
+
+    async def delete_global(self, key: str) -> None:
+        """Delete a global context entry."""
+        await self._conn.execute(
+            "DELETE FROM global_context WHERE key = ?",
+            (key,),
+        )
+        await self._conn.commit()
 
     # ------------------------------------------------------------------
     # Internal helpers

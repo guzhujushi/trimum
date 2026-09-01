@@ -7,6 +7,7 @@ from trimum_core.agent_socket import AgentSocketServer, AgentSocketClient, Socke
 from trimum_core.behavior_monitor import BehaviorMonitor
 from trimum_core.planner_agent import PlannerAgent
 from trimum_core.security_agent import SecurityAgent, DecisionResult
+from trimum_core.system_monitor import SystemMonitor
 from trimum_core.models import (
     Action,
     AgentEvents,
@@ -100,6 +101,7 @@ __all__ = [
     "SpawnResponse",
     "SocketMessage",
     "SystemEvent",
+    "SystemMonitor",
     "SecurityAgent",
     "DecisionResult",
     "ToolType",

@@ -1,6 +1,6 @@
 # trimum — 系统架构
 
-版本：v3.0（2026-08-31）
+版本：v4.0（2026-09-01）
 
 ---
 
@@ -23,24 +23,33 @@
 ```
                     ┌─────────────────────────────────────┐
                     │          AI Native Desktop           │
-                    │   Hyprland 预设 · Waybar AI · 主题包  │
+                    │   CLI / WebChat / TUI / API 入口      │
                     └──────────────┬──────────────────────┘
                                    │
                     ┌──────────────┴──────────────────────┐
-                    │         Interface Layer              │
-                    │  CLI / Unix Socket / HTTP API / SDK  │
+                    │         Transform Agent              │
+                    │  自然语言 → 标准化指令（标签语言）     │
+                    │  预翻译层：所有入口统一归一化           │
+                    │  输出格式：key:value key:value         │
+                    └──────────────┬──────────────────────┘
+                                   │
+                    ┌──────────────┴──────────────────────┐
+                    │      Workflow Engine (+ Listener)    │
+                    │  监听 Event Bus，匹配预置 workflow     │
+                    │  优先走 workflow（避免 LLM 调用）       │
+                    │  未命中 → 转 Router/Planner           │
                     └──────────────┬──────────────────────┘
                                    │
          ┌─────────────────────────┼─────────────────────────┐
          │                         │                         │
     ┌────┴─────┐            ┌─────┴──────┐           ┌──────┴─────┐
-    │ Service  │            │   Agent    │           │  External  │
-    │  Layer   │            │  Routing   │           │ Ecosystem  │
+    │ Workflow │            │   Agent    │           │  External  │
+    │ 缓存层   │            │  Routing   │           │ Ecosystem  │
     │          │            │            │           │            │
-    │  Rollback│            │  Router →  │           │ 3rd Agent  │
-    │  System  │            │  Planner   │           │ 3rd Tool   │
-    │  Health  │            │  Workflow  │           │ 3rd Wkflow │
-    │  Check   │            │  Engine    │           │            │
+    │ 成功→    │            │  Router →  │           │ 3rd Agent  │
+    │ 直接执行  │            │  Planner   │           │ 3rd Tool   │
+    │ 失败→    │            │  SE Agent  │           │ 3rd Wkflow │
+    │ Planner  │            │  路由      │           │            │
     └────┬─────┘            └─────┬──────┘           └──────┬─────┘
          │                         │                         │
          └─────────────────────────┼─────────────────────────┘
@@ -54,18 +63,27 @@
                     │  │Agent通信   │  │ Shell/Git/...  │ │
                     │  │系统事件    │  │ Memory/Knowledge│ │
                     │  └────────────┘  └────────────────┘ │
-                    │  ┌────────────┐  ┌────────────────┐ │
-                    │  │Agent Mgr   │  │ Security       │ │
-                    │  │生命周期    │  │ Policy Engine  │ │
-                    │  │Spawn/Destroy│  │ Permission     │ │
-                    │  │资源分配    │  │ Risk Eval      │ │
-                    │  └────────────┘  └────────────────┘ │
-                    │  ┌────────────┐  ┌────────────────┐ │
-                    │  │Context Mgr │  │ Memory Tool    │ │
-                    │  │SQLite持久化│  │ 长期记忆       │ │
-                    │  │Agent状态   │  │ FTS 检索       │ │
-                    │  └────────────┘  └────────────────┘ │
-                    │                                     │
+                    │  ┌────────────┐  ┌──────────────────────┐ │
+                    │  │Agent Mgr   │  │ Security Agent       │ │
+                    │  │生命周期    │  │ 弹性沙箱决策中心       │ │
+                    │  │Spawn/Destroy│  │ 可选：硬性/弹性/智能   │ │
+                    │  │Socket通信  │  │ Policy Engine 规则     │ │
+                    │  └────────────┘  │ Behavior Monitor 行为   │ │
+                    │  ┌────────────┐  │ Landlock 文件权限(P4)   │ │
+                    │  │Context Mgr │  │ 弹窗确认接口           │ │
+                    │  │三重记忆     │  └──────────────────────┘ │
+                    │  │  Agent私有  │  ┌──────────────────────┐ │
+                    │  │  项目共享   │  │ System Monitor       │ │
+                    │  │  全局(Planner)│ │ HW监听 + Event Bus通知 │
+                    │  │ FTS5 全文搜索│ │ CPU/GPU/Disk/RAM      │ │
+                    │  │ SQLite持久化│  │ 阈值告警 + 异常发布    │ │
+                    │  └────────────┘  └──────────────────────┘ │
+                    │  ┌──────────────────┐                     │
+                    │  │ Tool Gateway     │                     │
+                    │  │ 工具注册/发现 + 权限                     │
+                    │  │ Shell/Git/HTTP/Process/System/Env     │
+                    │  │ Knowledge/Notification/MCP/自定义      │
+                    │  └──────────────────┘                     │
                     └─────────────────────────────────────┘
                                    │
                     ┌──────────────┴──────────────────────┐
