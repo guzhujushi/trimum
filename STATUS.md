@@ -141,8 +141,13 @@
 | **tarl_parser.py** | ✅ | parse_line / parse_multi / serialize / match_prefix / 12 测试通过 |
 | **transform_agent.py** | ✅ | Transform Agent 骨架（NL→TARL 输出 Phase 1 stub）|
 | **docs/PHASE1-PLAN.md 删除** | ✅ | 内容已合并到 ARCHITECTURE.md + TARL-SPEC.md |
-| **GitHub 推送** | ✅ | 5 commits 已推：bf9c7b4 → 5c8250d |
+| **GitHub 推送** | ✅ | 6 commits 已推：bf9c7b4 → 51ba21d |
 | 版本升级 | ✅ | v0.3.1 → v0.4.0 |
+| **Phase 3 高优全部完成**（#1-#7） | ✅ | Task State Machine / TARL 匹配 / Handoff Snapshot / Security TARL |
+| **测试 98 pass 0 fail** | ✅ | 1 deselected（AgentRegistry auto-load）|
+| **开源调研分析文档** | ✅ | `docs/ECOSYSTEM-COMPARISON.md` — SemaClaw/skelm/Sandcastle 完整分析 |
+| **README.md 生态位+致谢段** | ✅ | 新增「生态位置」+「开源参考与致谢」两个段 |
+| **代码审查（Codex SIGKILL）** | ❌ | 90s 超时被杀，需 split scope 重试 |
 
 ---
 

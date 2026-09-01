@@ -5,6 +5,16 @@
 
 ---
 
+## 生态位置
+
+**trimum 是目前唯一用 Python 写的 AI 进程运行时（Harness）。**
+
+市面上已有的类似框架——SemaClaw (TS, 83★)、skelm (TS, 0★)、Sandcastle (TS, 7780★)——全部使用 TypeScript。LangChain / CrewAI 虽是 Python，但它们不是 Harness（是 Agent 框架/编排层）。Python 生态里没有人在做 **"Agent 的操作系统内核"** 这个层级的产品。
+
+详细分析：`docs/ECOSYSTEM-COMPARISON.md`
+
+---
+
 ## ✨ 亮点速览
 
 | 亮点 | 一句话 |
@@ -106,6 +116,19 @@
 | **API Server** | FastAPI HTTP 接口 | ✅ |
 
 ---
+
+## 开源参考与致谢
+
+trimum 的设计深受以下开源项目启发：
+
+| 项目 | 借鉴内容 |
+|---|---|
+| **[SemaClaw](https://github.com/midea-ai/SemaClaw)** — 个人 AI Agent 框架（TS） | DAG Teams 两阶段编排、Plugin Marketplace 概念、三重上下文管理思路 |
+| **[skelm](https://github.com/skelm-framework/skelm)** — 安全 Workflow 框架（TS） | Default-Deny 权限模型设计、Per-Agent Workspace 隔离思路、Tamper-Evident Audit 理念 |
+| **[Warp](https://github.com/warpdotdev/Warp)** — AI 终端（Rust） | TARL 标签语言理念、Handoff Snapshot 最小上下文原则、Run State 扩展启发 |
+| **[Sandcastle](https://github.com/mattpocock/sandcastle)** — 沙箱编码 Agent（TS） | 沙箱隔离设计参考 |
+
+详细对比分析：`docs/ECOSYSTEM-COMPARISON.md`
 
 ## 设计哲学
 
