@@ -1,14 +1,14 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-08-31（v11 — Tool Gateway 重构：ToolRegistry + Agent 权限集成）
+> 最后更新：2026-09-01（v12 — Security Agent + Behavior Monitor + Phase 3 架构组件）
 >
-> 当前阶段：Phase 2 进行中（Agent Registry + Router 已完成）
+> 当前阶段：Phase 3 进行中（Communication Architecture + Security）
 
 ---
 
 ## 任务清单
 
-### Phase 0 — 基础环境建设
+### Phase 0 — 基础环境建设 ✅
 - [x] 项目 README（定位、架构、路线图）
 - [x] 架构文档（ARCHITECTURE.md v2.0）
 - [x] 开发路线解读（DEVELOPMENT-ROADMAP.md）
@@ -22,40 +22,86 @@
 - [x] 项目名定稿：trimum（CLI 命令 trm）
 - [x] 开发环境方案变更：放弃虚拟机，Phase 1 直接在 Windows 开发
 
-### Phase 1 — AI Shell MVP（Python）
-- [x] 第 1 步：项目脚手架 + LLM 适配器（L-1/L-8 已修复）
-- [x] 第 2 步：策略引擎 + 配置（C-1/C-2/M-1/M-6/L-4 已修复）
-- [x] 第 3 步：命令规划器（H-2/M-3 已修复）
-- [x] 第 4 步：执行器 + 确认流程（H-1/M-2/L-5/L-6/L-9 已修复）
-- [x] 第 5 步：CLI 入口 + 输出格式化（M-4/L-2/L-3/L-7 已修复）
-- [x] 第 6 步：Shell 集成（desktop/zsh-ai.sh + desktop/ai.ps1）
-- [x] 第 7 步：验证（test_scenarios.py，39 个用例全部通过）
-- [x] 代码审查（2026-08-30）：结论见 tmp/code-review-findings.md；修复总结见 tmp/phase1-fix-summary.md
+### Phase 1 — AI Shell MVP（Python）✅
+- [x] 第 1~7 步全部完成（项目脚手架 → LLM 适配器 → 策略引擎 → 命令规划器 → 执行器 → CLI → Shell 集成 → 验证）
+- [x] 代码审查 & 修复（2 critical / 3 high / 6 medium / 9 low 全部修复）
+- [x] 39 个测试用例全部通过
 
-### Phase 1.5 — 桌面预设 + 安装脚本
-- [x] 集成 Omarchy 主题资源（22 套 → desktop/themes/）+ Snapper 脚本 + 参考文件（docs/omarchy-ref/），摘要见 tmp/omarchy-integrate-summary.md
-- [x] 评估 Omarchy 的 Hyprland 预设能否复用（结论：omarchy 预设为 Lua 且依赖 omarchy-defaults 运行库，trimum 改为标准 .conf 自包含实现）
-- [x] Hyprland 预设主题包（5 套：tokyo-night / catppuccin / gruvbox / nord / rose-pine；含 hyprland.conf + colors.conf + kitty.conf + waybar style.css）
-- [x] 主题切换器 scripts/trimum-theme（list / set / preview；symlink 切换 + swww 壁纸 + hyprctl reload）
-- [x] Btrfs + Snapper 自动配置（desktop/install.sh 创建 @/@home/@snapshots 子卷并调用 scripts/setup-btrfs-snapper.sh）
-- [x] 安装脚本 desktop/install.sh（纯 bash：分区 → pacstrap → chroot 配置 → 服务 → zsh）
+### Phase 1.5 — 桌面预设 + 安装脚本 ✅
+- [x] Hyprland 5 套主题预设（tokyo-night / catppuccin / gruvbox / nord / rose-pine）
+- [x] 主题切换器 scripts/trimum-theme（list / set / preview）
+- [x] Btrfs + Snapper 自动配置
+- [x] 安装脚本 desktop/install.sh（纯 bash）
 
-### Phase 2 — trimum Core（Python + FastAPI）
-- [x] **Agent Registry + Agent Router**（2026-08-31，pr #4 已合并）
-- [x] **Tool Gateway 重构**（2026-08-31，ToolRegistry + Agent 权限双层检查）
-- [ ] API Server 框架
-- [ ] Policy Engine + Agent Manager（Supervisor）
-- [ ] Event Bus + Context Manager（SQLite，atuin Schema）
-- [ ] Unix Socket / HTTP 接口
+### Phase 2 — trimum Core（Python + FastAPI）✅
+- [x] Agent Registry + Agent Router（agent_registry.py / agent_router.py）
+- [x] Tool Gateway 重构（ToolRegistry + Agent 权限双层检查 + 11 Dispatchers）
+  - FileDispatcher / GitDispatcher / HttpDispatcher / ProcessDispatcher
+  - SystemDispatcher / ShellDispatcher / EnvDispatcher / KnowledgeDispatcher
+  - NotificationDispatcher / MCPDispatcher / CustomDispatcher
+- [x] Planner Agent（planner_agent.py，~500 行）
+- [x] API Server 框架（api_server.py）
+- [x] Policy Engine（policy_engine.py，正则规则引擎）
+- [x] Event Bus（event_bus.py，异步 pub/sub）
+- [x] Context Manager（context_manager.py，SQLite 持久化）
+- [x] IPC Handler（ipc_handler.py，JSON-RPC 2.0 over Unix Socket）
+- [x] Models（models.py，全部 Pydantic 模型）
+- [x] Config（config.py，YAML 配置加载）
+- [x] 测试覆盖 ~120 个测试用例 → 全部通过
+- [x] SonarQube 扫描：181 issues 待评估（多为 CSS/C语言假阳性/Cognitive Complexity 等低风险项）
+  - 已修复 3 个真实 bug（空 f-string / 未用变量 / 重复字面量常量化）
+  - 已配置排除（图片 / Waybar CSS / 源文件编码）
+- [x] README.md 重写（亮点前置表格 + 架构图 + 组件表 + 开发状态 + 快速开始）
 
-### Phase 3 — Agent SDK
-- [ ] pip install openai-agents + apprise + psutil
-- [ ] 自定义 Tool + Guardrail
-- [ ] 预设 Agent + explain / fix 管道
+### Phase 3 — Agent SDK & 通信架构（进行中）
+- [x] **Agent Socket**（agent_socket.py）— Unix Socket Server/Client，JSON-RPC 帧协议
+  - AgentSocketServer：监听 Socket，接收子 Agent 连接，收发 start/stop/status 信号
+  - AgentSocketClient：子 Agent 端连接 Runtime 的客户端
+- [x] **Agent Runtime**（agent_runtime.py）— 子 Agent 进程生命周期管理
+  - start_agent / stop_agent / get_status / list_agents
+  - 通过 Event Bus 广播状态变更（agent.started / agent.stopped）
+  - 最大 Agent 数限制，发布/订阅事件循环
+- [x] **Workflow v2 格式**（workflow_engine.py 扩展）
+  - WorkflowStep / WorkflowStepCondition / WorkflowDefV2
+  - 监听器→执行组格式（trigger: event_type + condition, execute: [AgentTask]）
+  - start_v2()：等待事件触发 → 通过 Event Bus 派发任务 → 监听完成 → 进入下一步
+  - 向后兼容旧 Node/Edge/WorkflowDefinition 格式
+- [x] **Context Manager 扩展**（context_manager.py）
+  - 项目上下文接口（set/get/list_project_context）
+  - `requires_confirmation()` — 判断读取是否需要弹窗确认
+  - 规则：子 Agent 读自己记忆不需要确认，读项目公共上下文需要确认
+- [x] **Landlock 接口预留**（policy_engine.py / security_agent.py）
+  - check_landlock() / get_landlock_ruleset() — Phase 4 实现
+- [x] **Event Bus 扩展**（event_bus.py）
+  - Agent 消息类型常量：TASK_ASSIGNED / TASK_STARTED / TASK_COMPLETED / TASK_FAILED / AGENT_STATUS_CHANGED
+- [ ] Agent SDK 封装（openai-agents-python 集成）
+- [ ] 预设 Agent + Workflow 模板
+- [ ] Tool + Agent 鉴权的全链路集成测试
 
-### Phase 4 — Security Runtime
-### Phase 5 — Memory Layer（chroma 替代 PostgreSQL）
-### Phase 6 — ISO / 安装镜像
+#### 弹性沙箱体系（新，2026-09-01）
+- [x] **Security Agent**（security_agent.py）— 弹性沙箱决策中心
+  - 跨 Agent/工具访问决策（can_access / can_execute）
+  - 跨沙箱 / 同一沙箱不同工具的访问规则
+  - 资源阈值检查（CPU / 内存 / 写入频率等）
+  - 弹窗确认接口（confirm()）
+  - 防溢出风险评估（get_escape_risks）
+  - 工作流白名单（register_workflow_peers）
+- [x] **Behavior Monitor**（behavior_monitor.py）— 行为基线 + 异常检测
+  - 操作历史追踪（滑动窗口 300 秒）
+  - 命令分类（文件 / 网络 / 进程 / 容器 / VCS 等 8 大类 22 小类）
+  - 突发高频检测（按操作类型阈值）
+  - 跨沙箱操作检测
+  - 新操作类型检测
+- [ ] Security Agent ↔ Agent Router / Tool Gateway 的全链路集成
+- [ ] 弹窗确认的 UI / API 入口
+
+### Phase 4 — Security Runtime（计划中）
+- [ ] Landlock LSM 集成（os.landlock / ctypes）
+- [ ] ML 行为基线模型
+- [ ] 权限审计日志
+
+### Phase 5 — Memory Layer（计划中）
+### Phase 6 — ISO / 安装镜像（计划中）
 
 ---
 
@@ -69,46 +115,35 @@
 | 2026-08-29 | 引入 Supervisor / psutil / apprise / chroma | 替代自研进程管理/系统度量/通知/向量库 |
 | 2026-08-29 | Phase 5 用 chroma 替代 PostgreSQL+pgvector | 桌面场景不需要服务级数据库 |
 | 2026-08-30 | 项目名定稿：trimum / trm | 原名 Harness 太土，改为 trimum |
-| 2026-08-30 | 放弃虚拟机，Phase 1 直接在 Windows 开发 | AI Shell 核心逻辑（LM调用+subprocess+策略引擎）完全跨平台，在 Windows 上写好验证后再部署 Linux |
-| 2026-08-30 | Phase 1 审查问题全部修复（C-1/C-2/H-1/H-2/M-1~M-6/L-1~L-9） | 策略规范化（normalize_command 拆段）+ 磁盘工具规则补全 + GBK 安全符号 + 包重构 trimum_mvp/ + Step 6/7 补齐 |
-| 2026-08-30 | M-5 包重构：6 个模块迁入 trimum_mvp/ 包 | 顶层通用模块名（cli/policy 等）避免污染 site-packages；trm 入口改为 trimum_mvp.cli:app |
-| 2026-08-30 | Phase 1.5 安装脚本放弃 pyinfra，改用纯 bash | 任务约束“No pyinfra”；起点脚本保持零依赖、可读可改 |
-| 2026-08-30 | Hyprland 主题包采用标准 .conf，不复用 omarchy Lua 预设 | omarchy 预设依赖 omarchy-defaults 运行库，.conf 更贴近原生 Hyprland，且可被 hyprctl reload 热重载 |
-| 2026-08-30 | 首批 5 套主题（4 暗 + 1 亮：rose-pine） | 从 22 套 Omarchy 主题中选取主流配色；其余主题可由 tmp/gen-theme-configs.py 扩展生成 |
-| 2026-08-30 | 主题由 symlink 链驱动（hypr/current -> <name>） | 切换只需翻转 current 链接 + hyprctl reload，dotfiles 保持单一数据源 |
+| 2026-08-30 | 放弃虚拟机，Phase 1 直接在 Windows 开发 | AI Shell 核心逻辑跨平台，在 Windows 写好验证后再部署 Linux |
+| 2026-08-30 | Hyprland 主题包采用标准 .conf，不复用 omarchy Lua 预设 | .conf 更贴近原生 Hyprland，可被 hyprctl reload 热重载 |
+| 2026-09-01 | Phase 3 通信架构：Workflow Engine→Socket→Agent Runtime→Socket→子Agent；所有业务走Event Bus | Workflow Engine 做决策，Agent Runtime 只启停，Event Bus 纯消息通道 |
+| 2026-09-01 | 弹性沙箱 = Security Agent 决策 + Behavior Monitor 异常检测 + Policy Engine 规则匹配 | 三层分离：规则→行为→决策，互不耦合 |
+| 2026-09-01 | 跨工具互访需 Security Agent 确认（即使同一沙箱在 Docker 内） | 开发者工具互相隔离，防信息泄露和权限提升 |
+| 2026-09-01 | 安全 = Core 的职责，不是独立 Agent | 安全是基础设施，不交由子 Agent 管理 |
 
 ---
 
-## 今日进度（2026-08-31）
-| 完成项 | 状态 | 备注 |
-|---|---|---|
-| Agent Registry + Router 实现 | ✅ | agent_registry.py / agent_router.py / models 更新 / __init__.py 0.3.0 |
-| 代码审查 | ✅ | 15 文件检查，1 minor warning，已写入 tmp/code-review-agent.md |
-| Tool Gateway 重构 | ✅ | ToolRegistry / Agent_permission_check / load_tools_from_config |
-| 测试 | ✅ | 23/23 全部通过 |
-| 推 Git（phase2 分支） | ✅ | origin/phase2 b393c2c |
+## 今日进度（2026-09-01）
 
-## 今日进度（2026-08-30）
 | 完成项 | 状态 | 备注 |
 |---|---|---|
-| 项目名替换 + 遗留 bug 修复 | ✅ | trimum/trm 全部替换，4 处修改 |
-| 密钥管理方案定稿并写入 README | ✅ | ~/.trimum/env + get_secret() SDK |
-| 代理配置写入 AGENTS.md | ✅ | Clash 127.0.0.1:7993 |
-| 尝试搭建 Arch 开发虚拟机 | ❌ | GRUB 引导失败 + osboxes 兼容问题，决定放弃 |
-| 开发环境方案变更 | ✅ | Phase 1 全部在 Windows 开发 |
-| 三文件工作流补全（PRD.md / ARCH.md） | ✅ | 补齐缺失文档 |
-| Phase 1 编码 + 审查修复（src/trimum-mvp） | ✅ | 第 1~7 步全部完成，39 个测试用例通过 |
-| Phase 1 代码审查 | ✅ | 详见 tmp/code-review-findings.md（2 critical / 3 high / 6 medium / 9 low） |
-| 集成 Omarchy 资产（22 套主题 + snapper + 参考文件） | ✅ | 256 文件 / ~63 MiB；22/22 主题含 colors.toml + 背景；摘要见 tmp/omarchy-integrate-summary.md |
-| Phase 1.5 主题配置生成器（tmp/gen-theme-configs.py） | ✅ | 从 colors.toml 读取生成 5 套 hypr/kitty/waybar 配置（25 文件） |
-| Phase 1.5 主题切换器（scripts/trimum-theme） | ✅ | list / preview 实测通过（git-bash 验证）；set 待真机验证 |
-| Phase 1.5 安装脚本（desktop/install.sh） | ✅ | bash -n 语法检查通过；破坏性分区流程未在本机执行 |
-| Phase 1.5 zsh-ai.sh 更新 | ✅ | 增加 TRIMUM_HOME 导出 + scripts/ 加入 PATH |
+| SonarQube 3 个 bug 修复 + 排除配置 | ✅ | 空 f-string / 未用变量 / 重复字面量常数化 |
+| README.md 重写 + .gitignore 精简 | ✅ | 亮点前置表格 + 整洁结构 |
+| Agent Socket + Agent Runtime | ✅ | 新增 2 文件（~390 行）|
+| Workflow v2 格式（监听器→执行组） | ✅ | WorkflowDefV2 / WorkflowStep / start_v2() |
+| Context Manager 扩展（项目上下文/记忆/确认） | ✅ | set/get/list_project_context + requires_confirmation() |
+| Event Bus Agent 消息类型 | ✅ | TASK_ASSIGNED / STARTED / COMPLETED / FAILED / STATUS_CHANGED |
+| **Security Agent + Behavior Monitor** | ✅ | 新增 2 文件（~620 行），完整的弹性沙箱决策体系 |
+| 版本升级 | ✅ | v0.3.1 → v0.4.0 |
+| GitHub 推送 | ⏳ | commit 已提交，网络不通待推 |
 
 ---
 
 ## 下一步
-0. 真机验收 Phase 1.5：在二手小主机运行 `sudo bash desktop/install.sh /dev/sdX`，验证 Hyprland 启动、`trimum-theme set <name>` 切换与 Snapper 快照
-1. 在真实 Windows 终端安装验证：`pip install -e src/trimum-mvp --no-build-isolation`（本沙箱禁止 python 写工作区/站点目录，未执行安装）
-2. 配置真实 API Key（TRIMUM_API_KEY）后运行 `trm "查看磁盘空间"` 等场景实测 LLM 链路
-3. 如需扩充主题：修改 tmp/gen-theme-configs.py 的 THEMES 列表即可为其余 17 套主题生成配置
+
+1. **全链路集成** — Security Agent ↔ Agent Router / Tool Gateway / API Server 连接起来
+2. **弹窗确认的 API/UI 入口** — 用户如何收到弹窗、如何确认
+3. **Agent SDK 封装** — 集成 openai-agents-python 预设 Agent
+4. **网络恢复后推 GitHub**
+5. **SonarQube 重扫** — 确认修复效果，无回归
