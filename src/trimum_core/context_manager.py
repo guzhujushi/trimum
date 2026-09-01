@@ -194,6 +194,78 @@ class ContextManager:
 
         return result
 
+    # ------------------------------------------------------------------
+    # Project context (shared, requires confirmation to read)
+    # ------------------------------------------------------------------
+
+    _MEMORY_NAMESPACE = "agent_memory"   # private per-agent
+    _PROJECT_NAMESPACE = "project_ctx"    # shared project context
+
+    async def set_project_context(
+        self,
+        project_id: str,
+        key: str,
+        value: Any,
+        ttl_seconds: float | None = None,
+    ) -> None:
+        """Store a project-level context entry.
+
+        Uses agent_id = f"project:{project_id}" to namespace project data.
+        """
+        await self.set(
+            agent_id=f"project:{project_id}",
+            key=key,
+            value=value,
+            namespace=self._PROJECT_NAMESPACE,
+            ttl_seconds=ttl_seconds,
+        )
+
+    async def get_project_context(
+        self, project_id: str, key: str
+    ) -> Any | None:
+        """Retrieve a project-level context entry (requires confirmation)."""
+        return await self.get(
+            agent_id=f"project:{project_id}",
+            key=key,
+            namespace=self._PROJECT_NAMESPACE,
+        )
+
+    async def list_project_context(
+        self, project_id: str
+    ) -> dict[str, Any]:
+        """List all project context entries."""
+        return await self.list_namespace(
+            agent_id=f"project:{project_id}",
+            namespace=self._PROJECT_NAMESPACE,
+        )
+
+    async def requires_confirmation(self, agent_id: str, key: str) -> bool:
+        """Check if reading a context entry should prompt the user.
+
+        Rule: reading shared/project context owned by *other* agents
+        or the global project namespace requires confirmation.
+        Reading one's own agent_memory does NOT.
+        """
+        # Agent's own private memory: no confirmation needed
+        if key.startswith("agent_memory.") or key == "agent_memory":
+            return False
+        # Shared project context: always confirm
+        if key.startswith("project_ctx.") or key == "project_ctx":
+            return True
+        # Cross-agent read: confirm
+        return True
+
+    def confirm_read(
+        self, agent_id: str, key: str, namespace: str = "default"
+    ) -> None:
+        """Signal that the user has confirmed a context read.
+
+        This is a no-op placeholder; the actual confirmation flow is
+        handled by the caller (e.g. a UI prompt). Marking it here
+        for audit trail in future implementations.
+        """
+        pass
+
     async def clear_agent(self, agent_id: str) -> None:
         """Delete **all** context entries for *agent_id* (every namespace)."""
         await self._conn.execute(

@@ -610,3 +610,129 @@ class WorkflowEngine:
             )
             if all_preds_done and successor_nid not in ready_queue and successor_nid not in completed:
                 ready_queue.append(successor_nid)
+
+
+# ===================================================================
+# Phase 3: WorkflowStep — 新格式（监听器→执行组）
+# ===================================================================
+
+
+class WorkflowStepCondition(BaseModel):
+    """Step 触发条件."""
+    event_type: str = ""
+    condition: str = ""  # 可选的条件表达式
+
+
+class WorkflowStep(BaseModel):
+    """工作流步骤：监听器 + 执行组.
+
+    格式:
+    - trigger: 监听什么事件
+    - execute: 触发后执行哪些 AgentTask
+    """
+    trigger: WorkflowStepCondition = Field(default_factory=WorkflowStepCondition)
+    execute: list[AgentTask] = Field(default_factory=list)
+
+
+class WorkflowDefV2(BaseModel):
+    """Phase 3 新版工作流定义 (监听器→执行组).
+
+    兼容旧版 WorkflowDefinition (Node/Edge)，但提供新格式.
+    """
+    id: str = ""
+    name: str = ""
+    description: str = ""
+    steps: list[WorkflowStep] = Field(default_factory=list)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+    def to_workflow_definition(self) -> WorkflowDefinition:
+        """Convert v2 format to classic Node/Edge WorkflowDefinition.
+
+        Each step becomes a node. Steps execute sequentially.
+        """
+        nodes: list[NodeDefinition] = []
+        edges: list[EdgeDefinition] = []
+        prev_id: str | None = None
+
+        for i, step in enumerate(self.steps):
+            for j, task in enumerate(step.execute):
+                node_id = f"step_{i}_task_{j}"
+                nodes.append(NodeDefinition(
+                    id=node_id,
+                    label=f"{step.trigger.event_type}:{task.agent_type}",
+                    handler=task.agent_type,
+                    config=task.config,
+                    timeout_seconds=task.timeout_seconds,
+                ))
+                if prev_id:
+                    edges.append(EdgeDefinition(
+                        source=prev_id,
+                        target=node_id,
+                    ))
+                prev_id = node_id
+
+        return WorkflowDefinition(
+            id=self.id,
+            name=self.name,
+            description=self.description,
+            nodes=nodes,
+            edges=edges,
+            config=self.config,
+        )
+
+    async def start_v2(
+        self,
+        engine: "WorkflowEngine",
+        context: dict[str, Any] | None = None,
+    ) -> WorkflowResult:
+        """Start workflow in v2 mode: listen for triggers, dispatch tasks.
+
+        For each step:
+        1. Listen for trigger event on Event Bus
+        2. When trigger fires, evaluate condition
+        3. Execute all AgentTasks in the execute group (via Event Bus)
+        4. Wait for completion before moving to next step
+        """
+        workflow_id = self.id or f"wf-v2-{uuid.uuid4().hex[:12]}"
+        context = context or {}
+
+        for i, step in enumerate(self.steps):
+            # Listen for trigger event
+            trigger_queue: asyncio.Queue = asyncio.Queue()
+
+            async def _trigger_callback(event):
+                if step.trigger.event_type and event.event_type != step.trigger.event_type:
+                    return
+                if step.trigger.condition:
+                    ctx = {"payload": event.payload}
+                    try:
+                        if not eval(step.trigger.condition, {"__builtins__": {}}, ctx):
+                            return
+                    except Exception:
+                        return
+                await trigger_queue.put(event)
+
+            engine._bus.subscribe("*", _trigger_callback)
+
+            # Wait for trigger
+            await trigger_queue.get()
+
+            # Dispatch all tasks in the execute group
+            for task in step.execute:
+                task.workflow_id = workflow_id
+                task.task_id = f"{workflow_id}_step_{i}_{task.agent_type}"
+
+                # Publish task to Event Bus (Agent Runtime listens)
+                await engine._bus.emit_event(
+                    event_type="task.assigned",
+                    source=f"workflow:{workflow_id}",
+                    payload=task.model_dump(),
+                )
+
+            engine._bus.unsubscribe("*", _trigger_callback)
+
+        return WorkflowResult(
+            workflow_id=workflow_id,
+            status=WorkflowStatus.COMPLETED,
+            duration=0.0,
+        )

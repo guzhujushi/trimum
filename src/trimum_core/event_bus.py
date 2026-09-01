@@ -15,6 +15,14 @@ from trimum_core.models import EventSeverity, SystemEvent
 NAMESPACE_EVENT = "event."       # 如 event.planner.failed
 NAMESPACE_TASK = "task."         # 如 task.node.completed
 
+# ── Agent 消息类型（Phase 3）──────────────────────────────
+# Workflow Engine → Event Bus → Agent Runtime / Sub-Agent
+TASK_ASSIGNED = "task.assigned"          # Workflow 下发任务给 Agent
+TASK_STARTED = "task.started"            # Agent 确认开始执行
+TASK_COMPLETED = "task.completed"        # Agent 报告执行完成
+TASK_FAILED = "task.failed"              # Agent 报告执行失败
+AGENT_STATUS_CHANGED = "agent.status_changed"  # Runtime 报告 Agent 状态
+
 
 Callback = Callable[[SystemEvent], Coroutine[Any, Any, None] | None]
 

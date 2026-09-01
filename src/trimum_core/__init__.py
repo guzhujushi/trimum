@@ -2,6 +2,8 @@
 
 from trimum_core.agent_registry import AgentRegistry
 from trimum_core.agent_router import AgentRouter, RouteEntry
+from trimum_core.agent_runtime import AgentRuntime
+from trimum_core.agent_socket import AgentSocketServer, AgentSocketClient, SocketMessage
 from trimum_core.planner_agent import PlannerAgent
 from trimum_core.models import (
     Action,
@@ -10,6 +12,8 @@ from trimum_core.models import (
     AgentManifest,
     AgentPermissions,
     AgentStatus,
+    AgentTask,
+    AgentTaskResult,
     ContextEntry,
     EventSeverity,
     ExecuteRequest,
@@ -41,12 +45,15 @@ from trimum_core.workflow_engine import (
     NodeDefinition,
     NodeStatus,
     WorkflowDefinition,
+    WorkflowDefV2,
     WorkflowEngine,
     WorkflowResult,
     WorkflowStatus,
+    WorkflowStep,
+    WorkflowStepCondition,
 )
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 __all__ = [
     "Action",
@@ -56,7 +63,14 @@ __all__ = [
     "AgentPermissions",
     "AgentRegistry",
     "AgentRouter",
+    "AgentRuntime",
+    "AgentSocketClient",
+    "AgentSocketServer",
     "AgentStatus",
+    "AgentTask",
+    "AgentTaskResult",
+    "AgentTask",
+    "AgentTaskResult",
     "ContextEntry",
     "CustomDispatcher",
     "DispatcherRegistry",
@@ -83,10 +97,14 @@ __all__ = [
     "ToolDefinition",
     "SpawnRequest",
     "SpawnResponse",
+    "SocketMessage",
     "SystemEvent",
     "ToolType",
     "WorkflowDefinition",
+    "WorkflowDefV2",
     "WorkflowEngine",
     "WorkflowResult",
     "WorkflowStatus",
+    "WorkflowStep",
+    "WorkflowStepCondition",
 ]

@@ -54,6 +54,48 @@ class PolicyEngine:
         """Evaluate a list of command arguments."""
         return self.evaluate(" ".join(args))
 
+    # ------------------------------------------------------------------
+    # Landlock interface (Phase 4 stub)
+    # ------------------------------------------------------------------
+
+    async def check_landlock(
+        self,
+        path: str,
+        access_type: str = "read",
+    ) -> bool:
+        """Check if *path* is accessible with *access_type* under Landlock.
+
+        Args:
+            path: Filesystem path to check.
+            access_type: One of "read", "write", "execute".
+
+        Returns:
+            True if allowed, False if denied.
+
+        Note:
+            This is a Phase 4 placeholder. Currently returns True for all
+            paths. Actual Landlock enforcement will be implemented when
+            the Linux Landlock LSM integration is added.
+
+        Phase 4 implementation plan:
+        - Use ``os.landlock`` or ctypes to create a Landlock ruleset
+        - Restrict agent processes to their declared path permissions
+        - Deny writes to system paths (/etc, /usr, /boot, /sys, /proc)
+        - Allow reads to ~/.trimum/ and agent workspace unless blocked
+        """
+        _ = path, access_type  # unused placeholder
+        return True
+
+    async def get_landlock_ruleset(self) -> dict:
+        """Return the current Landlock ruleset as a dict (stub)."""
+        return {
+            "enabled": False,
+            "allowed_read": [],
+            "allowed_write": [],
+            "allowed_exec": [],
+            "version": 0,
+        }
+
     @staticmethod
     def _normalize_command(cmd: str) -> str:
         """Normalize command string for pattern matching.
