@@ -735,18 +735,42 @@ class CustomDispatcher:
 class DispatcherRegistry:
     """Registry mapping ToolType values to Dispatcher instances.
 
+    Two-tier loading:
+    1. File-based: ~/.trimum/tools/<name>/main.py exports ``execute()``
+    2. Built-in fallback: hardcoded dispatchers
+
     Usage::
 
-        registry = DispatcherRegistry()
+        registry = DispatcherRegistry(tools_path="~/.trimum/tools")
+        registry.load_from_files()
         response = await registry.dispatch(request)
     """
 
-    def __init__(self) -> None:
-        self._dispatchers: dict[ToolType, Any] = {}
-        self._register_defaults()
+    TOOLTYPE_MAP: dict[str, list[ToolType]] = {
+        "file": [ToolType.FILE_READ, ToolType.FILE_WRITE, ToolType.FILE_DELETE,
+                 ToolType.FILE_LIST, ToolType.FILE_MOVE, ToolType.FILE_COPY,
+                 ToolType.FILE_SEARCH],
+        "git": [ToolType.GIT, ToolType.GIT_STATUS, ToolType.GIT_DIFF,
+                ToolType.GIT_LOG, ToolType.GIT_COMMIT, ToolType.GIT_PUSH,
+                ToolType.GIT_PULL, ToolType.GIT_BRANCH],
+        "http": [ToolType.HTTP, ToolType.HTTP_GET, ToolType.HTTP_POST],
+        "process": [ToolType.PROCESS, ToolType.PROCESS_LIST, ToolType.PROCESS_KILL],
+        "system": [ToolType.SYSTEM, ToolType.SYSTEM_INFO, ToolType.SYSTEM_DISK, ToolType.SYSTEM_MEMORY],
+        "shell": [ToolType.SHELL],
+        "env": [ToolType.ENV_GET, ToolType.ENV_LIST],
+        "knowledge": [ToolType.KNOWLEDGE_SEARCH, ToolType.KNOWLEDGE_STORE],
+        "notification": [ToolType.NOTIFICATION, ToolType.NOTIFICATION_SEND],
+        "mcp": [ToolType.MCP_TOOLS_LIST, ToolType.MCP_TOOLS_CALL],
+        "custom": [ToolType.CUSTOM],
+    }
 
-    def _register_defaults(self) -> None:
-        """Register built-in dispatchers for each ToolType category."""
+    def __init__(self, tools_path: str | None = None) -> None:
+        self._dispatchers: dict[ToolType, Any] = {}
+        self._tools_path = tools_path or str(Path.home() / ".trimum" / "tools")
+        self._register_builtins()
+
+    def _register_builtins(self) -> None:
+        """Register built-in dispatchers as fallback."""
         file_d = FileDispatcher()
         git_d = GitDispatcher()
         http_d = HttpDispatcher()
@@ -759,51 +783,87 @@ class DispatcherRegistry:
         mcp_d = MCPDispatcher()
         custom_d = CustomDispatcher()
 
-        # File operations
-        for tt in (ToolType.FILE_READ, ToolType.FILE_WRITE, ToolType.FILE_DELETE,
-                   ToolType.FILE_LIST, ToolType.FILE_MOVE, ToolType.FILE_COPY,
-                   ToolType.FILE_SEARCH):
-            self._dispatchers[tt] = file_d
+        for types, dispatcher in [
+            (self.TOOLTYPE_MAP["file"], file_d),
+            (self.TOOLTYPE_MAP["git"], git_d),
+            (self.TOOLTYPE_MAP["http"], http_d),
+            (self.TOOLTYPE_MAP["process"], process_d),
+            (self.TOOLTYPE_MAP["system"], system_d),
+            (self.TOOLTYPE_MAP["shell"], shell_d),
+            (self.TOOLTYPE_MAP["env"], env_d),
+            (self.TOOLTYPE_MAP["knowledge"], knowledge_d),
+            (self.TOOLTYPE_MAP["notification"], notif_d),
+            (self.TOOLTYPE_MAP["mcp"], mcp_d),
+            (self.TOOLTYPE_MAP["custom"], custom_d),
+        ]:
+            for tt in types:
+                self._dispatchers[tt] = dispatcher
 
-        # Git operations
-        for tt in (ToolType.GIT, ToolType.GIT_STATUS, ToolType.GIT_DIFF,
-                   ToolType.GIT_LOG, ToolType.GIT_COMMIT, ToolType.GIT_PUSH,
-                   ToolType.GIT_PULL, ToolType.GIT_BRANCH):
-            self._dispatchers[tt] = git_d
+    def load_from_files(self) -> int:
+        """Scan ~/.trimum/tools/<name>/main.py and register file-based dispatchers.
 
-        # HTTP operations
-        for tt in (ToolType.HTTP, ToolType.HTTP_GET, ToolType.HTTP_POST):
-            self._dispatchers[tt] = http_d
+        Each tool directory with a main.py exporting ``async def execute()``
+        replaces the built-in dispatcher for its ToolType(s).
 
-        # Process operations
-        for tt in (ToolType.PROCESS, ToolType.PROCESS_LIST, ToolType.PROCESS_KILL):
-            self._dispatchers[tt] = process_d
+        Returns number of file-based dispatchers loaded.
+        """
+        import importlib.util
+        import sys as _sys
 
-        # System operations
-        for tt in (ToolType.SYSTEM, ToolType.SYSTEM_INFO, ToolType.SYSTEM_DISK, ToolType.SYSTEM_MEMORY):
-            self._dispatchers[tt] = system_d
+        tools_dir = Path(self._tools_path)
+        if not tools_dir.is_dir():
+            return 0
 
-        # Shell
-        self._dispatchers[ToolType.SHELL] = shell_d
+        count = 0
+        for child in sorted(tools_dir.iterdir()):
+            if not child.is_dir():
+                continue
+            main_py = child / "main.py"
+            if not main_py.is_file():
+                continue
 
-        # Environment
-        for tt in (ToolType.ENV_GET, ToolType.ENV_LIST):
-            self._dispatchers[tt] = env_d
+            tool_name = child.name
+            if tool_name not in self.TOOLTYPE_MAP:
+                continue
 
-        # Knowledge
-        for tt in (ToolType.KNOWLEDGE_SEARCH, ToolType.KNOWLEDGE_STORE):
-            self._dispatchers[tt] = knowledge_d
+            try:
+                # Dynamic import like a Minecraft mod
+                spec = importlib.util.spec_from_file_location(
+                    f"trimum_tool_{tool_name}",
+                    str(main_py),
+                )
+                if spec is None or spec.loader is None:
+                    continue
+                module = importlib.util.module_from_spec(spec)
+                _sys.modules[spec.name] = module
+                spec.loader.exec_module(module)
 
-        # Notification
-        for tt in (ToolType.NOTIFICATION, ToolType.NOTIFICATION_SEND):
-            self._dispatchers[tt] = notif_d
+                if not hasattr(module, "execute"):
+                    continue
 
-        # MCP
-        for tt in (ToolType.MCP_TOOLS_LIST, ToolType.MCP_TOOLS_CALL):
-            self._dispatchers[tt] = mcp_d
+                # Wrap module.execute into a dispatcher-compatible callable
+                class _FileDispatcher:
+                    def __init__(self, mod):
+                        self._mod = mod
 
-        # Custom
-        self._dispatchers[ToolType.CUSTOM] = custom_d
+                    async def execute(self, request):
+                        result = await self._mod.execute(request.model_dump())
+                        if isinstance(result, dict):
+                            return ExecuteResponse(**result)
+                        return result
+
+                fd = _FileDispatcher(module)
+                for tt in self.TOOLTYPE_MAP[tool_name]:
+                    self._dispatchers[tt] = fd
+
+                count += 1
+                logger.debug("dispatcher.file_loaded", tool=tool_name)
+
+            except Exception as e:
+                logger.warning("dispatcher.file_load_failed", tool=tool_name, error=str(e))
+                continue
+
+        return count
 
     def register(self, tool_type: ToolType, dispatcher: Any) -> None:
         """Register (or override) a dispatcher for a specific ToolType."""
