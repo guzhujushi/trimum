@@ -24,3 +24,9 @@ trimum-client = "trimum_core.trimum_client:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.sonar]
+sourceEncoding = "UTF-8"
+sonar.exclusions = "**/*.webp,**/*.jpg,**/*.png,**/desktop/**"
+sonar.css.exclusions = "**/waybar/**"
+sonar.python.version = "3.12"
