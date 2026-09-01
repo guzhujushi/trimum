@@ -12,6 +12,9 @@ from pydantic import BaseModel, Field
 from trimum_core.agent_registry import AgentRegistry
 from trimum_core.event_bus import EventBus
 from trimum_core.models import AgentManifest
+from trimum_core.logger import get_logger
+
+logger = get_logger("agent_router")
 
 
 class RouteEntry(BaseModel):
@@ -32,11 +35,16 @@ class AgentRouter:
     - ``build_routes()`` — rebuild internal route table from registry
     """
 
-    def __init__(self, registry: AgentRegistry, event_bus: EventBus) -> None:
-        self.registry = registry
-        self.event_bus = event_bus
+    def __init__(self, registry: Optional[AgentRegistry] = None, event_bus: Optional[EventBus] = None) -> None:
         # capability -> ordered list of RouteEntry (highest priority first)
         self._routes: dict[str, list[RouteEntry]] = {}
+        self.registry = registry or AgentRegistry()
+        self.event_bus = event_bus or EventBus()
+        # Auto-load agent manifests from disk on init
+        loaded = self.registry.load_from_dir()
+        if loaded > 0:
+            logger.debug("agent_router.init", loaded=loaded)
+        self.build_routes()
 
     # ------------------------------------------------------------------
     # Route building
