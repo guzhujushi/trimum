@@ -116,6 +116,17 @@
 
 AI 系统事件总线，负责 Runtime / Agent / Workflow 之间的通信。
 
+> **Phase 3+ 可选：虚拟文件接口**（来自 DeepSeek 建议）
+> Event Bus 可暴露 `/run/trimum/events/` 目录作为可选的文件接口展示层：
+> ```
+> /run/trimum/events/
+> ├── agent.log        # Agent 生命周期事件（近似 dmesg 的作用）
+> ├── workflow.log     # Workflow 执行流水
+> └── security.log     # 安全事件审计流
+> ```
+> 类似 Linux /proc、/sys——不是它们存储系统状态，只是展示接口。
+> **当前阶段不做 FUSE 实现**，备选方案：Unix Socket dump + 尾部滚动文件。
+
 ```
 事件类型：
 ├── agent.spawned       Agent 启动
@@ -237,6 +248,13 @@ Agent 间共享的轻量长期记忆：
 | 键值存储 | SQLite key-value |
 | 上下文持久化 | Agent 间共享状态 |
 | 关键字搜索 | SQLite FTS5 |
+
+> **渐进路线**（来自 DeepSeek 建议）
+> 当前技术选型：Phase 5 引入 chroma（轻量向量库）。
+> 如果实际使用中发现语义搜索需求不足（用户需求主要是"找历史/偏好/workflow"而非"找相似文章"），可降级为：
+SQLite 直接记忆 → sqlite-vec 向量扩展 → chroma
+此方案不需要立即调整 Phase 5 计划，仅作为 future option 记录。
+**关键规则**：Memory Tool 只返回 Top-N 条（如 5 条），不加载全部内容给 Agent，避免 Token 爆炸。
 
 ### 2.9 Agent Ecosystem
 

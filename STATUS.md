@@ -121,6 +121,10 @@
 | 2026-09-01 | 弹性沙箱 = Security Agent 决策 + Behavior Monitor 异常检测 + Policy Engine 规则匹配 | 三层分离：规则→行为→决策，互不耦合 |
 | 2026-09-01 | 跨工具互访需 Security Agent 确认（即使同一沙箱在 Docker 内） | 开发者工具互相隔离，防信息泄露和权限提升 |
 | 2026-09-01 | 安全 = Core 的职责，不是独立 Agent | 安全是基础设施，不交由子 Agent 管理 |
+| 2026-09-02 | DeepSeek 建议审核入档 | `docs/DEEPSEEK-ADVICE-REVIEW.md` — 3 采纳 / 3 部分采纳 / 2 不采纳 |
+| 2026-09-02 | Pydantic AI Harness 对比调研 | `docs/PYDANTIC-AI-COMPARISON.md` — 定位不同，不是竞品；发现 6 项 trimum Phase 3 差距 |
+| 2026-09-02 | REFERENCE-PROJECTS 审计 | `docs/REFERENCE-AUDIT.md` — 7 项目逐项对照，发现 35% 借鉴点未落地，新增 7 项差距（G3-G9）|
+| 2026-09-02 | Phase 5-7 规划扩展 | `docs/DEVELOPMENT-ROADMAP.md` 重写 — Phase 5 记忆+工具链 / Phase 6 ISO+包管理 / Phase 7 前端+生态市场 |
 
 ---
 
@@ -153,10 +157,14 @@
 
 ## 下一步（优先级排序）
 
-1. **全链路集成** — Security Agent ↔ Agent Router / Tool Gateway / API Server 连接起来
-2. **弹窗确认的 API/UI 入口** — 用户如何收到弹窗、如何确认
-3. **Agent SDK 封装** — 集成 openai-agents-python 预设 Agent
-4. **Transform Agent 稳定性测试** — 不同输入生成 TARL 正确率验证
-5. **Workflow Engine TARL 接入** — match() 用 KV 前缀索引替代正则
-6. **Security Agent TARL 接入** — `cmd:` 前缀直接映射策略规则
-7. **SonarQube 重扫** — 确认修复效果，无回归
+1. 🔴 **Agent SDK 封装** — 集成 openai-agents-python 作为底层，在其上包装 Tool Gateway + Security Agent 权限层（当前 `src/agent-sdk/` 是空目录，是最关键的未完成项）
+2. 🔴 **上下文窗口管理** — 复刻 Pydantic AI Harness 的 Compaction 模式：工具输出截断 + 滑动窗口。当前无任何上下文控制，长期运行 Agent 必然 token 爆炸
+3. 🟡 **全链路集成** — Security Agent ↔ Agent Router / Tool Gateway / API Server 连接起来
+4. 🟡 **可观测性基座** — LLM 调用封装 + Token 计数 + 结构化日志（管道到 disk/
+5. 🟡 **凭据脱敏** — Tool Gateway 执行前扫描 API key/token 模式，替换为 `***`
+6. 🟡 **弹窗确认的 API/UI 入口** — 用户如何收到弹窗、如何确认
+7. 🟢 **Transform Agent 稳定性测试** — 不同输入生成 TARL 正确率验证（含 #8.5 confidence 字段）
+8. 🟢 **Workflow Engine TARL 接入** — match() 用 KV 前缀索引替代正则
+9. 🟢 **Security Agent TARL 接入** — `cmd:` 前缀直接映射策略规则
+10. 🟢 **Policy Engine 学习模式** — Behavior Monitor 观察→动态生成 allow ruleset
+11. 🟢 **SonarQube 重扫** — 确认修复效果，无回归
