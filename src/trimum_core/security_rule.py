@@ -1,7 +1,7 @@
-"""Security Agent — 弹性沙箱的决策中心。
+"""Security Rule — 弹性沙箱的决策规则引擎。
 
 职责：
-1. **跨 Agent/工具访问决策** — 任何跨边界的请求，Security Agent 决定放行/弹窗/拒绝
+1. **跨 Agent/工具访问决策** — 任何跨边界的请求，Security Rule 决定放行/弹窗/拒绝
 2. **行为基线异常检测** — 调用 BehaviorMonitor 判断当前操作是否偏离常态
 3. **资源溢出防护** — Agent 之间互相屏蔽（哪怕在 Docker 内）
 4. **Landlock 接口** — 文件系统权限（Phase 4 存根）
@@ -52,7 +52,7 @@ class DecisionResult:
         }
 
 
-class SecurityAgent:
+class SecurityRule:
     """弹性沙箱的决策中心.
 
     与其他组件的关系:

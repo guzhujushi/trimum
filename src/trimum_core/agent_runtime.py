@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from .agent_socket import (
     AgentSocketServer,
@@ -34,16 +34,19 @@ class AgentRuntime:
     - stop_agent(agent_id): sends stop signal via Socket, cleans up
     - Publishes status changes to Event Bus
     - Listens on Event Bus for signals from Workflow Engine
+    - Registers agent session in ContextManager on startup
     """
 
     def __init__(
         self,
         socket_path: str,
         event_bus: EventBus,
+        context_manager: Optional[Any] = None,
         max_agents: int = 10,
     ) -> None:
         self._socket_server = AgentSocketServer(socket_path)
         self._event_bus = event_bus
+        self._context_manager = context_manager
         self._max_agents = max_agents
         self._agents: dict[str, asyncio.subprocess.Process] = {}
         self._stopped = False
@@ -112,6 +115,14 @@ class AgentRuntime:
 
         # For now: record without actually spawning (Phase 3 stub)
         self._agents[agent_id] = None  # placeholder for Process ref
+
+        # Register session in ContextManager (if available)
+        if self._context_manager is not None:
+            try:
+                metadata = {"agent_type": agent_type, "config": config or {}}
+                await self._context_manager.register_session(agent_id, agent_type, metadata=metadata)
+            except Exception:
+                log.warning("Failed to register session for %s", agent_id)
 
         # Publish status to Event Bus
         await self._event_bus.emit_event(

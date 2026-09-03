@@ -296,9 +296,10 @@ class ToolGateway:
         tool_def = self.tools.get(request.tool.value)
 
         # ------------------------------------------------------------------
-        # Layer 1: Global Policy Check
+        # Layer 1: Global Policy Check (with source_type awareness)
         # ------------------------------------------------------------------
-        risk, action, reason = self.policy.evaluate(cmd_str)
+        source_type = getattr(request, "source_type", None)
+        risk, action, reason = self.policy.evaluate(cmd_str, source_type=source_type)
 
         if action == Action.DENY:
             logger.warning(

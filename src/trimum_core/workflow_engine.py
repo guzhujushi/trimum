@@ -1,4 +1,4 @@
-﻿"""Workflow Engine — DAG 执行器（节点/边/状态机）.
+"""Workflow Engine — DAG 执行器（节点/边/状态机）.
 
 职责:
 - 定义 Workflow / Node / Edge 数据结构 (Pydantic)
@@ -17,6 +17,9 @@ from enum import Enum
 from typing import Any, Awaitable, Callable, Optional
 
 from pydantic import BaseModel, Field
+
+import yaml
+from pathlib import Path
 
 from .event_bus import EventBus
 from .models import AgentTask
@@ -802,7 +805,79 @@ class WorkflowDefV2(BaseModel):
     steps: list[WorkflowStep] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
 
-    def to_workflow_definition(self) -> WorkflowDefinition:
+    # ------------------------------------------------------------------
+    # 文件化加载
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def load_yaml(path: str | Path) -> "WorkflowDefV2":
+        """从 YAML 文件加载 WorkflowDefV2。
+
+        YAML 格式示例（与 Pydantic 字段一一对应）：
+
+        .. code-block:: yaml
+
+            id: blog-deploy
+            name: 博客部署
+            description: Git push → SSH restart → Health check
+            steps:
+              - trigger:
+                  event_type: workflow.request
+                  condition: 'payload.get("action") == "deploy"'
+                execute:
+                  - agent_type: shell
+                    instruction: git push origin main
+                    timeout_seconds: 30
+                  - agent_type: shell
+                    instruction: ssh root@server "systemctl restart blog"
+                    timeout_seconds: 10
+            config:
+              notify_on_failure: true
+        """
+        with open(str(path), encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        if not isinstance(data, dict):
+            raise ValueError(f"Invalid workflow YAML: {path}")
+        return WorkflowDefV2(**data)
+
+    @staticmethod
+    def load_from_dir(base_path: str | None = None) -> list["WorkflowDefV2"]:
+        """扫描目录并加载所有 workflow.yaml / workflow.yml 文件。
+
+        目录结构:
+          <base_path>/<name>/workflow.yaml
+          <base_path>/<name>/workflow.yml
+
+        Returns:
+            加载成功的 WorkflowDefV2 列表。加载失败的会打印警告但不会中断。
+        """
+        if base_path is None:
+            base_path = str(Path.home() / ".trimum" / "workflows")
+
+        workflows_dir = Path(base_path)
+        if not workflows_dir.is_dir():
+            return []
+
+        result: list[WorkflowDefV2] = []
+        for entry in sorted(workflows_dir.iterdir()):
+            if not entry.is_dir():
+                continue
+            for yml_name in ("workflow.yaml", "workflow.yml"):
+                yml_path = entry / yml_name
+                if yml_path.is_file():
+                    try:
+                        wf = WorkflowDefV2.load_yaml(yml_path)
+                        if not wf.id:
+                            wf.id = entry.name
+                        result.append(wf)
+                    except Exception as e:
+                        import logging
+                        logging.getLogger("trimum_core.workflow_engine").warning(
+                            "Failed to load workflow from %s: %s", yml_path, e
+                        )
+                    break  # 只加载第一个找到的
+
+        return result
         """Convert v2 format to classic Node/Edge WorkflowDefinition.
 
         Each step becomes a node. Steps execute sequentially.
@@ -837,7 +912,33 @@ class WorkflowDefV2(BaseModel):
             config=self.config,
         )
 
-    async def start_v2(
+    
+    def to_workflow_definition(self) -> "WorkflowDefinition":
+        """Convert v2 format to classic Node/Edge WorkflowDefinition.
+        Each step becomes a node. Steps execute sequentially.
+        """
+        from .workflow_engine import WorkflowDefinition, NodeDefinition, EdgeDefinition
+        nodes: list[NodeDefinition] = []
+        edges: list[EdgeDefinition] = []
+        prev_id: str | None = None
+        for i, step in enumerate(self.steps):
+            for j, task in enumerate(step.execute):
+                node_id = f"step_{i}_task_{j}"
+                nodes.append(NodeDefinition(
+                    id=node_id,
+                    label=f"{step.trigger.event_type}:{task.agent_type}",
+                    handler=task.agent_type,
+                    config=task.config,
+                    timeout_seconds=task.timeout_seconds,
+                ))
+                if prev_id:
+                    edges.append(EdgeDefinition(source=prev_id, target=node_id))
+                prev_id = node_id
+        return WorkflowDefinition(
+            id=self.id, name=self.name, description=self.description,
+            nodes=nodes, edges=edges, config=self.config,
+        )
+async def start_v2(
         self,
         engine: "WorkflowEngine",
         context: dict[str, Any] | None = None,

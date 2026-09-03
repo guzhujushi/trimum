@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from .models import RiskLevel, Action
+from .models import RiskLevel, Action, SourceType
 from .config import PolicyLoader
 
 
@@ -22,11 +22,32 @@ class PolicyEngine:
         """Reload policy rules from YAML file."""
         self._rules = self._loader.load()
 
-    def evaluate(self, command: str) -> tuple[RiskLevel, Action, str]:
+    def evaluate(
+        self,
+        command: str,
+        source_type: SourceType | None = None,
+    ) -> tuple[RiskLevel, Action, str]:
         """Evaluate a command string and return (risk, action, reason).
 
-        Iterates rules in order, returns first match.
+        Args:
+            command: The command string to evaluate.
+            source_type: Optional source type indicator. When set, rules
+                with a ``source`` filter are matched first. For example,
+                an AI-originated ``rm`` can be blocked while human-originated
+                is allowed.
+
+        Rules are iterated in order; the first match wins.
         If no rule matches, defaults to (medium, confirm).
+
+        Source-aware rules in YAML:
+            patterns:
+              - pattern: "rm"
+                source: ai          # 只有 AI 发的 rm 才匹配
+                action: deny
+              - pattern: "rm"
+                source: human        # 人类发的 rm 只需确认
+                risk: high
+                action: confirm
         """
         cmd_normalized = self._normalize_command(command)
 
@@ -34,20 +55,32 @@ class PolicyEngine:
             pattern = rule.get("pattern", "")
             if not pattern:
                 continue
-            if re.search(pattern, cmd_normalized, re.IGNORECASE):
-                risk_str = rule.get("risk", "medium")
-                action_str = rule.get("action", "confirm")
-                try:
-                    risk = RiskLevel(risk_str)
-                except ValueError:
-                    risk = RiskLevel.MEDIUM
-                try:
-                    action = Action(action_str)
-                except ValueError:
-                    action = Action.CONFIRM
-                return risk, action, f"Matched rule: {pattern}"
+            if not re.search(pattern, cmd_normalized, re.IGNORECASE):
+                continue
 
-        # No match → default
+            # Check source_type filter (if present in rule)
+            rule_source = rule.get("source", None)
+            if rule_source is not None and source_type is not None:
+                # rule has a source filter AND we have a source_type
+                # — only match if they match
+                if rule_source != source_type.value:
+                    continue
+
+            risk_str = rule.get("risk", "medium")
+            action_str = rule.get("action", "confirm")
+            try:
+                risk = RiskLevel(risk_str)
+            except ValueError:
+                risk = RiskLevel.MEDIUM
+            try:
+                action = Action(action_str)
+            except ValueError:
+                action = Action.CONFIRM
+            return risk, action, f"Matched rule: {pattern} (src={source_type.value if source_type else 'none'})"
+
+        # No match → default (respect source_type for stricter default)
+        if source_type == SourceType.AI:
+            return RiskLevel.MEDIUM, Action.CONFIRM, "No rule matched, AI default"
         return RiskLevel.MEDIUM, Action.CONFIRM, "No rule matched, default"
 
     def evaluate_args(self, args: list[str]) -> tuple[RiskLevel, Action, str]:

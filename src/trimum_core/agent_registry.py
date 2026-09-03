@@ -10,6 +10,12 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from trimum_core.agent_cert import (
+    CertTrustLevel,
+    check_agent_trust,
+    confirm_and_trust,
+    ensure_cert_dirs,
+)
 from trimum_core.models import AgentManifest
 
 # Try json5 for comment support
@@ -53,10 +59,26 @@ class AgentRegistry:
 
         If an agent with the same name already exists, the previous entry
         is replaced and all capability index entries for it are rebuilt.
+
+        Certificate check:
+        - Official cert → automatic trust, no prompt
+        - Self-signed cert (same machine) → automatic trust
+        - No cert → calls confirm_and_trust (stub, pending Phase 6 UI)
         """
         # Remove old capability entries if re-registering
         if manifest.name in self._agents:
             self._remove_from_capability_index(manifest.name)
+
+        # ── 证书校验 ──────────────────────────────────
+        ensure_cert_dirs()
+        trust_level, _cert = check_agent_trust(manifest.name)
+        if trust_level == CertTrustLevel.CONFIRM:
+            entry_path = manifest.entry or ""
+            if not confirm_and_trust(manifest.name, entry_path):
+                import logging
+                log = logging.getLogger("trimum_core.agent_registry")
+                log.warning("cert.registration_rejected", agent=manifest.name)
+                return  # 用户拒绝，不注册
 
         self._agents[manifest.name] = manifest
         self._add_to_capability_index(manifest)

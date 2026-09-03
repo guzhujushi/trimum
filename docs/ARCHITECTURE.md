@@ -104,12 +104,18 @@
 | 子模块 | 职责 | 状态 |
 |---|---|---|
 | Agent Manager | Agent 进程生命周期（spawn/destroy/restart） | ✅ |
+| Agent Runtime | Task 执行器（Task → AgentProcess → Result） | ✅ |
 | Event Bus | 异步 pub/sub 系统事件通信 | ✅ |
-| Context Manager | SQLite 持久化上下文 | ✅ |
-| Policy Engine | YAML 规则匹配 + Risk Level 评估 | ✅ |
-| Tool Gateway | 工具注册/发现 + Agent 权限感知 | ✅（重构后） |
-| API Server | FastAPI HTTP 接口 | ✅ |
+| Context Manager | SQLite 持久化上下文 + FTS5 全文搜索 | ✅ |
+| Memory Bridge | Event Bus → ContextManager 桥接（memory.* 事件） | ✅ |
+| Policy Engine | YAML 规则匹配 + Risk Level 评估 + source_type 过滤 | ✅ |
+| Security Rule | 三层沙箱模式（硬性/弹性/智能）| ✅ |
+| Behavior Monitor | 行为基线 + 事件记录 + 偏离度检测 | ✅ |
+| System Monitor | 硬件采集 + 阈值告警（CPU/内存/磁盘/网络）| ✅ |
+| Tool Gateway | 工具注册/发现 + Agent 权限感知 + 11 Dispatchers | ✅（v2） |
+| API Server | FastAPI HTTP 接口 + SSE 流 | ✅ |
 | IPC Handler | JSON-RPC over Unix Socket | ✅ |
+| Agent Socket | Unix Socket Server + Client（双向通信）| ✅ |
 | Logger | structlog 结构化日志 | ✅ |
 
 ### 2.2 Event Bus
@@ -262,18 +268,32 @@ SQLite 直接记忆 → sqlite-vec 向量扩展 → chroma
 
 ```
 ~/.trimum/
-├── agents/           # Agent 注册（目录 + manifest）
-│   ├── ai-shell/
-│   ├── system-healthy/
-│   └── theme-mgr/
-├── tools/            # 可执行工具
-│   ├── shell
-│   ├── git
-│   └── docker
-├── workflows/        # 预装工作流
-│   ├── system-update.yaml
-│   └── daily-check.yaml
-└── env               # API Key 统一管理
+├── agents/           # Agent 注册（目录 + agent.json5 + AGENT.md + main.py）
+│   ├── planner-agent/
+│   ├── transform-agent/
+│   ├── behavior-monitor/
+│   ├── security-rule/
+│   ├── system-monitor/
+│   └── workflow-listener/
+├── certs/            # 证书索引
+│   ├── official/     # 官方证书（拷入即用）
+│   ├── trusted/      # 用户签发证书
+│   └── pending/      # 待批准
+├── tools/            # 可执行工具（tool.json5 + main.py）
+│   ├── custom/
+│   ├── env/
+│   ├── file/
+│   ├── git/
+│   ├── http/
+│   ├── knowledge/
+│   ├── mcp/
+│   ├── notification/
+│   ├── process/
+│   ├── shell/
+│   └── system/
+└── workflows/        # 预装工作流（workflow.yaml）
+    ├── blog-deploy/
+    └── daily-check/
 ```
 
 ---

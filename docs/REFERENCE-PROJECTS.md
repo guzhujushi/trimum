@@ -404,6 +404,23 @@
 | **agronholm/apscheduler** | 7,617 | Python 任务调度库。Phase 2 daemon 内部任务调度 |
 | agronholm/sqlalchemy | 20,000+ | 数据库 ORM，Phase 2 考虑引入（atuin Schema 存储） |
 
+### PenguinHarness
+
+| 属性 | 值 |
+|---|---|
+| 类型 | AI Agent 运行时 Harness |
+| 关联 | trimum 参考 —— Harness Runtime 层设计 |
+
+**作用**：PenguinHarness 是 trimum 架构底层的 Harness Runtime 参考，涵盖 Event Bus（可回溯）、MemoryBridge、三重心智（Agent/Project/Global）、ExperienceLearner 等运行时组件。在 trimum 的架构中，Harness 层承载 Agent 进程生命周期管理、事件驱动的上下文桥接、以及经验学习闭环。
+
+**可借鉴**：
+- Event Bus 回溯 + 失败事件驱动的经验提炼机制
+- 三重心智存储的分层策略（私有/项目/全局）
+- 轻量级 Agent 进程管理与资源隔离
+- 经验数据库的自动维护与遗忘策略
+
+**定位**：这不是外部开源项目，而是 trimum 自身 Harness Runtime 层的设计概念参考名。
+
 ### 未找到成熟开源的项目（确认原创方向）
 
 以下方向 GitHub 上无成熟项目（全是 < 20⭐）：

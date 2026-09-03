@@ -8,6 +8,16 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
+class SourceType(str, Enum):
+    """流量源类型 — AI Agent、人类、Workflow。"""
+
+    HUMAN = "human"
+    AI = "ai"
+    WORKFLOW = "workflow"
+    SYSTEM = "system"
+    UNKNOWN = "unknown"
+
+
 class RiskLevel(str, Enum):
     """Risk level for a tool/command execution."""
 
@@ -75,6 +85,7 @@ class ExecuteRequest(BaseModel):
     timeout_seconds: float = 30.0
     env: dict[str, str] = Field(default_factory=dict)
     cwd: Optional[str] = None
+    source_type: SourceType = SourceType.UNKNOWN
 
 
 class ExecuteResponse(BaseModel):
@@ -143,6 +154,7 @@ class SystemEvent(BaseModel):
 
     event_type: str  # e.g. "agent.started", "tool.executed", "policy.denied"
     source: str  # e.g. "agent.healthy", "core"
+    source_type: SourceType = SourceType.UNKNOWN
     severity: EventSeverity = EventSeverity.INFO
     payload: dict[str, Any] = Field(default_factory=dict)
     timestamp: Optional[float] = None

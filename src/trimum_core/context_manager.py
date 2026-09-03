@@ -122,6 +122,19 @@ class ContextManager:
             """,
             (agent_id, namespace, key, json.dumps(value, ensure_ascii=False), now, expires_at),
         )
+
+        # Sync FTS5 index (FTS5 virtual tables don't support ON CONFLICT)
+        try:
+            await self._conn.execute(
+                "DELETE FROM context_fts WHERE agent_id = ? AND namespace = ? AND key = ?",
+                (agent_id, namespace, key),
+            )
+            await self._conn.execute(
+                "INSERT INTO context_fts (agent_id, namespace, key, value) VALUES (?, ?, ?, ?)",
+                (agent_id, namespace, key, json.dumps(value, ensure_ascii=False)),
+            )
+        except Exception:
+            pass
         await self._conn.commit()
 
     async def get(
@@ -164,6 +177,10 @@ class ContextManager:
         """Delete a single context entry."""
         await self._conn.execute(
             "DELETE FROM context WHERE agent_id = ? AND namespace = ? AND key = ?",
+            (agent_id, namespace, key),
+        )
+        await self._conn.execute(
+            "DELETE FROM context_fts WHERE agent_id = ? AND namespace = ? AND key = ?",
             (agent_id, namespace, key),
         )
         await self._conn.commit()

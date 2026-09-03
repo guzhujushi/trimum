@@ -6,8 +6,9 @@ from trimum_core.agent_router import AgentRouter, RouteEntry
 from trimum_core.agent_runtime import AgentRuntime
 from trimum_core.agent_socket import AgentSocketServer, AgentSocketClient, SocketMessage
 from trimum_core.behavior_monitor import BehaviorMonitor
+from trimum_core.memory_bridge import MemoryBridge
 from trimum_core.planner_agent import PlannerAgent
-from trimum_core.security_agent import SecurityAgent, DecisionResult
+from trimum_core.security_rule import SecurityRule, DecisionResult
 from trimum_core.system_monitor import SystemMonitor
 from trimum_core.models import (
     Action,
@@ -75,6 +76,7 @@ __all__ = [
     "AgentTaskResult",
     "BehaviorMonitor",
     "ContextEntry",
+    "MemoryBridge",
     "CustomDispatcher",
     "DispatcherRegistry",
     "EdgeDefinition",
@@ -106,8 +108,8 @@ __all__ = [
     "SocketMessage",
     "SystemEvent",
     "SystemMonitor",
-    "SecurityAgent",
     "DecisionResult",
+    "SecurityRule",  # 注意：是 SecurityRule 类，\_\_all\_\_ 列出实际类名
     "ToolType",
     "WorkflowDefinition",
     "WorkflowDefV2",

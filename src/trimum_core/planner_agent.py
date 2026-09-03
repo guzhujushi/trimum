@@ -1,21 +1,21 @@
-"""Planner Agent 鈥?Runtime 鍐呭敮涓€鍚?LLM 鏅鸿兘鐨勭粍浠?
+"""Planner Agent — 自然语言 → Workflow YAML 智能分解
 
-鑱岃矗锛堟寜闇€鍚姩锛岄潪甯搁┗锛?
-1. 鎺ユ敹鏃犲尮閰?workflow 鐨勬柊璇锋眰/鑷劧璇█鎰忓浘
-2. LLM 鎷嗚В鎰忓浘 鈫?缁撴瀯鍖?WorkflowDefinition
-3. 鍐欏叆 YAML 鍥哄寲锛垀/.trimum/workflows/<name>.yaml锛?4. 瑙﹀彂 WorkflowEngine 鎵ц
-5. 澶辫触鏃?emit event.planner.failed
+Planner Agent 将用户的自然语言请求分解为可执行的 Workflow：
+1. 调用 LLM（通过 Agent SDK）分析请求并生成结构化 Workflow JSON
+2. 将 JSON 转换为 WorkflowDefinition 并保存为 YAML（~/.trimum/workflows/<name>.yaml）
+3. 交给 WorkflowEngine 执行
+5. 失败时 emit event.planner.failed
 
-璁捐鍘熷垯:
-- 杞婚噺: 鍙?imports models + event_bus, 涓嶄緷璧栧叾浠栨ā鍧?- 鏈夌姸鎬? 姣忔 run() 鐙珛瀹炰緥, 涓嶅瓨璺ㄨ姹傜姸鎬?- workflow 鎸佷箙鍖栦娇鐢?YAML:
-  - 鍙, 鍙墜鍔ㄧ紪杈? 鍙増鏈帶鍒?  - WorkflowEngine.run() 鎺ュ彈 WorkflowDefinition 瀵硅薄
-  - ~/.trimum/workflows/ 鏄敞鍐岀洰褰?"""
+架构要点：
+- 使用 Agent SDK（TrimumAgent）替代裸 urllib，支持 per-agent 模型配置
+- 输出为 YAML 文件，由 WorkflowEngine 加载执行
+- 支持 LLM 回落（降级到默认模型）
+"""
 
 from __future__ import annotations
 
 import json
 import os
-import time
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -34,18 +34,42 @@ from .workflow_engine import (
 )
 from .event_bus import EventBus, NAMESPACE_EVENT, NAMESPACE_TASK
 
-# 鈹€鈹€ 榛樿鐩綍 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+# ---------------------------------------------------------------------------
+# Agent SDK — 可选导入 (Planner 特有)
+# ---------------------------------------------------------------------------
+
+try:
+    from pydantic_ai import Agent as PydanticAgent
+    from agent_sdk import TrimumAgent
+
+    _HAS_AGENT_SDK = True
+except ImportError:
+    _HAS_AGENT_SDK = False
+
+
+# ---------------------------------------------------------------------------
+# 常量
+# ---------------------------------------------------------------------------
 
 DEFAULT_WORKFLOW_DIR = Path.home() / ".trimum" / "workflows"
 
-# 鈹€鈹€ LLM 璋冪敤鍑芥暟 (鏃犲閮?SDK 渚濊禆) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+# Planner Agent 专属环境变量前缀
+PLANNER_ENV_MODEL = "PLANNER_LLM_MODEL"
+PLANNER_ENV_BASE_URL = "PLANNER_LLM_BASE_URL"
+PLANNER_ENV_API_KEY = "PLANNER_LLM_API_KEY"
 
+# 全局回落
+GLOBAL_ENV_MODEL = "TRIMUM_LLM_MODEL"
+GLOBAL_ENV_BASE_URL = "TRIMUM_LLM_BASE_URL"
+GLOBAL_ENV_API_KEY = "TRIMUM_LLM_API_KEY"
+
+# ── urllib 回落函数（当 Agent SDK 不可用时） ──────────────────
 
 import urllib.error
 import urllib.request
 
 
-def _call_llm_api(
+def _call_llm_api_fallback(
     system_prompt: str,
     user_prompt: str,
     *,
@@ -54,27 +78,14 @@ def _call_llm_api(
     api_key: str | None = None,
     timeout: float = 30.0,
 ) -> str:
-    """璋冪敤 OpenAI 鍏煎 API (鏃犲閮?SDK 渚濊禆).
-
-    鍙傛暟:
-        system_prompt: 绯荤粺鎻愮ず璇?        user_prompt: 鐢ㄦ埛璇锋眰
-        model: 妯″瀷鍚? 榛樿浠?TRIMUM_LLM_MODEL 鐜鍙橀噺璇诲彇
-        base_url: API 鍦板潃, 榛樿 TRIMUM_LLM_BASE_URL
-        api_key: API Key, 榛樿 TRIMUM_LLM_API_KEY
-        timeout: 璇锋眰瓒呮椂绉掓暟
-
-    杩斿洖:
-        LLM 鍝嶅簲鐨?content 瀛楃涓?
-    鎶涘嚭:
-        RuntimeError: 璇锋眰澶辫触鎴栦笉鍚堟硶鍝嶅簲
-    """
-    model = model or os.environ.get("TRIMUM_LLM_MODEL", "deepseek-chat")
-    base_url = base_url or os.environ.get("TRIMUM_LLM_BASE_URL",
+    """用 urllib 直接调用 OpenAI 兼容 API（Agent SDK 不可用时的回落）。"""
+    model = model or os.environ.get(PLANNER_ENV_MODEL) or os.environ.get(GLOBAL_ENV_MODEL, "deepseek-chat")
+    base_url = base_url or os.environ.get(PLANNER_ENV_BASE_URL) or os.environ.get(GLOBAL_ENV_BASE_URL,
                                           "https://models.sjtu.edu.cn/api/v1")
-    api_key = api_key or os.environ.get("TRIMUM_LLM_API_KEY", "")
+    api_key = api_key or os.environ.get(PLANNER_ENV_API_KEY) or os.environ.get(GLOBAL_ENV_API_KEY, "")
 
     if not api_key:
-        raise RuntimeError("PlannerAgent: TRIMUM_LLM_API_KEY 未设置")
+        raise RuntimeError("PlannerAgent: API Key 未设置 (检查 PLANNER_LLM_API_KEY 或 TRIMUM_LLM_API_KEY)")
 
     url = f"{base_url.rstrip('/')}/chat/completions"
     payload = json.dumps({
@@ -105,40 +116,41 @@ def _call_llm_api(
             f"LLM API HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:500]}"
         ) from e
     except Exception as e:
-        raise RuntimeError(f"LLM API 璋冪敤澶辫触: {e}") from e
+        raise RuntimeError(f"LLM API 调用失败: {e}") from e
 
     choices = body.get("choices", [])
     if not choices:
-        raise RuntimeError(f"LLM API 杩斿洖绌?choices: {json.dumps(body, ensure_ascii=False)[:300]}")
+        raise RuntimeError(f"LLM API 返回空 choices: {json.dumps(body, ensure_ascii=False)[:300]}")
 
     content = choices[0].get("message", {}).get("content", "")
     if not content:
-        raise RuntimeError("LLM API 杩斿洖绌?content")
+        raise RuntimeError("LLM API 返回空 content")
 
     return content
 
 
-# 鈹€鈹€ 绯荤粺鎻愮ず璇嶆ā鏉?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+# ---------------------------------------------------------------------------
+# LLM System Prompt
+# ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT_TEMPLATE = """浣犳槸涓€涓?AI Agent 杩愯鏃?(trimum) 鐨?Planner Agent銆?浣犵殑鑱岃矗鏄皢鐢ㄦ埛鐨勮嚜鐒惰瑷€璇锋眰鎷嗚В涓哄彲鎵ц鐨?Workflow銆?
-## 鍙敤鑳藉姏 (Agent 娉ㄥ唽琛ㄦ彁渚涚殑 capabilities)
+SYSTEM_PROMPT_TEMPLATE = """你是一个 AI Agent 运行时 (trimum) 的 Planner Agent，负责将用户的自然语言请求分解为可执行的 Workflow。
+## 可用能力 (Agent 可调用的 capabilities)
 {capabilities_str}
 
-## 杈撳嚭鏍煎紡
-杩斿洖涓€涓?JSON 瀵硅薄锛屼笉瑕佸寘鍚换浣曞叾浠栨枃瀛楋細
-
+## 输出格式
+你必须输出 JSON 格式的 WorkflowDefinition，包含 nodes 和 edges：
 ```json
 {{
-  "workflow_name": "绠€鐭嫳鏂囧悕, 鐢ㄤ笅鍒掔嚎鍒嗛殧",
-  "description": "涓枃鎻忚堪, 璇存槑杩欎釜 workflow 鍋氫粈涔?,
+  "workflow_name": "简短描述, 用英文小写加下划线",
+  "description": "详细描述, 说明这个 workflow 做什么",
   "nodes": [
     {{
-      "id": "姝ラ1_id",
-      "label": "姝ラ涓枃鏍囩",
-      "handler": "capability 鍚嶇О, 濡?system.monitor.disk",
+      "id": "步骤_id",
+      "label": "步骤的简短标签",
+      "handler": "capability 名称, 如 system.monitor.disk",
       "config": {{
-        "command": "闇€瑕佹墽琛岀殑 shell 鍛戒护 (濡傛灉 handler 鏄?shell.exec)",
-        "message": "闇€瑕佸彂閫佺殑娑堟伅 (濡傛灉 handler 鏄?agent.notify)",
+        "command": "如果是 shell 命令 (适用于 handler == shell.exec)",
+        "message": "如果是通知消息 (适用于 handler == agent.notify)",
         ...
       }},
       "timeout_seconds": 60,
@@ -147,8 +159,8 @@ SYSTEM_PROMPT_TEMPLATE = """浣犳槸涓€涓?AI Agent 杩愯鏃?(trimum) �
   ],
   "edges": [
     {{
-      "source": "鍓嶇疆姝ラ_id",
-      "target": "鍚庣画姝ラ_id",
+      "source": "上游节点id",
+      "target": "下游节点id",
       "condition": {{
         "type": "always"
       }}
@@ -157,27 +169,34 @@ SYSTEM_PROMPT_TEMPLATE = """浣犳槸涓€涓?AI Agent 杩愯鏃?(trimum) �
 }}
 ```
 
-## 鏉′欢绫诲瀷璇存槑
-- "always": 鍓嶇疆瀹屾垚灏辩珛鍗虫墽琛?(榛樿)
-- "on_complete": 鍓嶇疆鎴愬姛瀹屾垚鎵嶆墽琛?- "on_fail": 鍓嶇疆澶辫触鎵嶆墽琛?(闄嶇骇/澶囬€?
-- "expression": 鑷畾涔夎〃杈惧紡, 濡?{{"type": "expression", "expression": "result.get('usage', 0) > 80"}}
+## 条件类型
+- "always": 无条件串联（默认）
+- "on_complete": 上游完成后自动触发下游
+- "on_fail": 上游失败时触发下游（错误处理）
+- "expression": 条件表达式, 如 {{"type": "expression", "expression": "result.get('usage', 0) > 80"}}
 
-## 瑙勫垯
-1. 姝ラ鎸夋墽琛岄『搴忔帓鍒?(浠?nodes[0] 鍒?nodes[n-1])
-2. 姣忎釜姝ラ鐨?handler 蹇呴』浠庡彲鐢ㄨ兘鍔涗腑閫夋嫨
-3. 浣跨敤 "always" 鏉′欢杩炴帴椤哄簭姝ラ
-4. 瀵逛簬妫€鏌ョ被姝ラ, 璁剧疆 timeout_seconds 涓?30
-5. 瀵逛簬绯荤粺鎿嶄綔绫绘楠? 璁剧疆 timeout_seconds 涓?120
-6. 鍗遍櫓鎿嶄綔娣诲姞 retry_count=0 (涓嶉噸璇?
-7. 濡傛灉璇锋眰鏃犳硶鎷嗚В, 杩斿洖: {{"error": "鏃犳硶鐞嗚В姝よ姹?}}
+## 规则
+1. 节点按执行顺序排列 (nodes[0] 到 nodes[n-1])
+2. 边连接节点的顺序，使用 handler 中定义的能力
+3. 默认边类型为 "always" 表示无条件顺序执行
+4. 每个独立任务使用单独节点，不使用折线/合并节点
+5. timeout_seconds 默认为 30
+6. 复杂任务 timeout_seconds 默认为 120
+7. 除非明确说明，retry_count=0 (不重试)
+8. 执行失败时，返回 {{"error": "失败原因描述"}}
 """
 
 
-class PlannerAgent:
-    """Planner Agent.
+# ---------------------------------------------------------------------------
+# PlannerAgent
+# ---------------------------------------------------------------------------
 
-    闈炴寔涔呭寲缁勪欢 鈥?姣忔璇锋眰鍒涘缓鏂板疄渚?
-    閫氳繃 Event Bus 涓?Runtime 鍏朵粬閮ㄥ垎閫氫俊.
+
+class PlannerAgent:
+    """Planner Agent — 自然语言 → Workflow YAML。
+
+    接收用户自然语言请求，通过 LLM 分解并生成 WorkflowDefinition，
+    保存为 YAML 文件。通过 Event Bus 与 Runtime 通信。
     """
 
     def __init__(
@@ -186,35 +205,82 @@ class PlannerAgent:
         *,
         workflow_dir: str | Path | None = None,
         available_capabilities: list[str] | None = None,
+        # LLM 配置（Planner 专属，覆盖全局）
         llm_model: str | None = None,
         llm_base_url: str | None = None,
         llm_api_key: str | None = None,
+        # Agent SDK 集成
+        use_agent_sdk: bool = True,
     ) -> None:
         self._bus = event_bus
         self._workflow_dir = Path(workflow_dir or DEFAULT_WORKFLOW_DIR)
         self._available_capabilities = available_capabilities or ["shell.exec", "system.monitor"]
-        self._llm_model = llm_model
-        self._llm_base_url = llm_base_url
-        self._llm_api_key = llm_api_key
+        self._use_agent_sdk = use_agent_sdk and _HAS_AGENT_SDK
 
-        # 纭繚鐩綍瀛樺湪
+        # Planner 专属模型配置（优先级：构造参数 > 环境变量 > 全局环境变量）
+        self._llm_kwargs: dict[str, str | None] = {
+            "model": llm_model or os.environ.get(PLANNER_ENV_MODEL) or os.environ.get(GLOBAL_ENV_MODEL),
+            "base_url": llm_base_url or os.environ.get(PLANNER_ENV_BASE_URL) or os.environ.get(GLOBAL_ENV_BASE_URL),
+            "api_key": llm_api_key or os.environ.get(PLANNER_ENV_API_KEY) or os.environ.get(GLOBAL_ENV_API_KEY),
+        }
+
+        # 初始化 Agent SDK 包装器（如果可用）
+        self._sdk_agent: TrimumAgent | None = None
+        if self._use_agent_sdk:
+            self._init_sdk_agent()
+
+        # 创建工作流目录
         self._workflow_dir.mkdir(parents=True, exist_ok=True)
 
-    # 鈹€鈹€ 鍏紑鎺ュ彛 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    # ── Agent SDK 初始化 ──────────────────────────────────
+
+    def _init_sdk_agent(self) -> None:
+        """初始化 Agent SDK 的 TrimumAgent 包装器。"""
+        if not _HAS_AGENT_SDK:
+            self._use_agent_sdk = False
+            return
+
+        model = self._llm_kwargs.get("model") or "deepseek-chat"
+
+        # 构建 Pydantic AI model 字符串
+        # 注意：pydantic_ai 需要格式如 "openai:model-name"
+        # 对于自定义 provider，我们使用 logfire 或其他方式
+        # 这里使用 pydantic_ai 的 OpenAI provider
+        if "sjtu" in str(self._llm_kwargs.get("base_url", "")):
+            model_str = f"openai:{model}"
+        else:
+            model_str = f"openai:{model}"
+
+        try:
+            base = PydanticAgent(
+                model_str,
+                system_prompt="你是一个 Planner Agent，将用户请求分解为 WorkflowDefinition。",
+            )
+            self._sdk_agent = TrimumAgent(
+                base_agent=base,
+                agent_id="planner-agent",
+                event_bus=self._bus,
+            )
+        except Exception as e:
+            print(f"[PlannerAgent] Agent SDK 初始化失败，恢复到 urllib: {e}")
+            self._use_agent_sdk = False
+            self._sdk_agent = None
+
+    # ── 核心接口 ──────────────────────────────────────────
 
     async def run(
         self,
         request: str,
         context: dict[str, Any] | None = None,
     ) -> WorkflowDefinition | None:
-        """瀹屾暣瑙勫垝娴佺▼: LLM 鎷嗚В 鈫?鍐欏叆 鈫?杩斿洖 WorkflowDefinition.
+        """分解自然语言请求 → LLM 分析 → 验证 → 保存 → 返回 WorkflowDefinition。
 
-        鍙傛暟:
-            request: 鐢ㄦ埛鑷劧璇█璇锋眰
-            context: 棰濆涓婁笅鏂?(鍙€?
+        参数:
+            request: 用户自然语言请求
+            context: 额外的上下文信息（可选）
 
-        杩斿洖:
-            WorkflowDefinition 鎴?None (澶辫触鏃?
+        返回:
+            WorkflowDefinition 或 None（失败时）
         """
         context = context or {}
         plan_id = f"plan-{uuid.uuid4().hex[:8]}"
@@ -225,18 +291,19 @@ class PlannerAgent:
         })
 
         try:
-            # 1. LLM 鎷嗚В
-            workflow_json = self._decompose_with_llm(request, context)
+            # 1. LLM 调用（优先 Agent SDK，回落 urllib）
+            workflow_json = await self._decompose_with_llm(request, context)
             if workflow_json is None:
-                raise RuntimeError("LLM 鏃犳硶鎷嗚В璇锋眰")
+                raise RuntimeError("LLM 返回空 Workflow 数据")
 
-            # 2. JSON 鈫?WorkflowDefinition
+            # 2. JSON → WorkflowDefinition
             wf_def = self._json_to_workflow(workflow_json, plan_id)
 
-            # 3. 鏍￠獙 (鍩烘湰缁撴瀯)
+            # 3. 验证
             self._validate_workflow(wf_def)
 
-            # 4. 鍐欏叆鎸佷箙鍖?            filepath = self._save_workflow(wf_def)
+            # 4. 保存 YAML
+            filepath = self._save_workflow(wf_def)
 
             await self._bus.emit_event("planner.completed", "planner_agent", {
                 "plan_id": plan_id,
@@ -254,7 +321,7 @@ class PlannerAgent:
                 "error": str(e),
             })
 
-            # 鍙︽寜鏋舵瀯鏂囨。鍙?event.planner.failed
+            # 发送 SystemEvent
             await self._bus.emit(SystemEvent(
                 event_type=f"{NAMESPACE_EVENT}planner.failed",
                 source="planner_agent",
@@ -268,41 +335,71 @@ class PlannerAgent:
 
             return None
 
-    # 鈹€鈹€ LLM 鎷嗚В 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    # ── LLM 调用 ──────────────────────────────────────────
 
-    def _decompose_with_llm(
+    async def _decompose_with_llm(
         self,
         request: str,
         context: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """璋冪敤 LLM 灏嗚嚜鐒惰瑷€璇锋眰鎷嗚В涓虹粨鏋勫寲 workflow JSON."""
+        """调用 LLM 将自然语言分解为 workflow JSON。
+
+        优先使用 Agent SDK（如果可用），回落使用 urllib。
+        """
         caps_str = "\n".join(f"- {c}" for c in self._available_capabilities)
         system_prompt = SYSTEM_PROMPT_TEMPLATE.format(capabilities_str=caps_str)
 
         context_str = ""
         if context:
-            context_str = "\n## 棰濆涓婁笅鏂嘰n" + json.dumps(context, ensure_ascii=False, indent=2)
+            context_str = "\n## 额外上下文\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
-        user_prompt = f"璇锋媶瑙ｄ互涓嬭姹備负 Workflow:\n\n{request}{context_str}"
+        user_prompt = f"请为以下请求创建 Workflow:\n\n{request}{context_str}"
 
+        if self._use_agent_sdk and self._sdk_agent is not None:
+            return await self._decompose_via_sdk(system_prompt, user_prompt)
+        else:
+            return self._decompose_via_urllib(system_prompt, user_prompt)
+
+    async def _decompose_via_sdk(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> dict[str, Any] | None:
+        """通过 Agent SDK 调用 LLM。"""
         try:
-            raw = _call_llm_api(
+            # 构建完整 prompt（system + user 合并到 TrimumAgent 的 run）
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            result = self._sdk_agent.run_sync(full_prompt)
+            raw = result.data if hasattr(result, "data") else str(result)
+        except Exception as e:
+            print(f"[PlannerAgent] Agent SDK 调用失败，回落到 urllib: {e}")
+            return self._decompose_via_urllib(system_prompt, user_prompt)
+
+        return self._extract_json(raw)
+
+    def _decompose_via_urllib(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> dict[str, Any] | None:
+        """通过 urllib 直接调用 LLM API（回落方案）。"""
+        try:
+            raw = _call_llm_api_fallback(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                model=self._llm_model,
-                base_url=self._llm_base_url,
-                api_key=self._llm_api_key,
+                model=self._llm_kwargs.get("model"),
+                base_url=self._llm_kwargs.get("base_url"),
+                api_key=self._llm_kwargs.get("api_key"),
             )
         except RuntimeError as e:
-            print(f"[PlannerAgent] LLM 璋冪敤澶辫触: {e}")
+            print(f"[PlannerAgent] LLM 调用失败: {e}")
             return None
 
-        # 瑙ｆ瀽 JSON
         return self._extract_json(raw)
 
     @staticmethod
     def _extract_json(raw: str) -> dict[str, Any] | None:
-        """浠?LLM 鍝嶅簲涓彁鍙?JSON (鍙兘琚?```json 鍖呰９)."""
+        """从 LLM 返回文本中提取 JSON（去掉 ```json 包围）。"""
         if "```json" in raw:
             start = raw.index("```json") + 7
             end = raw.index("```", start) if "```" in raw[start:] else len(raw)
@@ -315,24 +412,24 @@ class PlannerAgent:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as e:
-            print(f"[PlannerAgent] JSON 瑙ｆ瀽澶辫触: {e}")
-            print(f"[PlannerAgent] 鍘熷 LLM 鍝嶅簲:\n{raw[:500]}")
+            print(f"[PlannerAgent] JSON 解析失败: {e}")
+            print(f"[PlannerAgent] 原始 LLM 输出:\n{raw[:500]}")
             return None
 
         if isinstance(data, dict) and "error" in data:
-            print(f"[PlannerAgent] LLM 杩斿洖閿欒: {data['error']}")
+            print(f"[PlannerAgent] LLM 返回错误: {data['error']}")
             return None
 
         return data
 
-    # 鈹€鈹€ 鏁版嵁缁撴瀯杞崲 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    # ── 转换与验证 ────────────────────────────────────────
 
     @staticmethod
     def _json_to_workflow(
         data: dict[str, Any],
         plan_id: str,
     ) -> WorkflowDefinition:
-        """瑙ｆ瀽 LLM 杩斿洖鐨?JSON dict 鈫?WorkflowDefinition."""
+        """将 LLM 返回的 JSON dict 转换为 WorkflowDefinition。"""
         nodes_raw: list[dict] = data.get("nodes", [])
         edges_raw: list[dict] = data.get("edges", [])
 
@@ -347,6 +444,7 @@ class PlannerAgent:
                 retry_delay=n.get("retry_delay", 2.0),
             )
             for i, n in enumerate(nodes_raw)
+
         ]
 
         edges = [
@@ -372,20 +470,20 @@ class PlannerAgent:
 
     @staticmethod
     def _validate_workflow(wf: WorkflowDefinition) -> None:
-        """鍩烘湰鏍￠獙: 闈炵┖鑺傜偣, 鏈?handler."""
+        """验证 workflow: 必须有节点, 每个节点有 id 和 handler."""
         if not wf.nodes:
-            raise ValueError("Workflow 娌℃湁鑺傜偣")
+            raise ValueError("Workflow 没有节点")
 
         for i, node in enumerate(wf.nodes):
             if not node.id:
-                raise ValueError(f"鑺傜偣 {i} 缂哄皯 id")
+                raise ValueError(f"节点 {i} 缺少 id")
             if not node.handler:
-                raise ValueError(f"鑺傜偣 '{node.id}' 缂哄皯 handler")
+                raise ValueError(f"节点 '{node.id}' 缺少 handler")
 
-    # 鈹€鈹€ 鎸佷箙鍖?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    # ---- YAML 保存 ----
 
     def _save_workflow(self, wf: WorkflowDefinition) -> Path:
-        """灏?Workflow 鍐欏叆 YAML 鏂囦欢."""
+        """将 Workflow 保存为 YAML 文件."""
         filename = wf.name.replace(" ", "_").lower()
         if not filename:
             filename = f"workflow_{uuid.uuid4().hex[:8]}"
@@ -426,10 +524,10 @@ class PlannerAgent:
 
         return filepath
 
-    # 鈹€鈹€ 鏌ヨ宸叉湁 workflow 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    # ---- Workflow 管理 ----
 
     def list_workflows(self) -> list[dict[str, Any]]:
-        """鍒楀嚭鎵€鏈夊凡鍥哄寲鐨?workflow 鍏冩暟鎹?(涓嶅姞杞藉畬鏁村畾涔?."""
+        """列出所有已保存的 workflow 元信息（仅文件名和名称，不加载完整内容）。"""
         if not self._workflow_dir.exists():
             return []
 
@@ -455,13 +553,13 @@ class PlannerAgent:
         return workflows
 
     def load_workflow(self, name: str) -> WorkflowDefinition | None:
-        """浠庢寔涔呭寲鐩綍鍔犺浇鎸囧畾 workflow.
+        """加载已保存的 workflow.
 
-        鍙傛暟:
-            name: workflow 鍚嶇О (涓嶅惈 .yaml)
+        参数:
+            name: workflow 名称 (不含 .yaml)
 
-        杩斿洖:
-            WorkflowDefinition 鎴?None (鏈壘鍒?鍔犺浇澶辫触)
+        返回:
+            WorkflowDefinition 或 None (文件不存在或解析失败)
         """
         filepath = self._workflow_dir / f"{name}.yaml"
         if not filepath.exists():

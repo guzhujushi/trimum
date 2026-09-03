@@ -28,21 +28,40 @@
 - **Security Runtime** — Policy Engine（YAML 规则 + Risk Level）
 - **Planner Agent** — 唯一 LLM 组件，按需启动
 
-## Phase 3：Agent SDK + 安全体系（进行中）
+## Phase 3：Agent SDK + 安全体系 ✅ 核心完成（2026-09-03）
+> 28 个模块，9010 行代码，135 项测试通过
 
-### 核心工作
-- Agent SDK 封装（集成 openai-agents-python）
-- 上下文窗口管理（Compaction / Tool Output Limits）
-- 可观测性基座（Token 计数 / 结构化日志 / 成本追踪）
-- 凭据脱敏（Secrets Redaction）
-- cwd Jail 工作目录隔离
-- AI/人类流量区分标签
-- JIT 一次性授权模式
-- 子 Agent 资源配额
-- 结构化审计日志
-- 流式 CLI 输出
+### 已实现的组件
 
-详情见 `TODO.md` #3 ~ #3.9。
+| 组件 | 状态 | 说明 |
+|---|---|---|
+| Agent SDK 封装 | ✅ 完成 | `src/agent-sdk/` 283 行，3 测试 |
+| Agent 文件化 | ✅ 完成 | `agent.json5` + `AGENT.md` + `main.py`，`load_from_dir()` |
+| Agent Router + Registry | ✅ 完成 | 能力路由 + 证书校验 |
+| Tool 文件化（11 Dispatchers） | ✅ 完成 | `tool.json5` + 11 种 Dispatcher |
+| Workflow 文件化 | ✅ 完成 | `workflow.yaml` 加载 + `WorkflowDefV2` |
+| 上下文管理 + FTS5 | ✅ 完成 | ContextManager 24 方法 + 全文搜索 |
+| MemoryBridge | ✅ 完成 | Event Bus → ContextManager 桥接 |
+| 证书体系 | ✅ 完成 | Official/Self-Signed/None 三档 |
+| AI/人类流量标签 | ✅ 完成 | `SourceType` + PolicyEngine `source:` 过滤 |
+| Transform Agent | ✅ 完成 | NL→TARL + origin:ai 标签 + confidence |
+| Behavior Monitor | ✅ 完成 | 行为基线 + 事件记录 |
+| System Monitor | ✅ 完成 | 硬件采集 + 阈值告警 |
+| Security Rule（三层沙箱） | ✅ 完成 | 硬性/弹性/智能三模式 |
+| TARL Parser | ✅ 完成 | TARL 指令解析 |
+| Agent Socket IPC | ✅ 完成 | Unix Socket Server + Client |
+| Agent Runtime | ✅ 完成 | Task 执行器 |
+
+### 待实现的安全补齐列表
+- 凭据脱敏（Secrets Redaction）🟡
+- JIT 一次性授权模式 🟡
+- Transform Agent 稳定性测试 🟡
+- 子 Agent 资源配额（CPU/内存）🟢
+- 结构化审计日志 🟢
+- 流式 CLI 输出 🟢
+- TRM 错误码体系 🟢
+
+详情见 `TODO.md`、`docs/STATUS.md`、`docs/PHASE3-4-PLAN.md`。
 
 ## Phase 4：Security Runtime（待开始）
 
@@ -278,7 +297,7 @@ trm workflow install daily-backup
 | Phase 1 | ✅ | — |
 | Phase 1.5 | ✅ | — |
 | **Phase 2** | **✅ 已完成** | **2026-08-31** |
-| Phase 3 | 🚧 进行中 | 待定 |
+| Phase 3 | ✅ 核心完成 | 2026-09-03 |
 | Phase 4 | 📝 设计完成 | Phase 3 后 |
 | Phase 5 | 📝 设计完成 | Phase 4 后 |
 | Phase 6 | 📝 大纲 | Phase 5 后 |
