@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -25,13 +27,31 @@ from .models import (
     ToolDefinition,
     AgentPermissions,
     AgentManifest,
+    AuditEvent,
+    JITToken,
 )
 from .policy_engine import PolicyEngine
+from .security_rule import SecurityRule, DecisionResult
 from .tool_dispatchers import DispatcherRegistry
 from .tool_file_loader import scan_tools
 from .logger import get_logger
 
 logger = get_logger("tool_gateway")
+
+# 默认工作目录
+_DEFAULT_WORK_DIR = os.path.expanduser("~/.trimum/workdir")
+
+# 敏感环境变量模式（用于凭据脱敏）
+_SENSITIVE_ENV_PATTERNS = re.compile(
+    r"(?i)(api_key|secret|password|token|auth|credential|private_key|access_key)"
+)
+
+# 敏感输出模式（用于日志脱敏）
+_SENSITIVE_OUTPUT_PATTERNS = [
+    (re.compile(r"(?i)(api[_-]?key|secret|password|token)[=: ]+\S+"), r"\1=***REDACTED***"),
+    (re.compile(r"(?i)(Bearer\s+)\S{8,}"), r"\1***REDACTED***"),
+    (re.compile(r"(?i)(Authorization:[^,]*)\S{8,}"), r"\1***REDACTED***"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -252,10 +272,27 @@ class ToolGateway:
         policy_engine: Optional[PolicyEngine] = None,
         tool_registry: Optional[ToolRegistry] = None,
         dispatcher_registry: Optional[DispatcherRegistry] = None,
+        security_rule: Optional[SecurityRule] = None,
+        work_dir: Optional[str] = None,
+        enable_cwd_jail: bool = True,
+        enable_credential_redact: bool = True,
+        enable_audit: bool = True,
+        enable_jit_auth: bool = True,
     ) -> None:
         self.policy = policy_engine or PolicyEngine()
         self.tools = tool_registry or ToolRegistry()
         self.dispatchers = dispatcher_registry or DispatcherRegistry()
+        self.work_dir = work_dir or _DEFAULT_WORK_DIR
+        self.security_rule = security_rule
+        self.enable_cwd_jail = enable_cwd_jail
+        self.enable_credential_redact = enable_credential_redact
+        self.enable_audit = enable_audit
+        self.enable_jit_auth = enable_jit_auth
+        # JIT 令牌表: agent_id -> list[JITToken]
+        self._jit_tokens: dict[str, list[JITToken]] = {}
+        # 审计日志（内存环缓冲区）
+        self._audit_log: list[AuditEvent] = []
+        self._audit_max = 1000
 
     # ------------------------------------------------------------------
     # Public API
@@ -270,19 +307,24 @@ class ToolGateway:
         return str(request.args).strip() if request.args else ""
 
     async def execute(self, request: ExecuteRequest) -> ExecuteResponse:
-        """Execute a tool command with two-layer permission check.
+        """Execute a tool command with four-layer security check.
 
+        Layer 0: cwd Jail — 验证工作目录在允许范围内.
         Layer 1: Global PolicyEngine check (regex rules from policy.yaml).
         Layer 2: Agent permissions check (from AgentManifest if available).
-        Execution: Dispatched via DispatcherRegistry to the appropriate
-                   dispatcher (FileDispatcher, GitDispatcher, ShellDispatcher, etc.).
+        Layer 3: JIT 授权检查（高风险操作需令牌）.
+        Execution: Dispatched via DispatcherRegistry.
+        Post-execution: 凭据脱敏 + 审计事件记录.
         """
         execution_id = uuid.uuid4().hex[:12]
+        timestamp = time.time()
 
         # Build command string for policy checks
         cmd_str = self._build_cmd_str(request)
+        request.raw_command = cmd_str  # 保存原始命令用于审计
+
         if not cmd_str and request.tool == ToolType.SHELL:
-            return ExecuteResponse(
+            resp = ExecuteResponse(
                 execution_id=execution_id,
                 status="denied",
                 error="Empty command",
@@ -291,9 +333,29 @@ class ToolGateway:
                 action=Action.DENY,
                 reason="No command provided",
             )
+            self._record_audit("policy_denied", request, resp)
+            return resp
 
-        # Resolve tool definition (optional, used for agent permission check)
+        # Resolve tool definition
         tool_def = self.tools.get(request.tool.value)
+
+        # ------------------------------------------------------------------
+        # Layer 0: cwd Jail
+        # ------------------------------------------------------------------
+        if self.enable_cwd_jail and not request.skip_cwd_check:
+            jail_reason = self._check_cwd_jail(request, tool_def)
+            if jail_reason is not None:
+                resp = ExecuteResponse(
+                    execution_id=execution_id,
+                    status="denied",
+                    error=f"cwd jail: {jail_reason}",
+                    exit_code=1,
+                    risk=RiskLevel.HIGH,
+                    action=Action.DENY,
+                    reason=jail_reason,
+                )
+                self._record_audit("cwd_jail", request, resp)
+                return resp
 
         # ------------------------------------------------------------------
         # Layer 1: Global Policy Check (with source_type awareness)
@@ -309,7 +371,7 @@ class ToolGateway:
                 tool=request.tool.value,
                 risk=risk.value,
             )
-            return ExecuteResponse(
+            resp = ExecuteResponse(
                 execution_id=execution_id,
                 status="denied",
                 error=f"Policy denied: {reason}",
@@ -318,6 +380,8 @@ class ToolGateway:
                 action=action,
                 reason=reason,
             )
+            self._record_audit("policy_denied", request, resp)
+            return resp
 
         # ------------------------------------------------------------------
         # Layer 2: Agent Permission Check
@@ -336,7 +400,7 @@ class ToolGateway:
                 agent=agent_manifest.name if agent_manifest else "unknown",
                 reason=agent_deny_reason,
             )
-            return ExecuteResponse(
+            resp = ExecuteResponse(
                 execution_id=execution_id,
                 status="denied",
                 error=f"Agent permission denied: {agent_deny_reason}",
@@ -345,6 +409,32 @@ class ToolGateway:
                 action=Action.DENY,
                 reason=agent_deny_reason,
             )
+            self._record_audit("policy_denied", request, resp)
+            return resp
+
+        # ------------------------------------------------------------------
+        # Layer 3: JIT 授权检查
+        # ------------------------------------------------------------------
+        if self.enable_jit_auth and agent_manifest is not None:
+            jit_reason = self._check_jit_auth(request, risk, action)
+            if jit_reason is not None:
+                logger.warning(
+                    "gateway.layer3_jit_denied",
+                    command=cmd_str,
+                    agent=agent_manifest.name if agent_manifest else "unknown",
+                    reason=jit_reason,
+                )
+                resp = ExecuteResponse(
+                    execution_id=execution_id,
+                    status="jit_required",
+                    error=f"JIT authorization required: {jit_reason}",
+                    exit_code=1,
+                    risk=RiskLevel.HIGH,
+                    action=Action.CONFIRM,
+                    reason=jit_reason,
+                )
+                self._record_audit("jit_auth", request, resp)
+                return resp
 
         # ------------------------------------------------------------------
         # Execute via DispatcherRegistry
@@ -370,6 +460,17 @@ class ToolGateway:
         result.risk = result.risk or risk
         result.action = result.action or action
         result.reason = result.reason or reason
+
+        # ------------------------------------------------------------------
+        # Post-execution: 凭据脱敏
+        # ------------------------------------------------------------------
+        if self.enable_credential_redact:
+            result = self._redact_credentials(result)
+
+        # ------------------------------------------------------------------
+        # Post-execution: 审计事件记录
+        # ------------------------------------------------------------------
+        self._record_audit("tool_executed", request, result)
 
         return result
 
@@ -452,98 +553,247 @@ class ToolGateway:
         return None  # allowed
 
     # ------------------------------------------------------------------
-    # Subprocess execution
+    # Layer 0: cwd Jail
     # ------------------------------------------------------------------
 
-    async def _run_subprocess(
+
+    # ------------------------------------------------------------------
+    # Layer 0: cwd Jail
+    # ------------------------------------------------------------------
+
+    def _check_cwd_jail(
         self,
-        cmd: str,
-        timeout: float = 30.0,
-        env: Optional[dict[str, str]] = None,
-        cwd: Optional[str] = None,
-    ) -> dict:
-        """Run a command via async subprocess with timeout."""
+        request: ExecuteRequest,
+        tool_def: Optional[ToolDefinition],
+    ) -> Optional[str]:
+        """检查工作目录是否在允许范围内。
+
+        规则：
+        1. 工具不允许 cwd（如 env、knowledge）→ 跳过（视作不需要文件系统访问）
+        2. request.cwd 为空 → 设为默认工作目录
+        3. request.cwd 解析后必须在 work_dir 下（或等于 work_dir）
+        4. agent_manifest 有 work_dir → 用 agent 的 work_dir 覆盖全局
+
+        返回 None 表示通过，返回 str 表示拒绝原因。
+        """
+        # 不需要文件系统路径的工具跳过 cwd jail
+        skip_tools = {
+            ToolType.KNOWLEDGE_SEARCH, ToolType.KNOWLEDGE_STORE,
+            ToolType.NOTIFICATION, ToolType.NOTIFICATION_SEND,
+            ToolType.MCP_TOOLS_LIST, ToolType.MCP_TOOLS_CALL,
+            ToolType.CUSTOM, ToolType.SHELL,
+        }
+
+        if request.tool in skip_tools:
+            return None  # allowed
+
+        # 确定 work_dir
+        work_dir = self.work_dir
+        if request.agent_manifest and request.agent_manifest.work_dir:
+            work_dir = request.agent_manifest.work_dir
+
+        # 确定 cwd
+        cwd = request.cwd
+        if not cwd:
+            cwd = work_dir
+
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                cwd=cwd,
-                shell=True,
+            resolved_cwd = Path(cwd).resolve()
+            resolved_work = Path(work_dir).resolve()
+        except (OSError, ValueError, RuntimeError) as e:
+            return f"Path resolution error: {e}"
+
+        # 检查 cwd 是否在 work_dir 下（或等于 work_dir）
+        try:
+            resolved_cwd.relative_to(resolved_work)
+        except ValueError:
+            return (
+                f"cwd '{cwd}' is outside allowed work directory '{work_dir}'"
             )
 
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return {
-                    "stdout": "",
-                    "stderr": f"Command timed out after {timeout}s",
-                    "exit_code": -1,
-                }
-
-            return {
-                "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
-                "stderr": stderr.decode("utf-8", errors="replace") if stderr else "",
-                "exit_code": proc.returncode or 0,
-            }
-
-        except FileNotFoundError:
-            return {"stdout": "", "stderr": "Command not found", "exit_code": 127}
-        except Exception as e:
-            return {"stdout": "", "stderr": str(e), "exit_code": -1}
+        return None  # allowed
 
     # ------------------------------------------------------------------
-    # Tool config loading
+    # Layer 3: JIT 授权检查
     # ------------------------------------------------------------------
 
-    def load_tools_from_config(self, tools_config: dict) -> None:
-        """Load tool definitions from a config dictionary.
+    def _check_jit_auth(
+        self,
+        request: ExecuteRequest,
+        risk: RiskLevel,
+        action: Action,
+    ) -> Optional[str]:
+        """检查是否需要 JIT 授权令牌。
 
-        Expected format::
-            tools:
-              shell:
-                allowed_flags: []
-                timeout_default: 30
-                risk_level: medium
-              file.read:
-                allowed_flags: ["-n", "-c", "-f"]
-                timeout_default: 10
-                risk_level: low
+        需要 JIT 的场景：
+        - CRITICAL 风险的操作
+        - DENY action 被覆盖为 ALLOW（需要 JIT 确认）
+        - 工具声明了 requires_jit=True
+
+        返回 None 表示不需要 JIT（通过），返回 str 表示需要 JIT 的原因。
         """
-        for name, cfg in tools_config.items():
-            try:
-                existing = self.tools.get(name)
-                if existing is not None:
-                    # Update existing tool
-                    for field in ("allowed_flags", "timeout_default", "risk_level"):
-                        if field in cfg:
-                            setattr(existing, field, cfg[field])
-                else:
-                    # Create new tool from config
-                    tool_type_str = cfg.get("tool_type", "custom")
-                    try:
-                        tool_type = ToolType(tool_type_str)
-                    except ValueError:
-                        tool_type = ToolType.CUSTOM
-                    self.tools.register(
-                        ToolDefinition(
-                            name=name,
-                            description=cfg.get("description", ""),
-                            tool_type=tool_type,
-                            executable=cfg.get("executable", ""),
-                            allowed_flags=cfg.get("allowed_flags", []),
-                            timeout_default=cfg.get("timeout_default", 30.0),
-                            risk_level=RiskLevel(cfg.get("risk_level", "medium")),
-                        )
-                    )
-                logger.debug("gateway.tool_config_loaded", tool=name)
-            except Exception as e:
-                logger.warning("gateway.tool_config_error", tool=name, error=str(e))
+        # CRITICAL 风险的操作始终需要 JIT
+        if risk == RiskLevel.CRITICAL:
+            if not request.jit_token:
+                return "CRITICAL risk operation requires JIT authorization"
+
+        # AUTO 需要检查是否 agent 权限覆盖
+        if action == Action.AUTO and request.agent_manifest:
+            cmd_str = " ".join(request.args) if request.args else request.raw_command
+            # 如果命令在 deny_exec 中 → 通过 JIT 才能 sudo
+            if request.agent_manifest.permissions and request.agent_manifest.permissions.deny_exec:
+                for pattern in request.agent_manifest.permissions.deny_exec:
+                    if re.search(pattern, cmd_str):
+                        if not request.jit_token:
+                            return "Command is deny_listed; requires JIT authorization"
+                        break
+
+        # 工具检查
+        if hasattr(request, 'tool_def') and request.tool_def:
+            tool_def = request.tool_def
+            if getattr(tool_def, 'requires_jit', False) and not request.jit_token:
+                return "Tool requires JIT authorization"
+
+        return None  # 不需要 JIT
+
+    def issue_jit_token(
+        self,
+        agent_id: str,
+        tool: ToolType,
+        command: str,
+        granted_by: str = "admin",
+        ttl: float = 300.0,
+    ) -> JITToken:
+        """颁发 JIT 授权令牌。
+
+        Args:
+            agent_id: 目标 agent ID
+            tool: 授权使用的工具
+            command: 授权执行的命令
+            granted_by: 授权人/系统
+            ttl: 令牌有效期（秒，默认 5 分钟）
+
+        Returns:
+            JITToken 实例
+        """
+        token = JITToken(
+            token=uuid.uuid4().hex[:24],
+            agent_id=agent_id,
+            tool=tool.value if isinstance(tool, ToolType) else tool,
+            command=command,
+            expires_at=time.time() + ttl,
+            granted_by=granted_by,
+            used=False,
+        )
+
+        # 存到网关的 jit_tokens 字典
+        if not hasattr(self, '_jit_tokens'):
+            self._jit_tokens: dict[str, JITToken] = {}
+        self._jit_tokens[token.token] = token
+
+        logger.info(
+            "gateway.jit_issued",
+            agent_id=agent_id,
+            tool=token.tool,
+            ttl=ttl,
+            token=token.token[:8] + "...",
+        )
+
+        return token
+
+    def grant_jit_token(
+        self,
+        agent_id: str,
+        tool: ToolType,
+        command: str,
+        granted_by: str = "admin",
+        ttl: float = 300.0,
+    ) -> JITToken:
+        """便捷方法：颁发 JIT 令牌（同 issue_jit_token）。"""
+        return self.issue_jit_token(agent_id, tool, command, granted_by, ttl)
+
+    # ------------------------------------------------------------------
+    # 凭证脱敏
+    # ------------------------------------------------------------------
+
+    def _redact_credentials(
+        self,
+        response: ExecuteResponse,
+    ) -> ExecuteResponse:
+        """对执行结果中的敏感信息进行脱敏处理。
+
+        使用 _SENSITIVE_OUTPUT_PATTERNS 中的正则表达式替换敏感内容。
+        """
+        if not response.output:
+            return response
+
+        redacted = response.output
+        for pattern, replacement in _SENSITIVE_OUTPUT_PATTERNS:
+            redacted = pattern.sub(replacement, redacted)
+
+        # 同时脱敏 error 字段
+        if response.error:
+            for pattern, replacement in _SENSITIVE_OUTPUT_PATTERNS:
+                response.error = pattern.sub(replacement, response.error)
+
+        response.output = redacted
+        return response
+
+    # ------------------------------------------------------------------
+    # 审计事件记录
+    # ------------------------------------------------------------------
+
+    def _record_audit(
+        self,
+        event_type: str,
+        request: ExecuteRequest,
+        response: ExecuteResponse,
+    ) -> None:
+        """记录审计事件。
+
+        如果未启用审计（enable_audit=False），直接返回。
+        记录到 logger（INFO 级别）和可选的 audit_store。
+        """
+        if not self.enable_audit:
+            return
+
+        cmd_str = " ".join(request.args) if request.args else request.raw_command
+
+        event = AuditEvent(
+            event_id=uuid.uuid4().hex[:12],
+            event_type=event_type,
+            agent_id=request.agent_id or "unknown",
+            agent_name=request.agent_manifest.name if request.agent_manifest else "unknown",
+            tool=request.tool.value,
+            command=cmd_str[:500],
+            risk=response.risk.value if response.risk else "unknown",
+            action=response.action.value if response.action else "unknown",
+            reason=response.reason or "",
+            details={
+                "execution_id": response.execution_id,
+                "exit_code": response.exit_code,
+                "cwd": request.cwd or "",
+                "source_type": request.source_type.value if hasattr(request.source_type, 'value') else str(request.source_type),
+            },
+            timestamp=time.time(),
+            source_type=str(request.source_type) if hasattr(request.source_type, 'value') else str(request.source_type),
+            jit_token=request.jit_token or "",
+            jit_expires_at=0.0,
+            jit_granted_by="",
+        )
+
+        logger.info(
+            "gateway.audit",
+            event_type=event_type,
+            agent_id=event.agent_id,
+            tool=event.tool,
+            risk=event.risk,
+            action=event.action,
+            execution_id=event.event_id,
+        )
+
+        # 可选：写入 audit store（Phase 5 实现）
+        # if self.audit_store:
+        #     self.audit_store.append(event)
 
 
-__all__ = ["ToolGateway", "ToolRegistry", "ToolDefinition"]

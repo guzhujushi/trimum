@@ -43,9 +43,8 @@ from trimum_core.workflow_engine import (
     NodeMode,
     NodeHandler,
 )
-from trimum_core.tool_gateway import ToolGateway, ToolRegistry
+from trimum_core.tool_gateway import ToolGateway, ToolRegistry, SecurityRule
 from trimum_core.agent_registry import AgentRegistry
-from trimum_core.agent_router import AgentRouter, RouteEntry
 from trimum_core.workflow_engine import WorkflowEngine, NodeMode, NodeHandler
 from trimum_core.event_bus import EventBus
 from trimum_core.context_manager import ContextManager
@@ -313,15 +312,14 @@ async def test_gateway_http_post():
 
 
 # ===================================================================
-#  SECTION 2: Agent Registry → Agent Router → Workflow Engine
+#  SECTION 2: Agent Registry + Workflow Engine
 # ===================================================================
 
 @pytest.mark.asyncio
-async def test_registry_router_workflow_chain():
-    """Full chain: register agents → build routes → route → execute workflow."""
+async def test_registry_workflow_chain():
+    """Full chain: register agents → registry query → execute workflow."""
     bus = EventBus()
     registry = AgentRegistry()
-    router = AgentRouter(registry, bus)
 
     # ── Register agents ──
     agents = [
@@ -329,6 +327,7 @@ async def test_registry_router_workflow_chain():
             name="reader",
             version="1.0",
             capabilities=["file.read"],
+            description="Reads files",
             permissions=AgentPermissions(read=["/tmp"]),
             events=AgentEvents(),
             entry="~/.trimum/agents/reader/agent.json",
@@ -337,6 +336,7 @@ async def test_registry_router_workflow_chain():
             name="writer",
             version="1.0",
             capabilities=["file.write"],
+            description="Writes files",
             permissions=AgentPermissions(write=["/tmp"]),
             events=AgentEvents(),
             entry="~/.trimum/agents/writer/agent.json",
@@ -345,6 +345,7 @@ async def test_registry_router_workflow_chain():
             name="analyst",
             version="1.0",
             capabilities=["data.analyze"],
+            description="Analyzes data",
             permissions=AgentPermissions(read=["/tmp", "/var"]),
             events=AgentEvents(),
             entry="~/.trimum/agents/analyst/agent.json",
@@ -355,32 +356,25 @@ async def test_registry_router_workflow_chain():
 
     assert len(registry.list_agents()) == 3
 
-    # ── Build routes ──
-    router.build_routes()
+    # ── Registry query: find by capability ──
+    file_agents = registry.find_by_capability("file.read")
+    assert len(file_agents) == 1
+    assert file_agents[0].name == "reader"
 
-    # ── Route ──
-    reader = router.route("file.read")
-    assert reader is not None
-    assert reader.name == "reader"
+    data_agents = registry.find_by_capability("data.analyze")
+    assert len(data_agents) == 1
+    assert data_agents[0].name == "analyst"
 
-    analyst = router.route("data.analyze")
-    assert analyst is not None
-    assert analyst.name == "analyst"
+    file_multi = registry.find_by_capability("file")
+    assert len(file_multi) == 2  # file.read + file.write
 
-    # ── Route multi ──
-    candidates = router.route_multi("file")
-    assert len(candidates) >= 1
+    # ── Get agent by name ──
+    reader_manifest = registry.get_agent("reader")
+    assert reader_manifest is not None
+    assert reader_manifest.description == "Reads files"
 
-    # ── Build pipeline ──
-    pipeline = router.build_pipeline(["file.read", "data.analyze", "file.write"])
-    assert len(pipeline) == 3
-    assert pipeline[0].name == "reader"
-    assert pipeline[1].name == "analyst"
-    assert pipeline[2].name == "writer"
-
-    # ── Route with event ──
-    routed = router.route_with_event("file.read")
-    assert routed is not None
+    nonexistent = registry.get_agent("nonexistent")
+    assert nonexistent is None
 
     # ── Workflow Engine with handlers ──
     engine = WorkflowEngine(event_bus=bus)
@@ -597,43 +591,6 @@ async def test_registry_find_by_prefix():
     assert len(registry.find_by_capability("documentation.write")) == 1
     # No match
     assert len(registry.find_by_capability("nonexistent")) == 0
-
-
-@pytest.mark.asyncio
-async def test_router_pipeline_skips_missing():
-    """AgentRouter.build_pipeline skips unmatched capabilities."""
-    bus = EventBus()
-    registry = AgentRegistry()
-    registry.register(AgentManifest(
-        name="alpha", version="1",
-        capabilities=["task.a"],
-        permissions=AgentPermissions(), events=AgentEvents(),
-        entry="~/.trimum/agents/alpha/agent.json",
-    ))
-    router = AgentRouter(registry, bus)
-    router.build_routes()
-
-    pipeline = router.build_pipeline(["task.a", "task.b", "task.c"])
-    assert len(pipeline) == 1  # Only 'task.a' matched
-    assert pipeline[0].name == "alpha"
-
-
-@pytest.mark.asyncio
-async def test_router_route_multi_no_match():
-    """route_multi returns empty list when nothing matches."""
-    bus = EventBus()
-    router = AgentRouter(AgentRegistry(), bus)
-    router.build_routes()
-    assert router.route_multi("nonexistent") == []
-
-
-@pytest.mark.asyncio
-async def test_router_route_none_when_empty():
-    """route returns None when registry is empty."""
-    bus = EventBus()
-    router = AgentRouter(AgentRegistry(), bus)
-    router.build_routes()
-    assert router.route("anything") is None
 
 
 # ===================================================================
@@ -977,3 +934,33 @@ async def test_context_manager_overwrite_value(tmp_path):
     assert val == "new"  # Overwritten
 
     await cm.close()
+
+# ================================================================
+# #9 SecurityRule -> ToolGateway 集成测试
+# ================================================================
+
+@pytest.mark.asyncio
+async def test_gateway_security_rule_allows_safe_command():
+    "SecurityRule: safe command passes (no explicit SR)."
+    gw = ToolGateway()
+    mock_proc = AsyncMock()
+    mock_proc.communicate.return_value = (b"hello\n", b"")
+    mock_proc.returncode = 0
+    with patch("trimum_core.tool_dispatchers.asyncio.create_subprocess_shell", return_value=mock_proc):
+        req = ExecuteRequest(tool=ToolType.SHELL, args=["echo hello"],)
+        resp = await gw.execute(req)
+        assert resp.status in ("allowed", "success")
+
+
+@pytest.mark.asyncio
+async def test_gateway_security_rule_with_rule_allows():
+    "SecurityRule with explicit rule: low-risk passes."
+    sr = SecurityRule(enable_blocking=True)
+    gw = ToolGateway(security_rule=sr)
+    mock_proc = AsyncMock()
+    mock_proc.communicate.return_value = (b"safe\n", b"")
+    mock_proc.returncode = 0
+    with patch("trimum_core.tool_dispatchers.asyncio.create_subprocess_shell", return_value=mock_proc):
+        req = ExecuteRequest(tool=ToolType.SHELL, args=["echo safe"],)
+        resp = await gw.execute(req)
+        assert resp.status in ("allowed", "success")

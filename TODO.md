@@ -52,9 +52,12 @@
 - 目标：Security Agent 能调用 LLM 辅助评估运行时行为
 - 注意：可选，不应引入不必要的 LLM 调用
 
-### #12 Router/Planner 概念明确
-- 当前 AgentRouter 包含 route() 和 plan_with_llm()，但 Plan→Dispatch 两步边界模糊
-- 需要明确：Router 负责按能力匹配 Agent，Planner 负责 LLM 兜底规划
+### #12 Router/Planner 概念明确 ✅
+- AgentRouter 已删除，功能由 AgentRegistry 直接承载（查询/注册）
+- AgentRegistry.list_agents() = 所有 Agent 清单（含 name/description/capabilities/depends_on）
+- AgentRegistry.find_by_capability() = 按能力前缀匹配
+- AgentRegistry.get_agent() = 按名字查
+- Planner Agent 通过 AgentRegistry 获取信息做规划决策
 
 ### #13 弹性沙箱 — AI 辅助策略评估 + 行为追踪
 - BehaviorMonitor 已有基础框架（滑动窗口、分类、异常检测）
@@ -162,12 +165,23 @@
 - 项目共享放到 `~/.trimum/memory/projects/<id>.db`
 - 全局放到 `~/.trimum/memory/global.db`
 
+### #22 Agent depends_on 依赖声明字段
+> 让 Agent 声明自己依赖的外部 CLI/MCP 工具，拓展生态
+- `agent.json5` 增加 `depends_on: list[str]` 字段
+  - 示例：`github-agent` 依赖 `["gh", "git"]`
+  - `coding-agent` 依赖 `["codex" | "claude-code" | "cursor"]`
+- `models.py` AgentManifest 增加 `depends_on` 字段
+- `tool_file_loader.py` 加载时自动检查依赖是否在 PATH 中
+- `trm tools detect` 关联：扫 PATH → 发现依赖 → 自动激活对应 Agent
+
 ### #21 Certs 移到 Agent 文件夹
-- 当前：certs 在 `~/.trimum/certs/` 根下
+- 当前：certs 在 `~/.trimum/certs/official/` `trusted/` `pending/` 三层子目录下
 - 需要：每个 Agent 文件夹自带证书
-  - `~/.trimum/agents/<name>/cert.json` — 该 Agent 的证书
-  - 同时在 `~/.trimum/certs/` 保留索引作为快捷发现
-- 这样 Agent 目录 cp 即走：复制 Agent 文件夹就等于复制了它的证书+记忆+代码
+  - `~/.trimum/agents/<name>/cert.json` — 该 Agent 的证书（type 字段决定级别）
+  - **取消** `certs/official/trusted/pending` 三层子目录划分
+  - `~/.trimum/certs/<name>.cert` 只做**符号链接/索引**指向 `agents/<name>/cert.json`
+- 证书类型由 `cert.json` 内部 `type: "official" | "self_signed" | "none"` 决定
+- **cp 即走**：复制 Agent 文件夹 = 代码+证书+记忆+经验完整打包
 
 ---
 

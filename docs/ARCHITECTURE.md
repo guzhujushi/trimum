@@ -275,10 +275,9 @@ SQLite 直接记忆 → sqlite-vec 向量扩展 → chroma
 │   ├── security-rule/
 │   ├── system-monitor/
 │   └── workflow-listener/
-├── certs/            # 证书索引
-│   ├── official/     # 官方证书（拷入即用）
-│   ├── trusted/      # 用户签发证书
-│   └── pending/      # 待批准
+├── certs/            # 证书索引（符号链接，指向 agents/<name>/cert.json）
+│   ├── planner-agent.cert
+│   └── transform-agent.cert
 ├── tools/            # 可执行工具（tool.json5 + main.py）
 │   ├── custom/
 │   ├── env/

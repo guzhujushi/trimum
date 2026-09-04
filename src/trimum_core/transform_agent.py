@@ -117,7 +117,7 @@ class TransformAgent:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
-            log.warning("transform.llm_http_error", code=e.code)
+            log.warning(f"transform.llm_http_error code={e.code}")
             return TransformResult(
                 tarl=self._fallback_tarl(instruction),
                 confidence=0.2,
@@ -125,7 +125,7 @@ class TransformAgent:
                 error=f"LLM HTTP {e.code}",
             )
         except Exception as e:
-            log.warning("transform.llm_error", error=str(e))
+            log.warning(f"transform.llm_error error={e}")
             return TransformResult(
                 tarl=self._fallback_tarl(instruction),
                 confidence=0.1,
@@ -180,6 +180,16 @@ class TransformAgent:
         if body.startswith("SHELL:"):
             # 终端命令
             shell_cmd = body[len("SHELL:"):].strip()
+            if not shell_cmd:
+                # 空命令 → unrecognized
+                log.info("transform.empty_shell_command")
+                return TransformResult(
+                    tarl=self._fallback_tarl(instruction),
+                    confidence=0.3,
+                    original=instruction,
+                    output_type="tarl",
+                    error="Empty shell command",
+                )
             return TransformResult(
                 shell_command=shell_cmd,
                 tarl=f"cmd:{shell_cmd.replace(' ', '_')} origin:ai",

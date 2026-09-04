@@ -86,6 +86,12 @@ class ExecuteRequest(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     cwd: Optional[str] = None
     source_type: SourceType = SourceType.UNKNOWN
+    # JIT 授权令牌
+    jit_token: Optional[str] = None
+    # 原始命令（执行前保留，用于审计/脱敏）
+    raw_command: str = ""
+    # 是否跳过 cwd jail 检查（默认不跳过）
+    skip_cwd_check: bool = False
 
 
 class ExecuteResponse(BaseModel):
@@ -213,6 +219,7 @@ class AgentManifest(BaseModel):
     version: str
     description: str = ""
     capabilities: list[str]
+    depends_on: list[str] = []  # 依赖的 CLI/MCP 工具列表
     permissions: AgentPermissions
     events: AgentEvents
     entry: str
@@ -220,6 +227,8 @@ class AgentManifest(BaseModel):
     # 长期提示词文件路径（类 AGENTS.md），减少每次调用注入的 tokens
     system_prompt_path: str = ""
     system_prompt: str = ""
+    # 工作目录限制（cwd jail）
+    work_dir: str = ""  # 允许访问的工作目录根路径，空=不限制
 
 
 # ── Agent 任务通信模型 ──────────────────────────────────
@@ -242,6 +251,42 @@ class AgentTask(BaseModel):
     input_from: list[str] = Field(default_factory=list)  # 依赖的前驱节点 ID 列表
     config: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: float = 120.0
+
+
+# ── 审计事件模型 ──────────────────────────────────
+
+
+class AuditEvent(BaseModel):
+    """安全审计事件记录。"""
+
+    event_id: str = ""
+    event_type: str = ""  # cwd_jail | credential_redact | jit_auth | tool_executed | policy_denied
+    agent_id: str = ""
+    agent_name: str = ""
+    tool: str = ""
+    command: str = ""
+    risk: str = ""
+    action: str = ""
+    reason: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
+    timestamp: float = 0.0
+    source_type: str = ""
+    # JIT 授权相关
+    jit_token: str = ""
+    jit_expires_at: float = 0.0
+    jit_granted_by: str = ""  # "auto" | "human"
+
+
+class JITToken(BaseModel):
+    """JIT（Just-In-Time）授权令牌。"""
+
+    token: str = ""
+    agent_id: str = ""
+    tool: str = ""
+    command: str = ""
+    expires_at: float = 0.0
+    granted_by: str = ""  # "auto" | "human"
+    used: bool = False
 
 
 class AgentTaskResult(BaseModel):

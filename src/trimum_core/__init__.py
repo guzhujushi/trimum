@@ -2,7 +2,6 @@
 
 from trimum_core.agent_registry import AgentRegistry
 from trimum_core.tool_file_loader import scan_tools, parse_tool_manifest
-from trimum_core.agent_router import AgentRouter, RouteEntry
 from trimum_core.agent_runtime import AgentRuntime
 from trimum_core.agent_socket import AgentSocketServer, AgentSocketClient, SocketMessage
 from trimum_core.behavior_monitor import BehaviorMonitor
@@ -45,6 +44,7 @@ from trimum_core.tool_dispatchers import (
     MCPDispatcher,
     CustomDispatcher,
 )
+from trimum_core.learning_engine import LearningEngine, AgentProfile, LearnedRule
 from trimum_core.workflow_engine import (
     EdgeDefinition,
     NodeDefinition,
@@ -67,7 +67,8 @@ __all__ = [
     "AgentManifest",
     "AgentPermissions",
     "AgentRegistry",
-    "AgentRouter",
+    "AuditEvent",
+    "JITToken",
     "AgentRuntime",
     "AgentSocketClient",
     "AgentSocketServer",
@@ -75,6 +76,9 @@ __all__ = [
     "AgentTask",
     "AgentTaskResult",
     "BehaviorMonitor",
+    "LearningEngine",
+    "AgentProfile",
+    "LearnedRule",
     "ContextEntry",
     "MemoryBridge",
     "CustomDispatcher",

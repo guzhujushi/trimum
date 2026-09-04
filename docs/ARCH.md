@@ -91,10 +91,9 @@ main.py
 │   ├── system-monitor/
 │   ├── transform-agent/
 │   └── workflow-listener/
-├── certs/               # 证书索引
-│   ├── official/        # 官方证书（拷入即用）
-│   ├── trusted/         # 用户签发证书
-│   └── pending/         # 待批准
+├── certs/               # 证书索引（符号链接/索引，指向 agents/<name>/cert.json）
+│   ├── planner-agent.cert
+│   └── transform-agent.cert
 ├── tools/               # Tool 文件化（tool.json5 + main.py）
 │   ├── custom/env/file/git/http/knowledge/mcp/notification/process/shell/system/
 └── workflows/           # Workflow 文件化（workflow.yaml）
@@ -169,11 +168,11 @@ Socket：/run/user/1000/trimum.sock（0700 权限，Arch Linux 部署时）
 ## 认证/授权体系
 
 ```
-Agent 请求 → AgentRouter 匹配 → 
-  (1) AgentRegistry 检查证书（agent_cert）→ 
-    ├── Official cert → 直接放行
-    ├── Self-signed → 同机信任/跨机 Confirm
-    └── None → 走 ConfirmEntry
+Agent 请求 → AgentRegistry 查询 → 
+  (1) AgentRegistry 检查 Agent 文件夹下 cert.json → 
+    ├── type=official → TRUSTED（跨机信任）
+    ├── type=self_signed → 同机 TRUSTED/跨机 CONFIRM
+    └── type=none → CONFIRM（弹确认入口）
   (2) PolicyEngine 策略匹配 → 
     ├── source_type 过滤
     └── RiskLevel 评估

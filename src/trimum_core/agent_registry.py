@@ -16,6 +16,7 @@ from trimum_core.agent_cert import (
     confirm_and_trust,
     ensure_cert_dirs,
 )
+from shutil import which
 from trimum_core.models import AgentManifest
 
 # Try json5 for comment support
@@ -82,6 +83,26 @@ class AgentRegistry:
 
         self._agents[manifest.name] = manifest
         self._add_to_capability_index(manifest)
+
+    def check_dependencies(self, manifest: AgentManifest) -> list[str]:
+        """检查 Agent 声明的依赖是否在 PATH 中。
+
+        Args:
+            manifest: Agent 清单
+
+        Returns:
+            缺失依赖列表（空 = 全部就绪）
+        """
+        if not manifest.depends_on:
+            return []
+
+        missing: list[str] = []
+        for dep in manifest.depends_on:
+            # 使用 shutil.which 检查 PATH
+            if which(dep) is None:
+                missing.append(dep)
+
+        return missing
 
     def unregister(self, name: str) -> bool:
         """Remove an agent type by name. Returns True if removed."""
