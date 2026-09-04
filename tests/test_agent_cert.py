@@ -95,82 +95,120 @@ class TestVerifyCert:
 
 
 class TestCheckAgentTrust:
-    """check_agent_trust 集成测试。"""
+    """check_agent_trust 集成测试。
 
-    def test_official_dir(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            import trimum_core.agent_cert as ac
-            # 临时替换 cert_dirs
-            orig = ac.cert_dirs
-            base = Path(tmp)
-            ac.cert_dirs = lambda: {
-                "official": base / "official",
-                "trusted": base / "trusted",
-                "pending": base / "pending",
-            }
-            ensure_cert_dirs()
-            # 放一个官方证书
-            cert = AgentCert("official-agent", CertificateType.OFFICIAL, issued_by="trimum")
-            cert.save(base / "official")
-            level, loaded = check_agent_trust("official-agent")
-            assert level == CertTrustLevel.TRUSTED
-            assert loaded is not None
-            ac.cert_dirs = orig  # 恢复
+    #21 — 查找顺序：
+    1. ``agents/<name>/cert.json``（Agent 文件夹优先）
+    2. ``certs/official/<name>.cert.json``
+    3. ``certs/trusted/<name>.cert.json``（迁移兼容）
+    4. 无证 → CONFIRM
+    """
 
-    def test_trusted_dir(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            import trimum_core.agent_cert as ac
-            orig = ac.cert_dirs
-            base = Path(tmp)
-            ac.cert_dirs = lambda: {
-                "official": base / "official",
-                "trusted": base / "trusted",
-                "pending": base / "pending",
-            }
-            ensure_cert_dirs()
-            cert = create_self_signed_cert("trusted-agent")
-            cert.save(base / "trusted")
-            level, loaded = check_agent_trust("trusted-agent")
-            assert level == CertTrustLevel.TRUSTED
-            assert loaded is not None
-            ac.cert_dirs = orig
+    @pytest.fixture
+    def monkey_ac(self, monkeypatch):
+        """临时替换 _agents_dir 和 cert_dirs 到 tempdir。"""
+        import trimum_core.agent_cert as ac
+        tmp = Path(tempfile.mkdtemp())
+        agents_dir = tmp / "agents"
+        agents_dir.mkdir()
+        monkeypatch.setattr(ac, "_agents_dir", lambda: agents_dir)
+        certs_base = tmp / "certs"
+        monkeypatch.setattr(ac, "cert_dirs", lambda: {
+            "official": certs_base / "official",
+            "trusted": certs_base / "trusted",
+            "pending": certs_base / "pending",
+        })
+        ensure_cert_dirs()
+        return tmp, agents_dir, certs_base
 
-    def test_no_cert(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            import trimum_core.agent_cert as ac
-            orig = ac.cert_dirs
-            base = Path(tmp)
-            ac.cert_dirs = lambda: {
-                "official": base / "official",
-                "trusted": base / "trusted",
-                "pending": base / "pending",
-            }
-            ensure_cert_dirs()
-            level, loaded = check_agent_trust("unknown-agent")
-            assert level == CertTrustLevel.CONFIRM
-            assert loaded is None
-            ac.cert_dirs = orig
+    def test_agent_folder_cert_priority(self, monkey_ac):
+        """Agent 文件夹的 cert.json 优先于 certs/official。"""
+        tmp, agents_dir, certs_base = monkey_ac
+        import trimum_core.agent_cert as ac
+
+        # 在 official 放一个官方证书
+        cert_official = AgentCert("agent-x", CertificateType.OFFICIAL, issued_by="trimum")
+        cert_official.save(certs_base / "official")
+
+        # 在 Agent 文件夹放一个自签证书（应该优先）
+        agent_dir = agents_dir / "agent-x"
+        agent_dir.mkdir(parents=True)
+        cert_self = create_self_signed_cert("agent-x")
+        (agent_dir / "cert.json").write_text(json.dumps(cert_self.to_dict()), encoding="utf-8")
+
+        level, loaded = check_agent_trust("agent-x")
+        assert level == CertTrustLevel.TRUSTED
+        assert loaded is not None
+        assert loaded.cert_type == CertificateType.SELF_SIGNED  # Agent 文件夹的生效
+
+    def test_official_dir(self, monkey_ac):
+        """official 证书仍作为第二优先级。"""
+        tmp, agents_dir, certs_base = monkey_ac
+
+        cert = AgentCert("official-agent", CertificateType.OFFICIAL, issued_by="trimum")
+        cert.save(certs_base / "official")
+        level, loaded = check_agent_trust("official-agent")
+        assert level == CertTrustLevel.TRUSTED
+        assert loaded is not None
+
+    def test_trusted_dir_fallback(self, monkey_ac):
+        """old trusted 作为第三优先级（迁移兼容）。"""
+        tmp, agents_dir, certs_base = monkey_ac
+
+        cert = create_self_signed_cert("legacy-agent")
+        cert.save(certs_base / "trusted")
+        level, loaded = check_agent_trust("legacy-agent")
+        assert level == CertTrustLevel.TRUSTED
+        assert loaded is not None
+
+    def test_no_cert(self, monkey_ac):
+        """无证 → CONFIRM。"""
+        tmp, agents_dir, certs_base = monkey_ac
+
+        level, loaded = check_agent_trust("unknown-agent")
+        assert level == CertTrustLevel.CONFIRM
+        assert loaded is None
 
 
 class TestConfirmAndTrust:
-    """用户确认流程。"""
+    """用户确认流程（#21 — 证书写入 Agent 文件夹）。"""
 
-    def test_confirm_creates_cert(self):
+    def test_confirm_creates_agent_folder_cert(self):
+        """confirm_and_trust 现在写入 agents/<name>/cert.json（同时保留旧 trusted 兼容）。"""
         with tempfile.TemporaryDirectory() as tmp:
             import trimum_core.agent_cert as ac
-            orig = ac.cert_dirs
+            import trimum_core.agent_cert as ac_mod
+
+            orig_cert = ac.cert_dirs
+            orig_agents = ac._agents_dir
+
             base = Path(tmp)
+            agents_dir = base / "agents"
+            agents_dir.mkdir()
+
+            ac._agents_dir = lambda: agents_dir
             ac.cert_dirs = lambda: {
-                "official": base / "official",
-                "trusted": base / "trusted",
-                "pending": base / "pending",
+                "official": base / "certs" / "official",
+                "trusted": base / "certs" / "trusted",
+                "pending": base / "certs" / "pending",
             }
             ensure_cert_dirs()
+
             result = confirm_and_trust("new-agent")
-            assert result is True  # 当前 stub 返回 True
-            # 检查证书是否被创建
-            assert (base / "trusted" / "new-agent.cert.json").is_file()
-            ac.cert_dirs = orig
+            assert result is True
+
+            # 1. Agent 文件夹 cert.json 必须存在
+            agent_cert_path = agents_dir / "new-agent" / "cert.json"
+            assert agent_cert_path.is_file(), "Agent cert.json not created"
+            data = json.loads(agent_cert_path.read_text(encoding="utf-8"))
+            assert data["agent_name"] == "new-agent"
+            assert data["cert_type"] == "self_signed"
+
+            # 2. 旧 trusted 兼容副本也应存在
+            assert (base / "certs" / "trusted" / "new-agent.cert.json").is_file()
+
+            ac._agents_dir = orig_agents
+            ac.cert_dirs = orig_cert
 
 
 class TestCertDirs:

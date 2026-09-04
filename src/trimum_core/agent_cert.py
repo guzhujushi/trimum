@@ -52,6 +52,10 @@ def _certs_dir() -> Path:
     return Path.home() / ".trimum" / "certs"
 
 
+def _agents_dir() -> Path:
+    return Path.home() / ".trimum" / "agents"
+
+
 def cert_dirs() -> dict[str, Path]:
     base = _certs_dir()
     return {
@@ -271,21 +275,40 @@ class ConfirmEntry:
 
 
 # ---------------------------------------------------------------------------
-# AgentRegistry 集成入口
+# AgentRegistry 集成入口（#21 — 证书移入 Agent 文件夹）
 # ---------------------------------------------------------------------------
 
 
 def check_agent_trust(
     agent_name: str,
 ) -> tuple[CertTrustLevel, Optional[AgentCert]]:
-    ensure_cert_dirs()
+    """检查 Agent 的信任等级。
 
+    搜索顺序：
+    1. ``~/.trimum/agents/<name>/cert.json`` — Agent 文件夹自带证书
+    2. ``~/.trimum/certs/official/<name>.cert.json`` — 官方证书仓库
+    3. ``~/.trimum/certs/trusted/<name>.cert.json`` — 旧信任证书（迁移兼容）
+    4. 无证 → CONFIRM
+    """
+    ensure_cert_dirs()
     dirs = cert_dirs()
 
+    # 优先：Agent 文件夹自带 cert.json
+    agent_cert_path = _agents_dir() / agent_name / "cert.json"
+    if agent_cert_path.is_file():
+        try:
+            data = json.loads(agent_cert_path.read_text(encoding="utf-8"))
+            cert = AgentCert.from_dict(data)
+            return verify_cert(agent_name, cert), cert
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # 次优先：官方证书仓库
     cert = AgentCert.load(agent_name, dirs["official"])
     if cert:
         return verify_cert(agent_name, cert), cert
 
+    # 旧 trusted 目录（迁移兼容）
     cert = AgentCert.load(agent_name, dirs["trusted"])
     if cert:
         return verify_cert(agent_name, cert), cert
@@ -294,11 +317,23 @@ def check_agent_trust(
 
 
 def confirm_and_trust(agent_name: str, entry_path: str = "") -> bool:
+    """用户确认后，将证书写入 Agent 文件夹（不是旧 certs/trusted）。
+
+    #21 — cp 即走：复制 Agent 文件夹 = 代码+证书+记忆+经验完整打包。
+    """
     if not ConfirmEntry.request_confirmation(agent_name):
         return False
 
-    ensure_cert_dirs()
+    agent_memory_dir = _agents_dir() / agent_name / "memory"
+    agent_memory_dir.mkdir(parents=True, exist_ok=True)
+
     cert = create_self_signed_cert(agent_name, entry_path)
+    # 保存到 Agent 文件夹
+    cert_path = _agents_dir() / agent_name / "cert.json"
+    cert_path.write_text(json.dumps(cert.to_dict(), indent=2), encoding="utf-8")
+
+    # 同时保留旧 trusted 目录的副本（旧代码迁移兼容）
+    ensure_cert_dirs()
     cert.save(cert_dirs()["trusted"])
     return True
 

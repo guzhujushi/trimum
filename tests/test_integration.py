@@ -714,9 +714,9 @@ async def test_event_bus_subscriber_error_is_silent():
 @pytest.mark.asyncio
 async def test_context_manager_set_get_delete(tmp_path):
     """ContextManager: set → get → delete → get None."""
-    db_path = str(tmp_path / "test_ctx.db")
-    cm = ContextManager(db_path)
-    await cm.initialize()
+    db_dir = str(tmp_path / "ctx")
+    cm = ContextManager(db_dir)
+    await cm.initialize("agent-1")
 
     await cm.set("agent-1", "key1", "value1")
     val = await cm.get("agent-1", "key1")
@@ -733,9 +733,9 @@ async def test_context_manager_set_get_delete(tmp_path):
 @pytest.mark.asyncio
 async def test_context_manager_ttl_expiry(tmp_path):
     """ContextManager TTL expiry: past-TTL entry returns None."""
-    db_path = str(tmp_path / "test_ttl.db")
-    cm = ContextManager(db_path)
-    await cm.initialize()
+    db_dir = str(tmp_path / "ttl")
+    cm = ContextManager(db_dir)
+    await cm.initialize("agent-1")
 
     await cm.set("agent-1", "ephemeral", "gone", ttl_seconds=0.01)
     await asyncio.sleep(0.02)
@@ -749,9 +749,9 @@ async def test_context_manager_ttl_expiry(tmp_path):
 @pytest.mark.asyncio
 async def test_context_manager_namespace_isolation(tmp_path):
     """Different namespaces don't interfere."""
-    db_path = str(tmp_path / "test_ns.db")
-    cm = ContextManager(db_path)
-    await cm.initialize()
+    db_dir = str(tmp_path / "ns")
+    cm = ContextManager(db_dir)
+    await cm.initialize("agent-1")
 
     await cm.set("agent-1", "key", "ns1_value", namespace="ns1")
     await cm.set("agent-1", "key", "ns2_value", namespace="ns2")
@@ -768,9 +768,9 @@ async def test_context_manager_namespace_isolation(tmp_path):
 @pytest.mark.asyncio
 async def test_context_manager_list_namespace(tmp_path):
     """list_namespace returns all non-expired entries."""
-    db_path = str(tmp_path / "test_list.db")
-    cm = ContextManager(db_path)
-    await cm.initialize()
+    db_dir = str(tmp_path / "list")
+    cm = ContextManager(db_dir)
+    await cm.initialize("agent-1")
 
     await cm.set("agent-1", "a", 1)
     await cm.set("agent-1", "b", 2)
@@ -788,8 +788,8 @@ async def test_context_manager_list_namespace(tmp_path):
 @pytest.mark.asyncio
 async def test_context_manager_session_lifecycle(tmp_path):
     """Session register → update → list."""
-    db_path = str(tmp_path / "test_session.db")
-    cm = ContextManager(db_path)
+    db_dir = str(tmp_path / "session")
+    cm = ContextManager(db_dir)
     await cm.initialize()
 
     await cm.register_session("agent-1", "worker", {"started": True})
@@ -811,9 +811,10 @@ async def test_context_manager_session_lifecycle(tmp_path):
 @pytest.mark.asyncio
 async def test_context_manager_clear_agent(tmp_path):
     """clear_agent removes all context for an agent."""
-    db_path = str(tmp_path / "test_clear.db")
-    cm = ContextManager(db_path)
-    await cm.initialize()
+    db_dir = str(tmp_path / "clear")
+    cm = ContextManager(db_dir)
+    await cm.initialize("agent-1")
+    await cm.initialize("agent-2")
 
     await cm.set("agent-1", "x", 10)
     await cm.set("agent-1", "y", 20, namespace="other")
@@ -923,9 +924,9 @@ async def test_event_bus_integrated_with_workflow():
 @pytest.mark.asyncio
 async def test_context_manager_overwrite_value(tmp_path):
     """Setting same key overwrites previous value."""
-    db_path = str(tmp_path / "test_overwrite.db")
-    cm = ContextManager(db_path)
-    await cm.initialize()
+    db_dir = str(tmp_path / "overwrite")
+    cm = ContextManager(db_dir)
+    await cm.initialize("agent-1")
 
     await cm.set("agent-1", "key", "old")
     await cm.set("agent-1", "key", "new")

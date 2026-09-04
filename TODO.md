@@ -1,6 +1,6 @@
 # trimum — 未完成待办清单
 
-> 最后更新：2026-09-03 18:54
+> 最后更新：2026-09-04 13:49
 > Phase 3 核心 7 项已全部完成（#1 TARL-SPEC ~ #7 Security TARL）✅
 > **Agent SDK 封装已就绪**：TrimumAgent 283 行 + 3 测试通过 ✅
 > **上下文窗口管理不单独做**：ContextManager 三重记忆 + FTS5 已覆盖 ✅
@@ -8,7 +8,7 @@
 > **X4 证书体系已落地**：agent_cert.py 官方/自签/无证三档 + 机器指纹 + ConfirmEntry 预留 ✅
 > **#3.5 AI/人类流量标签已落地**：SourceType 枚举 + PolicyEngine source 过滤 + TransformAgent origin 标签 ✅
 > 审计分析：`docs/REFERENCE-AUDIT.md`（G1-G12）、`docs/PYDANTIC-AI-COMPARISON.md`
-> 测试：120 pass 1 fail（已知缓存问题）
+> 测试：201 pass 1 skip（#20 #21 Agent 私密记忆 + 证书移入 Agent 文件夹已落地）✅
 
 ---
 
@@ -157,13 +157,28 @@
 - 已创建两个示例：blog-deploy（3步部署）和 daily-check（系统巡检）
 - 文件化体系完整：Agent / Tool / Certs / Workflow 四层全部可 `ls` 发现
 
-### #20 记忆文件（前两级）放到 Agent 文件夹
-- 当前记忆全在 `~/.trimum/memory/` 的全局 namespace 下
-- 需要：每个 Agent 文件夹自带 `memory/` 子目录
-  - `~/.trimum/agents/<name>/memory/agent.db` — Agent 私有记忆（前两级）
-  - `~/.trimum/agents/<name>/memory/experience.db` — 经验教训
-- 项目共享放到 `~/.trimum/memory/projects/<id>.db`
-- 全局放到 `~/.trimum/memory/global.db`
+### #20 记忆文件放到 Agent 文件夹 ✅
+> 2026-09-04 全量测试 201/1 pass
+- ContextManager 改造：`db_path` → `db_dir` 参数
+- Agent 私有记忆路径：`{db_dir}/agents/{agent_id}/memory/agent.db`
+- 项目共享：`{db_dir}/projects/{project_id}.db`
+- 全局：`{db_dir}/global.db`
+- FTS5 统一索引：`{db_dir}/fts.db`
+- agent.db 自动创建初始化（`initialize(agent_id)` 时 mkdir + SQL schema）
+- 新增 global CRUD：`set_global`/`get_global`/`list_global`/`delete_global`
+- 新增 session 管理：`register_session`/`get_session`/`update_session`/`list_sessions`
+- 新增 cross-agent FTS5 搜索：`search(query, limit, namespace_filter)`
+- `_agent_memory_dir(agent_id)` 路径助手
+
+### #21 Certs 移到 Agent 文件夹 ✅
+> 2026-09-04 全量测试 201/1 pass
+- `check_agent_trust()` 搜索顺序：
+  1. `~/.trimum/agents/<name>/cert.json`（Agent 文件夹优先）
+  2. `~/.trimum/certs/official/<name>.cert.json`（官方证书）
+  3. `~/.trimum/certs/trusted/<name>.cert.json`（迁移兼容）
+  4. 无证 → CONFIRM
+- `confirm_and_trust()` 将证书写入 `agents/<name>/cert.json`（同时保留旧 trusted/ 副本）
+- cp 即走：复制 Agent 文件夹 = 代码 + 证书 + 记忆 + 经验完整打包
 
 ### #22 Agent depends_on 依赖声明字段
 > 让 Agent 声明自己依赖的外部 CLI/MCP 工具，拓展生态

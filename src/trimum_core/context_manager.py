@@ -2,13 +2,26 @@
 
 Provides ContextManager for storing/retrieving agent context data
 and session tracking, using aiosqlite for async SQLite operations.
+
+#20 — Each agent gets its own memory DB:
+
+  {db_dir}/
+  ├── global.db              # global_context + sessions
+  ├── fts.db                 # FTS5 unified index (cross-agent search)
+  ├── agents/
+  │   └── {agent_id}/
+  │       └── memory/
+  │           └── agent.db   # context (agent_memory namespace only)
+  └── projects/
+      └── {project_id}.db    # project_ctx (shared)
 """
 
 from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 import aiosqlite
 
@@ -26,50 +39,142 @@ class ContextEntry(BaseModel):
 class ContextManager:
     """Async SQLite-backed context & session manager for agents.
 
+    Manages multiple SQLite files:
+    - One ``agent.db`` per agent (private memory)
+    - One DB per project (shared project context)
+    - ``global.db`` (Planner long-term memory + session records)
+    - ``fts.db`` (unified FTS5 index for cross-agent search)
+
     Usage::
 
-        cm = ContextManager("path/to/db.sqlite")
-        await cm.initialize()
+        cm = ContextManager("/path/to/memory/dir")
+        await cm.initialize("agent-1")
         await cm.set("agent-1", "my_key", {"nested": "data"}, ttl_seconds=3600)
         val = await cm.get("agent-1", "my_key")
         await cm.close()
     """
 
-    def __init__(self, db_path: str) -> None:
-        self._db_path = db_path
-        self._conn: aiosqlite.Connection | None = None
+    def __init__(self, db_dir: str) -> None:
+        self._db_dir = Path(db_dir)
+        # Connection cache: key -> aiosqlite.Connection
+        self._agent_conns: dict[str, aiosqlite.Connection] = {}
+        self._project_conns: dict[str, aiosqlite.Connection] = {}
+        self._global_conn: aiosqlite.Connection | None = None
+        self._fts_conn: aiosqlite.Connection | None = None
+
+    # ------------------------------------------------------------------
+    # Path helpers
+    # ------------------------------------------------------------------
+
+    def _agent_db_path(self, agent_id: str) -> Path:
+        return self._db_dir / "agents" / agent_id / "memory" / "agent.db"
+
+    def _project_db_path(self, project_id: str) -> Path:
+        return self._db_dir / "projects" / f"{project_id}.db"
+
+    def _global_db_path(self) -> Path:
+        return self._db_dir / "global.db"
+
+    def _fts_db_path(self) -> Path:
+        return self._db_dir / "fts.db"
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def initialize(self) -> None:
-        """Open db connection and create tables if they don't exist."""
-        self._conn = await aiosqlite.connect(self._db_path)
-        self._conn.row_factory = aiosqlite.Row
+    async def initialize(self, agent_id: str | None = None) -> None:
+        """Open **or ensure** DB connections and create tables.
 
-        await self._conn.executescript(
+        If *agent_id* is given, only initialise that agent's DB (lazy init).
+        If *agent_id* is omitted, global + FTS connections are ensured.
+        """
+        # Global DB (always)
+        if self._global_conn is None:
+            self._global_conn = await self._connect_and_init_global()
+
+        # FTS DB (always)
+        if self._fts_conn is None:
+            self._fts_conn = await self._connect_and_init_fts()
+
+        # Agent-specific
+        if agent_id is not None and agent_id not in self._agent_conns:
+            db_path = self._agent_db_path(agent_id)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = await aiosqlite.connect(str(db_path))
+            conn.row_factory = aiosqlite.Row
+            await conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS context (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    namespace      TEXT    NOT NULL,
+                    key            TEXT    NOT NULL,
+                    value          TEXT    NOT NULL,     -- JSON-encoded
+                    created_at     REAL   NOT NULL,
+                    expires_at     REAL   DEFAULT NULL,  -- NULL = never expires
+                    UNIQUE(namespace, key)
+                );
+                """
+            )
+            await conn.commit()
+            self._agent_conns[agent_id] = conn
+
+    async def ensure_project_db(self, project_id: str) -> aiosqlite.Connection:
+        """Lazy-init and return a project DB connection."""
+        if project_id not in self._project_conns:
+            db_path = self._project_db_path(project_id)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = await aiosqlite.connect(str(db_path))
+            conn.row_factory = aiosqlite.Row
+            await conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS context (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    namespace      TEXT    NOT NULL DEFAULT 'project_ctx',
+                    key            TEXT    NOT NULL,
+                    value          TEXT    NOT NULL,
+                    created_at     REAL   NOT NULL,
+                    expires_at     REAL   DEFAULT NULL,
+                    UNIQUE(namespace, key)
+                );
+                """
+            )
+            await conn.commit()
+            self._project_conns[project_id] = conn
+        return self._project_conns[project_id]
+
+    async def close(self) -> None:
+        """Close all database connections."""
+        for conn in self._agent_conns.values():
+            await conn.close()
+        self._agent_conns.clear()
+
+        for conn in self._project_conns.values():
+            await conn.close()
+        self._project_conns.clear()
+
+        if self._global_conn is not None:
+            await self._global_conn.close()
+            self._global_conn = None
+
+        if self._fts_conn is not None:
+            await self._fts_conn.close()
+            self._fts_conn = None
+
+    # ------------------------------------------------------------------
+    # Internal connection builders
+    # ------------------------------------------------------------------
+
+    async def _connect_and_init_global(self) -> aiosqlite.Connection:
+        db_path = self._global_db_path()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = await aiosqlite.connect(str(db_path))
+        conn.row_factory = aiosqlite.Row
+        await conn.executescript(
             """
-            CREATE TABLE IF NOT EXISTS context (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                agent_id       TEXT    NOT NULL,
-                namespace      TEXT    NOT NULL,
-                key            TEXT    NOT NULL,
-                value          TEXT    NOT NULL,     -- JSON-encoded
-                created_at     REAL   NOT NULL,
-                expires_at     REAL   DEFAULT NULL,  -- NULL = never expires
-                UNIQUE(agent_id, namespace, key)
-            );
-
             CREATE TABLE IF NOT EXISTS global_context (
                 key            TEXT   PRIMARY KEY,
                 value          TEXT   NOT NULL,
                 updated_at     REAL   NOT NULL
-            );
-
-            CREATE VIRTUAL TABLE IF NOT EXISTS context_fts USING fts5(
-                agent_id, namespace, key, value,
-                tokenize="unicode61"
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -81,16 +186,36 @@ class ContextManager:
             );
             """
         )
-        await self._conn.commit()
+        await conn.commit()
+        return conn
 
-    async def close(self) -> None:
-        """Close the database connection."""
-        if self._conn is not None:
-            await self._conn.close()
-            self._conn = None
+    async def _connect_and_init_fts(self) -> aiosqlite.Connection:
+        db_path = self._fts_db_path()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = await aiosqlite.connect(str(db_path))
+        conn.row_factory = aiosqlite.Row
+        await conn.executescript(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS context_fts USING fts5(
+                agent_id, project_id, namespace, key, value,
+                tokenize="unicode61"
+            );
+            """
+        )
+        await conn.commit()
+        return conn
+
+    def _get_agent_conn(self, agent_id: str) -> aiosqlite.Connection:
+        """Get or lazily open an agent DB connection."""
+        if agent_id not in self._agent_conns:
+            raise RuntimeError(
+                f"Agent '{agent_id}' DB not initialised. "
+                "Call cm.initialize(agent_id) first."
+            )
+        return self._agent_conns[agent_id]
 
     # ------------------------------------------------------------------
-    # Context CRUD
+    # Context CRUD — Agent private memory
     # ------------------------------------------------------------------
 
     async def set(
@@ -106,36 +231,40 @@ class ContextManager:
         If *ttl_seconds* is provided, the entry will be considered expired
         that many seconds after creation (or last update).
         """
+        conn = self._get_agent_conn(agent_id)
         now = time.time()
         expires_at: float | None = None
         if ttl_seconds is not None:
             expires_at = now + ttl_seconds
 
-        await self._conn.execute(
+        await conn.execute(
             """
-            INSERT INTO context (agent_id, namespace, key, value, created_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(agent_id, namespace, key) DO UPDATE SET
+            INSERT INTO context (namespace, key, value, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(namespace, key) DO UPDATE SET
                 value      = excluded.value,
                 created_at = excluded.created_at,
                 expires_at = excluded.expires_at
             """,
-            (agent_id, namespace, key, json.dumps(value, ensure_ascii=False), now, expires_at),
+            (namespace, key, json.dumps(value, ensure_ascii=False), now, expires_at),
         )
+        await conn.commit()
 
-        # Sync FTS5 index (FTS5 virtual tables don't support ON CONFLICT)
-        try:
-            await self._conn.execute(
-                "DELETE FROM context_fts WHERE agent_id = ? AND namespace = ? AND key = ?",
-                (agent_id, namespace, key),
-            )
-            await self._conn.execute(
-                "INSERT INTO context_fts (agent_id, namespace, key, value) VALUES (?, ?, ?, ?)",
-                (agent_id, namespace, key, json.dumps(value, ensure_ascii=False)),
-            )
-        except Exception:
-            pass
-        await self._conn.commit()
+        # Sync FTS5 index (shared fts.db)
+        fts = self._fts_conn
+        if fts is not None:
+            try:
+                await fts.execute(
+                    "DELETE FROM context_fts WHERE agent_id = ? AND namespace = ? AND key = ?",
+                    (agent_id, namespace, key),
+                )
+                await fts.execute(
+                    "INSERT INTO context_fts (agent_id, project_id, namespace, key, value) VALUES (?, ?, ?, ?, ?)",
+                    (agent_id, "", namespace, key, json.dumps(value, ensure_ascii=False)),
+                )
+                await fts.commit()
+            except Exception:
+                pass
 
     async def get(
         self,
@@ -144,13 +273,14 @@ class ContextManager:
         namespace: str = "default",
     ) -> Any | None:
         """Retrieve a value, returning *None* if missing or expired."""
-        row = await self._conn.execute(
+        conn = self._get_agent_conn(agent_id)
+        row = await conn.execute(
             """
             SELECT value, expires_at
             FROM context
-            WHERE agent_id = ? AND namespace = ? AND key = ?
+            WHERE namespace = ? AND key = ?
             """,
-            (agent_id, namespace, key),
+            (namespace, key),
         )
         row_data = await row.fetchone()
         if row_data is None:
@@ -159,11 +289,11 @@ class ContextManager:
         value_raw, expires_at = row_data["value"], row_data["expires_at"]
         # Expired check
         if expires_at is not None and time.time() > expires_at:
-            await self._conn.execute(
-                "DELETE FROM context WHERE agent_id = ? AND namespace = ? AND key = ?",
-                (agent_id, namespace, key),
+            await conn.execute(
+                "DELETE FROM context WHERE namespace = ? AND key = ?",
+                (namespace, key),
             )
-            await self._conn.commit()
+            await conn.commit()
             return None
 
         return json.loads(value_raw)
@@ -175,15 +305,24 @@ class ContextManager:
         namespace: str = "default",
     ) -> None:
         """Delete a single context entry."""
-        await self._conn.execute(
-            "DELETE FROM context WHERE agent_id = ? AND namespace = ? AND key = ?",
-            (agent_id, namespace, key),
+        conn = self._get_agent_conn(agent_id)
+        await conn.execute(
+            "DELETE FROM context WHERE namespace = ? AND key = ?",
+            (namespace, key),
         )
-        await self._conn.execute(
-            "DELETE FROM context_fts WHERE agent_id = ? AND namespace = ? AND key = ?",
-            (agent_id, namespace, key),
-        )
-        await self._conn.commit()
+        await conn.commit()
+
+        # Remove from FTS5 as well
+        fts = self._fts_conn
+        if fts is not None:
+            try:
+                await fts.execute(
+                    "DELETE FROM context_fts WHERE agent_id = ? AND namespace = ? AND key = ?",
+                    (agent_id, namespace, key),
+                )
+                await fts.commit()
+            except Exception:
+                pass
 
     async def list_namespace(
         self,
@@ -191,13 +330,14 @@ class ContextManager:
         namespace: str,
     ) -> dict[str, Any]:
         """List all non-expired key-value pairs under *namespace*."""
-        cursor = await self._conn.execute(
+        conn = self._get_agent_conn(agent_id)
+        cursor = await conn.execute(
             """
             SELECT key, value, expires_at
             FROM context
-            WHERE agent_id = ? AND namespace = ?
+            WHERE namespace = ?
             """,
-            (agent_id, namespace),
+            (namespace,),
         )
         now = time.time()
         result: dict[str, Any] = {}
@@ -214,11 +354,11 @@ class ContextManager:
         # Clean up expired entries in batch
         if to_delete:
             placeholders = ",".join("?" for _ in to_delete)
-            await self._conn.execute(
-                f"DELETE FROM context WHERE agent_id = ? AND namespace = ? AND key IN ({placeholders})",
-                (agent_id, namespace, *to_delete),
+            await conn.execute(
+                f"DELETE FROM context WHERE namespace = ? AND key IN ({placeholders})",
+                (namespace, *to_delete),
             )
-            await self._conn.commit()
+            await conn.commit()
 
         return result
 
@@ -236,36 +376,96 @@ class ContextManager:
         value: Any,
         ttl_seconds: float | None = None,
     ) -> None:
-        """Store a project-level context entry.
+        """Store a project-level context entry."""
+        conn = await self.ensure_project_db(project_id)
+        now = time.time()
+        expires_at: float | None = None
+        if ttl_seconds is not None:
+            expires_at = now + ttl_seconds
 
-        Uses agent_id = f"project:{project_id}" to namespace project data.
-        """
-        await self.set(
-            agent_id=f"project:{project_id}",
-            key=key,
-            value=value,
-            namespace=self._PROJECT_NAMESPACE,
-            ttl_seconds=ttl_seconds,
+        await conn.execute(
+            """
+            INSERT INTO context (namespace, key, value, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(namespace, key) DO UPDATE SET
+                value      = excluded.value,
+                created_at = excluded.created_at,
+                expires_at = excluded.expires_at
+            """,
+            (self._PROJECT_NAMESPACE, key, json.dumps(value, ensure_ascii=False), now, expires_at),
         )
+        await conn.commit()
+
+        # Sync FTS5
+        fts = self._fts_conn
+        if fts is not None:
+            try:
+                await fts.execute(
+                    "DELETE FROM context_fts WHERE project_id = ? AND namespace = ? AND key = ?",
+                    (project_id, self._PROJECT_NAMESPACE, key),
+                )
+                await fts.execute(
+                    "INSERT INTO context_fts (agent_id, project_id, namespace, key, value) VALUES (?, ?, ?, ?, ?)",
+                    ("", project_id, self._PROJECT_NAMESPACE, key, json.dumps(value, ensure_ascii=False)),
+                )
+                await fts.commit()
+            except Exception:
+                pass
 
     async def get_project_context(
         self, project_id: str, key: str
     ) -> Any | None:
         """Retrieve a project-level context entry (requires confirmation)."""
-        return await self.get(
-            agent_id=f"project:{project_id}",
-            key=key,
-            namespace=self._PROJECT_NAMESPACE,
+        conn = await self.ensure_project_db(project_id)
+        row = await conn.execute(
+            "SELECT value, expires_at FROM context WHERE namespace = ? AND key = ?",
+            (self._PROJECT_NAMESPACE, key),
         )
+        row_data = await row.fetchone()
+        if row_data is None:
+            return None
+
+        value_raw, expires_at = row_data["value"], row_data["expires_at"]
+        if expires_at is not None and time.time() > expires_at:
+            await conn.execute(
+                "DELETE FROM context WHERE namespace = ? AND key = ?",
+                (self._PROJECT_NAMESPACE, key),
+            )
+            await conn.commit()
+            return None
+
+        return json.loads(value_raw)
 
     async def list_project_context(
         self, project_id: str
     ) -> dict[str, Any]:
         """List all project context entries."""
-        return await self.list_namespace(
-            agent_id=f"project:{project_id}",
-            namespace=self._PROJECT_NAMESPACE,
+        conn = await self.ensure_project_db(project_id)
+        cursor = await conn.execute(
+            "SELECT key, value, expires_at FROM context WHERE namespace = ?",
+            (self._PROJECT_NAMESPACE,),
         )
+        now = time.time()
+        result: dict[str, Any] = {}
+        rows = await cursor.fetchall()
+        to_delete: list[str] = []
+
+        for row in rows:
+            expires_at = row["expires_at"]
+            if expires_at is not None and now > expires_at:
+                to_delete.append(row["key"])
+                continue
+            result[row["key"]] = json.loads(row["value"])
+
+        if to_delete:
+            placeholders = ",".join("?" for _ in to_delete)
+            await conn.execute(
+                f"DELETE FROM context WHERE namespace = ? AND key IN ({placeholders})",
+                (self._PROJECT_NAMESPACE, *to_delete),
+            )
+            await conn.commit()
+
+        return result
 
     async def requires_confirmation(self, agent_id: str, key: str) -> bool:
         """Check if reading a context entry should prompt the user.
@@ -296,30 +496,133 @@ class ContextManager:
 
     async def clear_agent(self, agent_id: str) -> None:
         """Delete **all** context entries for *agent_id* (every namespace)."""
-        await self._conn.execute(
-            "DELETE FROM context WHERE agent_id = ?",
-            (agent_id,),
-        )
-        await self._conn.execute(
-            "DELETE FROM context_fts WHERE agent_id = ?",
-            (agent_id,),
-        )
-        await self._conn.commit()
+        conn = self._get_agent_conn(agent_id)
+        await conn.execute("DELETE FROM context")
+        await conn.commit()
+
+        # Also clear from FTS5
+        fts = self._fts_conn
+        if fts is not None:
+            try:
+                await fts.execute(
+                    "DELETE FROM context_fts WHERE agent_id = ?",
+                    (agent_id,),
+                )
+                await fts.commit()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
-    # Session management
+    # Global context (Planner long-term memory)
+    # ------------------------------------------------------------------
+
+    async def set_global(
+        self,
+        key: str,
+        value: Any,
+    ) -> None:
+        """Store a global context entry."""
+        conn = self._global_conn
+        if conn is None:
+            conn = await self._connect_and_init_global()
+            self._global_conn = conn
+        now = time.time()
+        await conn.execute(
+            """
+            INSERT INTO global_context (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value      = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, json.dumps(value, ensure_ascii=False), now),
+        )
+        await conn.commit()
+
+        # Sync FTS5
+        fts = self._fts_conn
+        if fts is not None:
+            try:
+                await fts.execute(
+                    "DELETE FROM context_fts WHERE agent_id = ? AND namespace = ? AND key = ?",
+                    ("__global__", "global_ctx", key),
+                )
+                await fts.execute(
+                    "INSERT INTO context_fts (agent_id, project_id, namespace, key, value) VALUES (?, ?, ?, ?, ?)",
+                    ("__global__", "", "global_ctx", key, json.dumps(value, ensure_ascii=False)),
+                )
+                await fts.commit()
+            except Exception:
+                pass
+
+    async def get_global(self, key: str) -> Any | None:
+        """Retrieve a global context entry."""
+        conn = self._global_conn
+        if conn is None:
+            return None
+        row = await conn.execute(
+            "SELECT value FROM global_context WHERE key = ?",
+            (key,),
+        )
+        row_data = await row.fetchone()
+        if row_data is None:
+            return None
+        return json.loads(row_data["value"])
+
+    async def list_global(self) -> dict[str, Any]:
+        """List all global context entries."""
+        conn = self._global_conn
+        if conn is None:
+            return {}
+        cursor = await conn.execute(
+            "SELECT key, value FROM global_context"
+        )
+        result: dict[str, Any] = {}
+        rows = await cursor.fetchall()
+        for row in rows:
+            result[row["key"]] = json.loads(row["value"])
+        return result
+
+    async def delete_global(self, key: str) -> None:
+        """Delete a global context entry."""
+        conn = self._global_conn
+        if conn is None:
+            return
+        await conn.execute(
+            "DELETE FROM global_context WHERE key = ?",
+            (key,),
+        )
+        await conn.commit()
+
+        # Also remove from FTS5
+        fts = self._fts_conn
+        if fts is not None:
+            try:
+                await fts.execute(
+                    "DELETE FROM context_fts WHERE agent_id = ? AND namespace = ? AND key = ?",
+                    ("__global__", "global_ctx", key),
+                )
+                await fts.commit()
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # Session management (global.db `sessions` table)
     # ------------------------------------------------------------------
 
     async def register_session(
         self,
         agent_id: str,
-        agent_type: str,
+        session_type: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Register (or upsert) a session record for *agent_id*."""
+        """Register a session for *agent_id* in global DB."""
+        conn = self._global_conn
+        if conn is None:
+            conn = await self._connect_and_init_global()
+            self._global_conn = conn
         now = time.time()
-        meta_json = json.dumps(metadata or {}, ensure_ascii=False)
-        await self._conn.execute(
+        await conn.execute(
             """
             INSERT INTO sessions (agent_id, type, created_at, last_active, metadata)
             VALUES (?, ?, ?, ?, ?)
@@ -328,183 +631,131 @@ class ContextManager:
                 last_active = excluded.last_active,
                 metadata    = excluded.metadata
             """,
-            (agent_id, agent_type, now, now, meta_json),
+            (agent_id, session_type, now, now, json.dumps(metadata or {}, ensure_ascii=False)),
         )
-        await self._conn.commit()
-
-    async def update_session(
-        self,
-        agent_id: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        """Update *last_active* timestamp and optionally merge *metadata*.
-
-        If *metadata* is provided, the existing metadata dict is shallow-merged
-        (new keys overwrite old ones).
-        """
-        now = time.time()
-
-        if metadata is not None:
-            # Read existing metadata, merge, then write back
-            existing = await self._get_session_metadata(agent_id)
-            existing.update(metadata)
-            meta_json = json.dumps(existing, ensure_ascii=False)
-            await self._conn.execute(
-                "UPDATE sessions SET last_active = ?, metadata = ? WHERE agent_id = ?",
-                (now, meta_json, agent_id),
-            )
-        else:
-            await self._conn.execute(
-                "UPDATE sessions SET last_active = ? WHERE agent_id = ?",
-                (now, agent_id),
-            )
-        await self._conn.commit()
+        await conn.commit()
 
     async def get_session(self, agent_id: str) -> dict[str, Any] | None:
-        """Get session info for *agent_id*, or *None* if not registered."""
-        cursor = await self._conn.execute(
-            "SELECT * FROM sessions WHERE agent_id = ?",
+        """Get session info for *agent_id* from global DB."""
+        conn = self._global_conn
+        if conn is None:
+            return None
+        row = await conn.execute(
+            "SELECT type, created_at, last_active, metadata FROM sessions WHERE agent_id = ?",
             (agent_id,),
         )
-        row = await cursor.fetchone()
-        if row is None:
+        row_data = await row.fetchone()
+        if row_data is None:
             return None
-
         return {
-            "agent_id":   row["agent_id"],
-            "type":       row["type"],
-            "created_at": row["created_at"],
-            "last_active": row["last_active"],
-            "metadata":   json.loads(row["metadata"]),
+            "type": row_data["type"],
+            "created_at": row_data["created_at"],
+            "last_active": row_data["last_active"],
+            "metadata": json.loads(row_data["metadata"]),
         }
 
-    async def list_sessions(self) -> list[dict[str, Any]]:
-        """List all sessions active within the last 24 hours."""
-        cutoff = time.time() - 86400  # 24 hours
-        cursor = await self._conn.execute(
-            "SELECT * FROM sessions WHERE last_active >= ?",
-            (cutoff,),
+    async def update_session(self, agent_id: str, metadata_updates: dict[str, Any]) -> None:
+        """Update session metadata (merge) and touch last_active."""
+        conn = self._global_conn
+        if conn is None:
+            return
+        row = await conn.execute(
+            "SELECT metadata FROM sessions WHERE agent_id = ?",
+            (agent_id,),
         )
+        row_data = await row.fetchone()
+        if row_data is None:
+            return
+        existing = json.loads(row_data["metadata"])
+        existing.update(metadata_updates)
+        now = time.time()
+        await conn.execute(
+            "UPDATE sessions SET metadata = ?, last_active = ? WHERE agent_id = ?",
+            (json.dumps(existing, ensure_ascii=False), now, agent_id),
+        )
+        await conn.commit()
+
+    async def list_sessions(self) -> list[dict[str, Any]]:
+        """List all active sessions."""
+        conn = self._global_conn
+        if conn is None:
+            return []
+        cursor = await conn.execute(
+            "SELECT agent_id, type, created_at, last_active, metadata FROM sessions"
+        )
+        results: list[dict[str, Any]] = []
         rows = await cursor.fetchall()
-        return [
-            {
-                "agent_id":   row["agent_id"],
-                "type":       row["type"],
+        for row in rows:
+            results.append({
+                "agent_id": row["agent_id"],
+                "type": row["type"],
                 "created_at": row["created_at"],
                 "last_active": row["last_active"],
-                "metadata":   json.loads(row["metadata"]),
-            }
-            for row in rows
-        ]
+                "metadata": json.loads(row["metadata"]),
+            })
+        return results
 
     # ------------------------------------------------------------------
-    # FTS5 Full-text search
+    # Cross-agent search via FTS5
     # ------------------------------------------------------------------
 
     async def search(
         self,
         query: str,
         limit: int = 20,
-    ) -> list[dict]:
-        """Full-text search across all context entries.
+        namespace_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Full-text search across all indexed context entries.
 
-        Uses FTS5 with unicode61 tokenizer.
-        Supports standard FTS5 query syntax (AND, OR, NOT, phrases).
-        Returns list of {agent_id, namespace, key, value, rank}.
+        Uses FTS5 on ``context_fts`` virtual table.
+
+        Args:
+            query: FTS5 query string (uses unicode61 tokenizer).
+            limit: Maximum number of results.
+            namespace_filter: Optional namespace restriction.
+
+        Returns:
+            List of dicts with keys: agent_id, project_id, namespace, key, value.
         """
-        try:
-            cursor = await self._conn.execute(
-                """SELECT c.agent_id, c.namespace, c.key, c.value, fts.rank
-                FROM context_fts fts
-                JOIN context c ON c.agent_id = fts.agent_id
-                    AND c.namespace = fts.namespace
-                    AND c.key = fts.key
-                WHERE context_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?""",
-                (query, limit),
-            )
-            rows = await cursor.fetchall()
-            return [
-                {
-                    "agent_id": r["agent_id"],
-                    "namespace": r["namespace"],
-                    "key": r["key"],
-                    "value": json.loads(r["value"]),
-                    "rank": r[4],
-                }
-                for r in rows
-            ] if rows else []
-        except Exception:
+        fts = self._fts_conn
+        if fts is None:
             return []
 
-    async def search_by_namespace(
-        self,
-        query: str,
-        namespace: str,
-        limit: int = 20,
-    ) -> list[dict]:
-        """Full-text search scoped to a specific namespace."""
-        return await self.search(f"namespace:\"{namespace}\" AND ({query})", limit=limit)
+        if namespace_filter:
+            sql = """
+                SELECT agent_id, project_id, namespace, key, value
+                FROM context_fts
+                WHERE context_fts MATCH ?
+                  AND namespace = ?
+                LIMIT ?
+            """
+            params = (query, namespace_filter, limit)
+        else:
+            sql = """
+                SELECT agent_id, project_id, namespace, key, value
+                FROM context_fts
+                WHERE context_fts MATCH ?
+                LIMIT ?
+            """
+            params = (query, limit)
 
-    # ------------------------------------------------------------------
-    # Global context (Planner long-term / 总上下文)
-    # ------------------------------------------------------------------
+        results: list[dict[str, Any]] = []
+        try:
+            cursor = await fts.execute(sql, params)
+            rows = await cursor.fetchall()
+            for row in rows:
+                try:
+                    val = json.loads(row["value"])
+                except (json.JSONDecodeError, TypeError):
+                    val = row["value"]
+                results.append({
+                    "agent_id": row["agent_id"],
+                    "project_id": row["project_id"],
+                    "namespace": row["namespace"],
+                    "key": row["key"],
+                    "value": val,
+                })
+        except Exception:
+            pass
 
-    async def set_global(
-        self,
-        key: str,
-        value: Any,
-    ) -> None:
-        """Store a global context entry (Planner long-term / 总上下文)."""
-        await self._conn.execute(
-            """INSERT INTO global_context (key, value, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = excluded.updated_at""",
-            (key, json.dumps(value, ensure_ascii=False), time.time()),
-        )
-        await self._conn.commit()
-
-    async def get_global(self, key: str) -> Any | None:
-        """Retrieve a global context entry."""
-        cursor = await self._conn.execute(
-            "SELECT value FROM global_context WHERE key = ?",
-            (key,),
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        return json.loads(row["value"])
-
-    async def list_global(self) -> dict[str, Any]:
-        """List all global context entries."""
-        cursor = await self._conn.execute(
-            "SELECT key, value FROM global_context",
-        )
-        rows = await cursor.fetchall()
-        return {r["key"]: json.loads(r["value"]) for r in rows}
-
-    async def delete_global(self, key: str) -> None:
-        """Delete a global context entry."""
-        await self._conn.execute(
-            "DELETE FROM global_context WHERE key = ?",
-            (key,),
-        )
-        await self._conn.commit()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    async def _get_session_metadata(self, agent_id: str) -> dict[str, Any]:
-        """Read the existing metadata dict for *agent_id* (internal)."""
-        cursor = await self._conn.execute(
-            "SELECT metadata FROM sessions WHERE agent_id = ?",
-            (agent_id,),
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            return {}
-        return json.loads(row["metadata"])
+        return results
