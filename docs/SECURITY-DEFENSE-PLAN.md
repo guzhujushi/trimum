@@ -7,50 +7,19 @@
 
 ## 一、架构总览
 
-```
-Agent / 终端 / Workflow 的命令
-       │
-       ▼
-┌─────────────────────────────────┐
-│      ToolGateway.execute()      │  ← 拦截入口
-│  L0 cwd Jail · L1 PolicyEngine  │
-│  L2 AgentPerms · L3 JIT Auth    │
-│  L4 SecurityRule.can_execute()  │
-└──────────┬──────────────────────┘
-           │ 事件: agent.executing
-           ▼
-┌─────────────────────────────────────────────┐
-│           SecMonitor（安全监听器）            │
-│                                             │
-│  ┌────────────────┐  ┌──────────────────┐   │
-│  │  TerminalTap    │  │  EventSnoop      │   │
-│  │  实时钩入gateway │  │  监听Event Bus   │   │
-│  │  每一行命令      │  │  上的所有安全事件  │   │
-│  └───────┬────────┘  └────────┬─────────┘   │
-│          │                    │              │
-│          └────────┬───────────┘              │
-│                   ▼                          │
-│    ┌────────────────────────────┐            │
-│    │    ThreatMatcher           │            │   ← 核心：威胁匹配引擎
-│    │  输入：(agent, cmd, ctx)   │            │
-│    │  输出：威胁类型 + 应对方案   │            │
-│    └────────────┬───────────────┘            │
-│                 │                            │
-│        决策: allow / confirm / deny          │
-└─────────────────────┬───────────────────────┘
-                      │ event: security.blocked / security.alert
-                      ▼
-┌─────────────────────────────────────────────┐
-│           SecExecutor（安全执行器）           │
-│                                             │
-│  ┌────────────┐  ┌──────────┐  ┌─────────┐  │
-│  │ SecBlocker  │  │ SecNotif │  │ SecAudit │  │
-│  │ 阻断+回滚   │  │ 告警通知  │  │ 审计日志  │  │
-│  │ proc kill   │  │ EventBus │  │ 持久化    │  │
-│  │ cmd revert  │  │ 终端输出  │  │ JSON     │  │
-│  └────────────┘  └──────────┘  └─────────┘  │
-└─────────────────────────────────────────────┘
-```
+### 安全决策优先级原则
+> **能用 Workflow 干的，绝不进 Security Agent。**
+> Security Agent 是
+
+#### 决策优先级分层
+
+| 优先级 | 方式 | 说明 | 适用场景 |
+|--------|------|------|---------|
+| 1️⃣ **Workflow TARL 匹配** | 纯 YAML 规则 | ThreatMatcher 命中后直接触发预定义工作流，不进 LLM | 所有已知威胁（第 2 章表 + 第 5 章工作流应对表） |
+| 2️⃣ **SecMonitor 静态规则** | PolicyEngine 硬编码 | 模式匹配 + 操作序列分析，不进 LLM | 规则明确的阻断/确认（curl\|bash、LD_PRELOAD 等） |
+| 3️⃣ **Security Agent（LLM）** | 深度判断 | 前两层无法静态匹配或上下文不明时，才调用 LLM 推理 | 复杂边界 Case（如："这个 curl URL 是正常包管理器还是恶意"） |
+
+> **执行原则**：请求到达 → ❓ PolicyEngine/ThreatMatcher 能匹配？→ ✅ 直接 Workflow / 静态阻断；→ ❌ 进入操作序列分析 → 仍无匹配 → 🟡 Security Agent 深度判断。
 
 ---
 
@@ -143,6 +112,8 @@ agent.executing 事件到达：
 
 ### 上下文追踪（操作序列检测）
 
+> 操作序列检测同样**优先走 Workflow TARL 匹配**：操作序列模式触发后，ThreatMatcher 直接匹配对应工作流，无需 Security Agent 参与。只有操作序列模式明确但上下文不足以确定阻断/确认时，才走 Security Agent 深度判断。
+
 SecMonitor 维护一个 Agent 操作上下文环缓冲区：
 
 ```
@@ -213,22 +184,22 @@ SecExecutor 负责 "SecurityRule 判定后的实际操作"。
 
 ## 五、已知威胁 → 工作流应对表
 
-每种威胁可以自动触发一个应对工作流（YAML），不需要 LLM 参与。
+每种威胁可以自动触发一个应对工作流（YAML），不需要 LLM 参与。所有工作流通过 TARL 匹配直接触发，**不走 Security Agent**。
 
-| 威胁 | 触发时机 | 工作流名称 | 具体步骤 |
-|------|---------|-----------|---------|
-| **LD_PRELOAD rootkit** | BLOCKED 后 | `threat-prelink-check` | ① cat `/etc/ld.so.preload` → ② ls `/etc/ld.so.preload` 权限 → ③ 比对上次 hash → ④ 发审计报告 |
-| **eBPF 劫持** | BLOCKED 后 | `threat-ebpf-scan` | ① ls `/sys/fs/bpf/` → ② bpftool prog list (mock) → ③ find `/lib/modules/` 最新 .ko |
-| **PAM 后门** | DETECTED 时 | `threat-pam-audit` | ① ls `-la /etc/pam.d/` → ② sha256sum 每个文件 → ③ ldd PAM .so 文件检测异常库 |
-| **反向 Shell** | BLOCKED 后 | `threat-revshell-cleanup` | ① ss -tupn → ② kill 对应 PID → ③ firewall-cmd --add-rich-rule 阻断 IP |
-| **勒索加密** | DETECTED 时 | `threat-ransomware-response` | ① 杀进程 (SIGSTOP) → ② find 受影响文件清单 → ③ 记录 hash 到审计 → ④ 发 security.alert |
-| **SSH 密钥窃取** | DETECTED 时 | `threat-ssh-audit` | ① cat ~/.ssh/authorized_keys → ② ls -la ~/.ssh/ → ③ 比对 known_hosts 变化 → ④ 审计日志 |
-| **curl|bash 远程加载** | BLOCKED 后 | `threat-pipe-download-check` | ① 检查 ~/.bashrc 是否被改 → ② 检查 /tmp/ 新文件 → ③ 检查定时任务 → ④ 报告 |
-| **挖矿二进制** | BLOCKED 后 | `threat-crypto-scan` | ① lsof -i 检查连接 → ② ps aux 扫描 crypto 进程名 → ③ 检查 cron jobs → ④ 检查 /dev/shm/ 内容 |
-| **Cron 持久化** | BLOCKED 后 | `threat-cron-audit` | ① crontab -l 列出 → ② ls /etc/cron.d/ → ③ 比对上次 hash → ④ 报告新增条目 |
-| **Systemd 持久化** | BLOCKED 后 | `threat-systemd-audit` | ① systemctl list-units --state=enabled → ② find /etc/systemd/system/ -newer timestamp → ③ 检查 ExecStart 路径合法性 |
-| **WebShell 上传** | DETECTED 时 | `threat-webshell-scan` | ① find Web目录 -name '*.php' -o -name '*.py' -mmin -5 → ② grep -l 'exec\|system\|passthru' → ③ 隔离可疑文件 |
-| **pip/npm 供应链投毒** | DETECTED 时 | `threat-supply-chain-audit` | ① 记录安装的包名+版本 → ② 对比已知恶意包清单 → ③ 检查 postinstall 脚本内容 → ④ 审计 |
+| 威胁 | 触发时机 | 工作流名称 | 类型 | 具体步骤 |
+|------|---------|-----------|------|---------|
+| **LD_PRELOAD rootkit** | BLOCKED 后 | `threat-prelink-check` | Workflow | ① cat `/etc/ld.so.preload` → ② ls `/etc/ld.so.preload` 权限 → ③ 比对上次 hash → ④ 发审计报告 |
+| **eBPF 劫持** | BLOCKED 后 | `threat-ebpf-scan` | Workflow | ① ls `/sys/fs/bpf/` → ② bpftool prog list (mock) → ③ find `/lib/modules/` 最新 .ko |
+| **PAM 后门** | DETECTED 时 | `threat-pam-audit` | Workflow | ① ls `-la /etc/pam.d/` → ② sha256sum 每个文件 → ③ ldd PAM .so 文件检测异常库 |
+| **反向 Shell** | BLOCKED 后 | `threat-revshell-cleanup` | Workflow | ① ss -tupn → ② kill 对应 PID → ③ firewall-cmd --add-rich-rule 阻断 IP |
+| **勒索加密** | DETECTED 时 | `threat-ransomware-response` | Workflow | ① 杀进程 (SIGSTOP) → ② find 受影响文件清单 → ③ 记录 hash 到审计 → ④ 发 security.alert |
+| **SSH 密钥窃取** | DETECTED 时 | `threat-ssh-audit` | Workflow | ① cat ~/.ssh/authorized_keys → ② ls -la ~/.ssh/ → ③ 比对 known_hosts 变化 → ④ 审计日志 |
+| **curl|bash 远程加载** | BLOCKED 后 | `threat-pipe-download-check` | Workflow | ① 检查 ~/.bashrc 是否被改 → ② 检查 /tmp/ 新文件 → ③ 检查定时任务 → ④ 报告 |
+| **挖矿二进制** | BLOCKED 后 | `threat-crypto-scan` | Workflow | ① lsof -i 检查连接 → ② ps aux 扫描 crypto 进程名 → ③ 检查 cron jobs → ④ 检查 /dev/shm/ 内容 |
+| **Cron 持久化** | BLOCKED 后 | `threat-cron-audit` | Workflow | ① crontab -l 列出 → ② ls /etc/cron.d/ → ③ 比对上次 hash → ④ 报告新增条目 |
+| **Systemd 持久化** | BLOCKED 后 | `threat-systemd-audit` | Workflow | ① systemctl list-units --state=enabled → ② find /etc/systemd/system/ -newer timestamp → ③ 检查 ExecStart 路径合法性 |
+| **WebShell 上传** | DETECTED 时 | `threat-webshell-scan` | Workflow | ① find Web目录 -name '*.php' -o -name '*.py' -mmin -5 → ② grep -l 'exec\|system\|passthru' → ③ 隔离可疑文件 |
+| **pip/npm 供应链投毒** | DETECTED 时 | `threat-supply-chain-audit` | Workflow | ① 记录安装的包名+版本 → ② 对比已知恶意包清单 → ③ 检查 postinstall 脚本内容 → ④ 审计 |
 ---
 
 ## 六、eBPF 系统级监听
@@ -279,6 +250,25 @@ eBPF map 写入告警事件
         -> ThreatMatcher 匹配对应防御
           -> SecExecutor 执行阻断
 ```
+
+### 6.5 eBPF 自防护
+
+> **背景**：eBPF 监听系统调用本身没有自我保护机制。一个恶意进程如果拥有足够权限，可以 detach/覆盖 已被挂载的 eBPF 程序，使整个 eBPF 监控失效。这是 DeepSeek 评审中指出的真实缺口——必须让监控系统自身也可被监控和保护。
+
+| 威胁 | 攻击方式 | 防护方案 |
+|------|---------|---------|
+| **eBPF 程序被 detach** | `bpf(BPF_PROG_DETACH)` 或 `bpftool prog detach` 卸载监控用 eBPF | ① **BPF_LINK_TYPE_TRACING**：用 `BPF_LINK` 持久化挂载，非普通 prog attach，不可被 `BPF_PROG_DETACH` 卸载；② PolicyEngine 模式匹配 `bpftool prog detach/pin/unpin` → DENY |
+| **eBPF 程序被覆盖** | 同挂载点覆盖现有 eBPF handler | `bpf(BPF_PROG_ATTACH)` 时检查 caller 身份：仅 trimum 守护进程（固定 PID）可附加到监控用挂载点 |
+| **bpffs 被篡改** | 直接写 `/sys/fs/bpf/` 目录 | Landlock LSM 在 Phase 4 禁止非 trimum 进程写入 `/sys/fs/bpf/` |
+| **eBPF 程序被 pin/unpin** | `bpftool prog pin` 导出 / `bpftool prog unpin` 移除持久化 | PolicyEngine 模式 → DENY（与 `bpftool` 的阻断规则一致） |
+| **LSM BPF 绕过** | 利用 LSM BPF 修改 `inode_permission` 绕过 Landlock | Seccomp L1 禁止 `bpf()` 系统调用（非 trimum 守护进程）；trimum 守护进程运行在 L0 无限制层，但 bpf() 调用量被严格监控 |
+
+**实现要点**（Phase 4 随 eBPF 监听器一同落地）：
+
+1. trimum 守护进程作为唯一可管理 eBPF 的进程——启动时创建 BPF_LINK（不可被普通进程 detach），往后只追加不覆盖。
+2. 所有 Agent 进程运行在 Seccomp L1/L2，`bpf()` 系统调用被直接拦截（无需额外判断）。
+3. 守护进程自身不需要 eBPF 自防护——它是 L0 无限制进程，但运行时权限最低化。
+4. 监控工作流 `threat-ebpf-scan` 定期巡检 `/sys/fs/bpf/` 内容变化（hash 比对）。
 
 
 ---
@@ -453,6 +443,65 @@ docker run --rm \
 
 ---
 
+## 📊 性能熔断器（Performance Fuse）
+
+> **背景**：目前方案在防御完备性上做得不错，但性能开销未做量化限制。全量开启 eBPF 监听 + 操作序列追踪 + Landlock + Seccomp 的开销叠加，在负载场景下可能造成不可忽视的 CPU 损失。需要引入性能熔断机制——从基线到熔断的动态调节。
+
+### 性能目标
+
+| 场景 | 目标 |
+|------|------|
+| **空闲（Idle）** | CPU 额外开销 < 5%（eBPF + 操作追踪 + 安全决策） |
+| **满载（Loaded）** | CPU 额外开销 < 15%（正常构建/编译/部署场景） |
+| **熔断（Fuse）** | 超过 20% 后自动关闭非核心监控，回到 <5% |
+
+### 性能监控与熔断逻辑
+
+```
+PerformanceMonitor.run()  →  每 60 秒读 /proc/stat
+                            ↓
+       计算系统 idle vs trimum 额外开销
+                            ↓
+     idle cpu < 75% && trimum > 20% total?
+        → Yes → 触发熔断
+        → No  → 健康，维持当前防护等级
+```
+
+### 熔断分级
+
+| 熔断等级 | 描述 | 关闭的组件 | 保留的组件 |
+|---------|------|-----------|-----------|
+| L0-全开 | 正常模式，所有防护开启 | — | 全部 |
+| L1-轻量 | CPU > 15% 额外开销时触发 | Landlock 文件锁（低频率路径）、中断无关 eBPF kprobe | PolicyEngine、Seccomp、高频 eBPF tracepoint、操作序列追踪 |
+| L2-核心 | CPU > 20% 额外开销时触发 | 低频 eBPF kprobe、操作序列详细追踪、非关键工作流 | PolicyEngine、Seccomp、高频 eBPF tracepoint（execve/connect） |
+| L3-生存 | CPU > 30% 或系统负载 > 80% | 全部 eBPF 监听、Landlock、操作序列追踪 | PolicyEngine（最优匹配）、Seccomp L1 |
+
+> **设计原则**：Seccomp 和 PolicyEngine 永不熔断——它们是在应用层直接做字符串/模式匹配，CPU 开销极小（<1%），是不可妥协的安全基线。
+
+### 信任分动态调节
+
+结合信任分机制自动降级（可选 Phase 5 实现）：
+
+| Agent 信任分 | 初始防护等级 | 熔断后的防护等级 |
+|-------------|-------------|----------------|
+| ≥ 80 | L0-全开 | L1-轻量（信任度高的 Agent 熔断了也保持较好防护） |
+| 50-79 | L0-全开 | L1-轻量 |
+| < 50 | L0-全开 | L2-核心（不信任的 Agent 熔断时保留更多监控） |
+
+### 熔断事件
+
+```
+熔断触发时 → Event Bus 发布 security.fuse_triggered
+  → 工作流 threat-fuse-log：记录熔断原因、耗时、CPU 快照
+  → 发布 security.alert:performance_degraded
+  → 持续监控，idle cpu > 80% 持续 5 分钟后自动恢复 L0
+```
+
+> **未来扩展**：容器化环境（Phase 5 Docker）下可配合 cgroups CPU 配额做更精细的熔断——超限容器直接降级到 L3 生存模式，不影响其他 Agent。
+
+
+---
+
 ## 十、已知病毒防御全链路
 
 > 针对你提供的威胁清单中每种已知病毒，从检测特征->决策逻辑->阻断手段->事后恢复全链路设计。
@@ -556,6 +605,34 @@ docker run --rm \
 | 阻断 | 1. 不能封 53 端口（正常 DNS 需要），改为 BehaviorMonitor 标记可疑进程 2. 可疑进程隔离沙箱 3. SecBlocker SIGKILL 确认的后门进程 |
 | 事后 | 1. 工作流：检查 /etc/resolv.conf 是否被改 2. tcpdump port 53 抽样 3. 检查系统 DNS 缓存（ss -tupn | grep 53） |
 
+---
+
+### 10.8 Congur（基于 eBPF 的持久化 rootkit）
+
+**威胁模型**：将恶意 eBPF 程序持久化到 `/sys/fs/bpf/`，绕过系统重启（libbpf 自动加载机制）。即使清理了用户态文件，内核态 eBPF 仍然存在，重启后通过 `bpffs` 自动恢复加载。
+**核心难点**：eBPF 程序无文件残留，传统文件扫描无法检测；重启后自动恢复更难追踪。
+
+| 阶段 | 方案 |
+|------|------|
+| 检测 | 1. eBPF 自防护（6.5 节）阻止非 trimum 进程的 bpf() 调用 2. SecMonitor 定期巡检 `/sys/fs/bpf/` hash 基线 3. 工作流 `threat-ebpf-scan`：`bpftool prog list` 输出与基线比对 4. 检测 `bpftool prog pin` 写入 bpffs |
+| 决策 | 非 trimum 守护进程的任何 bpf() 调用 -> DENY（Seccomp L1 拦截）| bpffs 写入 -> DENY（Landlock 拦截）|
+| 阻断 | 1. Seccomp L1 拦截 bpf() 系统调用（第一道防线）2. PolicyEngine 模式匹配 bpftool -> DENY（第二道防线，防护用户态工具）3. Phase 4 LSM BPF 禁止写 bpffs |
+| 事后 | 1. 工作流 threat-ebpf-scan：列出所有 eBPF 程序 → 比对 hash → 隔离异常程序 2. 从 bpffs 卸载非白名单 eBPF 程序 3. 检查是否已挂载了恶意 eBPF 对系统调用的 kprobe |
+
+---
+
+### 10.9 CongurTLP（eBPF 旁路侧信道窃密）
+
+**威胁模型**：利用 eBPF 的 `tracepoint` 或 `kprobe` 挂钩加密库（如 OpenSSL）的内存读写操作，在不修改任何文件的情况下，通过分析函数参数窃取私钥、TLS 会话密钥。无文件残留，无进程持久化。
+**核心难点**：无文件化、无进程化，纯 eBPF 内存嗅探；传统 EDR 完全不可见。
+
+| 阶段 | 方案 |
+|------|------|
+| 检测 | 1. 与 10.8 相同：任何非守护进程的 bpf() 调用 → DENY（Seccomp L1 已拦截）2. 检测 eBPF kprobe/tracepoint 是否挂载到敏感函数（如 `SSL_read`、`RSA_private_decrypt`）3. 工作流定期检查 `/sys/kernel/debug/tracing/` 的 kprobe 注册情况 |
+| 决策 | bpf() 非白进程 -> DENY（硬性）| kprobe 到加密库符号 -> 对守护进程触发 CONFIRM |
+| 阻断 | 1. **最有效阻断点**：Seccomp L1 拦截 bpf()，任何非 trimum 守护进程无法创建 eBPF 程序（不需要额外判断）2. 守护进程自身运行在 L0，其 eBPF 操作用 BPF_LINK 持久化不可 detach（6.5 节） |
+| 事后 | 1. 安全审计：检查 `/sys/kernel/debug/kprobes/list` 是否有可疑条目 2. 工作流：检查已加载 eBPF 程序 map 内容是否含 base64 编码数据 3. 加密库完整性校验：比对 ld.so 预加载的加密库 hash |
+
 
 ---
 
@@ -563,13 +640,16 @@ docker run --rm \
 
 ### 11.1 与现有三层安全体系的整合
 
+> **核心原则**：Security Agent（LLM）是**最后选项**，不是默认路径。
+> 1️⃣ Workflow TARL 匹配 → 2️⃣ SecMonitor 静态规则 → 3️⃣ Security Agent LLM 深度判断
+
 ```
 Agent/Terminal/Workflow 的命令
        |
        v
 +----- ToolGateway.execute() -----+
 |  L0: cwd Jail + Landlock       |
-|  L1: PolicyEngine.evaluate()   |
+|  L1: PolicyEngine.evaluate()   |  ← 第一步：模式匹配
 |  L1.5: _check_agent_perms()    |
 |  L2: SECCOMP (spawn 时设置)     |
 |  L3: JIT Auth                  |
@@ -579,10 +659,18 @@ Agent/Terminal/Workflow 的命令
 +----- SecMonitor (新建) ---------+
 |  TerminalTap: 实时钩入 gateway  |
 |  EventSnoop: 监听 Event Bus    |
-|  ThreatMatcher: 特征匹配引擎    |
+|  ThreatMatcher: 特征匹配引擎    |  ← 第二步：威胁匹配
 |  OpContextTracker: 操作序列分析 |
 +---------------------------------+
-       | 需要阻断?
+       |
+       |--- ThreatMatcher 命中? ---→ 已命中 → WorkflowEngine
+       |                                (TARL 匹配规则表)
+       |                                 ↓
+       |--- 操作序列分析命中? ----→ 已命中 → WorkflowEngine
+       |
+       |--- 都无法匹配? ----------→ 🟡 Security Agent (LLM)
+       |                                深度上下文判断
+       |                                (最后选项)
        v
 +----- SecExecutor (新建) --------+
 |  SecBlocker: 阻断/冻结/隔离     |
@@ -622,9 +710,12 @@ Agent/Terminal/Workflow 的命令
 每种威胁自动触发一个工作流（YAML），见第五章应对表。
 
 工作流特征：
-- 无 LLM 参与（纯操作步骤）
+- **无 LLM 参与**（纯操作步骤，不走 Security Agent）
+- **TARL 匹配直接触发** — ThreatMatcher 命中即路由到 WorkflowEngine，零延迟
 - 通过 Event Bus 与安全体系集成
 - 结果写入审计日志
+
+> 当 ThreatMatcher 和操作序列分析都无法匹配时（如威胁特征模糊、上下文产生歧义），才上升到 Security Agent 做 LLM 深度判断。Security Agent 的定义和实现可参考 trimum `docs/security-agent.md`。
 
 
 ---
@@ -821,4 +912,83 @@ patterns:
 ---
 
 > 文件结束。完整方案覆盖：威胁评估 -> 特征检测 -> 规则决策 -> 监听器 -> 执行器 -> 事后工作流 -> eBPF -> Seccomp -> Landlock -> Docker -> 已知病毒全链路 -> 测试策略。
+
+---
+
+## 附录 B：从 Apple 安全架构中可借鉴的设计原则
+
+> iOS/macOS 的安全不是因为闭源——Apple Platform Security 文档（400+ 页公开）已证明这一点。真正的原因是一套从硬件到应用层的**分层系统工程**。以下是对 trimum 有参考价值的关键点。
+
+### B.1 系统完整性保护（SIP / SSV）—— 运行时不可篡改
+
+Apple 的 **Signed System Volume（SSV）** 让系统分区在启动后被锁定为只读+签名状态。即使 `/bin/ls` 被改，下次启动自动检出并修复。
+
+**trimum 借鉴**：Phase 5 可选 — 对核心组件（`sec_monitor.py`、`sec_executor.py`、`policy_engine.py`）在启动时做 hash 签名校验，运行时 Landlock 禁止写这些文件。目前靠 Seccomp 拦截系统层面修改，没有保护 trimum 自身文件完整性的机制。
+
+### B.2 强制代码签名 + 声明式权限（AMFI / Hardware Sandbox）
+
+Apple 不是阻止第三方软件，而是要求**所有可执行代码必须有签名**。更重要的是 **Entitlements 声明制**：App 在签名时声明它需要什么能力（如麦克风、相册、网络），运行时由 Sandbox.kext 在内核检查。没有声明的权限自动 DENY。
+
+**trimum 借鉴**：当前 agent.json5 的 `declared_paths` 已有类似设计，但粒度可以更细——将声明扩展到 **Tool 级别**：
+
+```json5
+{
+  name: "coding-agent",
+  tool_entitlements: {
+    "pip_install": { allowed: true, packages: ["flask", "requests"], block_newer_than: "2026-09-01" },
+    "git_push": { allowed: false },
+    "network": { allowed: true, domains: ["pypi.org", "github.com"] }
+  }
+}
+```
+
+> 当前实现已在 PolicyEngine 中做模式匹配——但匹配是在**运行时**（event-driven），而非**声明时**（Profile-driven）。后者更优（声明即权限，无需额外 LLM 判断）。
+
+### B.3 最小权限是默认值（iOS App Sandbox）
+
+iOS 上每个 App 启动即被隔离：一个 unique UID、独立容器、目录隔离、网络默认关闭、传感器默认不可用。App 必须主动请求权限，且权限可被用户随时撤销。
+
+**对比 Linux 默认哲学**：你能做一切，直到被告知不行。
+
+**trimum 借鉴**：Agent 在 sandbox.json 中声明的路径、系统调用、网络访问应用同样的哲学——**声明即上限，超限即 DENY**。这已经在 PolicyEngine + Seccomp 中实现，但 Seccomp 的粒度偏粗（白名单 150 个系统调用），未来的 Agent 配置文件应允许额外的 `extra_block`（如 agent.json5 的 sandbox 段支持 `extra_syscalls` 和 `extra_block` 声明，已在 7.3 节）。
+
+### B.4 硬件信任链（Secure Boot Chain）
+
+iOS 启动链：Boot ROM（硬件不可改写）→ iBoot（Rust 重写，无内存安全漏洞）→ kernel → userspace。每一级验证上一级的签名。
+
+**trimum 借鉴**：这是硬件级信任，trimum 作为用户态 Agent 框架做不到也不应追求。但不妨碍在 **Phase 5 引入对核心配置和组件的启动校验**（签名 hash 验证 + Landlock 锁定）。
+
+### B.5 内核完整性保护（KPP / KTRR）
+
+Apple Silicon 硬件锁定内核代码段只读，运行时不能修改。这是为什么 macOS 上 LKM rootkit 几乎绝迹——不是因为闭源，而是因为**硬件禁止运行时修改内核代码段**。
+
+**trimum 借鉴**：trimum 通过 Seccomp L1 拦截 `init_module`/`bpf` 系统调用在做同样的事情——但这是**用户态拦截**，不是硬件级。对 Agent 框架来说足够（trimum 守护进程本身不需要硬件级内核保护），除非未来部署到可信执行环境（Intel TDX / AMD SEV）。
+
+### B.6 Library Validation（DYLD 注入防护）
+
+Apple 的 `hardened_runtime` 阻止 inject dylib，只加载经签名的动态库。这使 `DYLD_INSERT_LIBRARIES`（macOS 版 `LD_PRELOAD`）在 hardened runtime 下失效。
+
+**trimum 借鉴**：当前 PolicyEngine 检测 `LD_PRELOAD` 环境变量并在执行时 DENY。Apple 的做法的优势在于——**在加载时直接拒绝，不在执行时检测**。trimum 改进方案：在沙箱 Agent 启动时设置 `LD_LIBRARY_PATH` 为白名单目录列表（`/usr/lib:/lib`），比事后字符串匹配模式更干净、更难绕过。
+
+### B.7 Fail Safe（失败安全降级）
+
+iOS 启动链任一环节签名验证失败 → 直接进 recoveryOS（brick-level safe），不会跳过验证继续启动。
+
+**trimum 借鉴**：当 Security Agent 的关键组件（如 PolicyEngine 加载失败、ThreatMatcher DB 损坏）需要类似的**安全失败行为**——不是“继续执行但监控关了”，而是“阻断所有核心操作直到修复”。已体现在性能熔断器的 L3-生存模式设计中。
+
+---
+
+### 总结：Apple 给 trimum 的启发
+
+| Apple 技术 | trimum 现有对应 | 可借鉴的改进 | 优先级 |
+|-----------|---------------|------------|--------|
+| SSV（系统卷签名） | 无 | Phase 5：核心组件启动时 hash 签名校验 + Landlock 锁定 | 🟢 低 |
+| AMFI（强制代码签名） | JIT Auth + agent.json5 | Tool 级别 entitlements 声明制（B.2 节） | 🟡 中 |
+| Seatbelt（声明式沙箱） | agent.json5 `declared_paths` | 扩展到每个 Tool 的能力声明 | 🟡 中 |
+| KPP/KTRR（内核保护） | Seccomp L1 拦截 init_module/bpf | 用户态够用，不追求硬件级 | 🟢 低 |
+| Library Validation | PolicyEngine LD_PRELOAD 检测 | Agent 启动时固定 LD_LIBRARY_PATH | 🟡 中 |
+| Secure Boot Chain | 无 | 超出 trimum 范围 | ⚪ 不适用 |
+| **Fail Safe** | 性能熔断 L3 | 已部分实现，可扩展 | 🟢 低 |
+
+> **核心结论**：Apple 不是靠封闭成功的——是靠**默认可信 + 硬链验证 + 用户态可审计**三件事做对了。闭源只是辅助，不是核心。trimum 在 Linux 上做到 Seccomp（系统调用白名单）+ Landlock（文件路径隔离）+ PolicyEngine（模式匹配）+ 操作序列分析，在 Agent 安全层面已经走在正确方向上。亟需补的主要是：**运行时完整性校验**（组件是否被篡改）和 **更细粒度的 entitlements 声明**（每个工具的能力声明而非泛化的路径权限）。
 
