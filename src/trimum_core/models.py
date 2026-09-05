@@ -296,6 +296,85 @@ class AgentTaskResult(BaseModel):
     """
 
     task_id: str = ""
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Security Agent 类型
+# ═══════════════════════════════════════════════════════════════════
+
+
+class ThreatCategory(str, Enum):
+    """威胁分类。"""
+    PRIV_ESCAPE = "priv_escape"
+    MALWARE = "malware"
+    DATA_THEFT = "data_theft"
+    C2_BOTNET = "c2_botnet"
+    SUPPLY_CHAIN = "supply_chain"
+    LLM_ATTACK = "llm_attack"
+
+
+class DefenseAction(str, Enum):
+    """防御动作。"""
+    DENY = "deny"
+    CONFIRM = "confirm"
+    ALLOW = "allow"
+    FREEZE = "freeze"          # SIGSTOP
+    KILL = "kill"               # SIGKILL
+    ISOLATE = "isolate"         # 网络/沙箱隔离
+    WORKFLOW = "workflow"       # 触发工作流
+
+
+class OpContext(str, Enum):
+    """操作上下文标记。"""
+    NORMAL = "normal"
+    DOWNLOAD_THEN_EXEC = "download_then_exec"
+    WRITE_THEN_EXEC = "write_then_exec"
+    WRITE_THEN_ENCRYPT = "write_then_encrypt"
+    KEY_STEAL = "key_steal"
+    SUID_STORM = "suid_storm"
+    CLONE_THEN_BUILD = "clone_then_build"
+    FIRST_TIME_OP = "first_time_op"
+    COMPILE_THEN_EXEC = "compile_then_exec"
+
+
+class SecVerdict(str, Enum):
+    """安全裁决结果。"""
+    ALLOW = "allow"
+    BLOCK = "block"
+    CONFIRM = "confirm"
+    FREEZE = "freeze"
+
+
+class ThreatMatch(BaseModel):
+    """ThreatMatcher 的输出：一个威胁匹配结果。"""
+
+    threat_name: str = ""
+    category: ThreatCategory = ThreatCategory.MALWARE
+    defense: DefenseAction = DefenseAction.ALLOW
+    confidence: float = 0.0
+    matched_pattern: str = ""
+    workflow_name: str = ""     # 非空则触发对应工作流
+    reason: str = ""
+
+    class Config:
+        use_enum_values = True
+
+
+class AuditRecord(BaseModel):
+    """安全审计记录（含 hash 链完整性字段）。"""
+
+    timestamp: float = 0.0
+    event_id: str = ""
+    agent_id: str = ""
+    command: str = ""
+    threat: str = ""
+    verdict: str = ""
+    reason: str = ""
+    context: str = "normal"
+    sandbox: str = "default"
+    layer_hit: str = ""
+    prev_hash: str = ""
+    hmac: str = ""
     workflow_id: str = ""
     node_id: str = ""
     source: str = ""  # Agent 名称

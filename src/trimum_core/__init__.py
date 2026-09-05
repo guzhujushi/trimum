@@ -8,9 +8,16 @@ from trimum_core.behavior_monitor import BehaviorMonitor
 from trimum_core.memory_bridge import MemoryBridge
 from trimum_core.planner_agent import PlannerAgent
 from trimum_core.security_rule import SecurityRule, DecisionResult
+from trimum_core.threat_workflows import THREAT_WORKFLOWS, get_workflow_by_name, get_workflows_by_trigger
 from trimum_core.system_monitor import SystemMonitor
 from trimum_core.models import (
     Action,
+    AuditRecord,
+    DefenseAction,
+    OpContext,
+    SecVerdict,
+    ThreatCategory,
+    ThreatMatch,
     AgentEvents,
     AgentInfo,
     AgentManifest,
@@ -100,6 +107,15 @@ __all__ = [
     "PolicyRule",
     "ProcessDispatcher",
     "RiskLevel",
+    "AuditRecord",
+    "DefenseAction",
+    "OpContext",
+    "SecVerdict",
+    "ThreatCategory",
+    "ThreatMatch",
+    "THREAT_WORKFLOWS",
+    "get_workflow_by_name",
+    "get_workflows_by_trigger",
     "RouteEntry",
     "ShellDispatcher",
     "SystemDispatcher",
