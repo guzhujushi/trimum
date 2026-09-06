@@ -11,10 +11,14 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import importlib
+import importlib.util
 import os
 import re
 import time
+import types
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Optional
 
@@ -75,19 +79,14 @@ class ToolRegistry:
 
     def __init__(self, tools_path: str | None = None) -> None:
         self._tools: dict[str, ToolDefinition] = {}
+        self._tool_modules: dict[str, types.ModuleType] = {}
         self._tools_path = tools_path
         self.load_all()
 
     def load_all(self) -> int:
-        """Reload all tool definitions from files + built-in fallbacks.
-
-        Clears current registry, then:
-        1. Loads from ~/.trimum/tools/<name>/tool.json5
-        2. Fills missing tools with built-in defaults
-
-        Returns number of file-based tools loaded.
-        """
+        """Reload all tool definitions and entry-point modules."""
         self._tools.clear()
+        self._tool_modules.clear()
 
         # 1. File-based tools
         file_count = 0
@@ -95,10 +94,33 @@ class ToolRegistry:
             self._tools[tool.name] = tool
             file_count += 1
 
-        # 2. Built-in fallbacks for tools not registered via file
+        # 2. Load each tool's main.py module
+        tools_path = Path(self._tools_path or Path.home() / ".trimum" / "tools")
+        if tools_path.is_dir():
+            for child in sorted(tools_path.iterdir()):
+                if child.is_dir():
+                    main_py = child / "main.py"
+                    if main_py.is_file():
+                        self._load_tool_module(child.name, main_py)
+
+        # 3. Built-in fallbacks for tools not registered via file
         self._register_defaults()
 
         return file_count
+
+    def _load_tool_module(self, name: str, main_py: Path) -> None:
+        """Dynamically import a tool's main.py and cache the module."""
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"trimum_tool_{name}", str(main_py)
+            )
+            if spec is None or spec.loader is None:
+                return
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            self._tool_modules[name] = mod
+        except Exception as e:
+            logger.warning("tool_file_loader.module_failed", tool=name, error=str(e))
 
     def _register_defaults(self) -> None:
         """Register built-in tool fallbacks (only if not already loaded from file)."""
@@ -234,6 +256,16 @@ class ToolRegistry:
     def get(self, name: str) -> Optional[ToolDefinition]:
         """Look up a tool by name."""
         return self._tools.get(name)
+
+    def get_executor(self, name: str) -> Optional[Callable[..., Awaitable[dict]]]:
+        """Get the async execute() function for a file-based tool.
+
+        Returns None if the tool has no file-based executor.
+        """
+        mod = self._tool_modules.get(name)
+        if mod and hasattr(mod, 'execute') and callable(mod.execute):
+            return mod.execute
+        return None
 
     def list_tools(self) -> list[ToolDefinition]:
         """Return all registered tool definitions."""
@@ -474,10 +506,37 @@ class ToolGateway:
                 self._record_audit("jit_auth", request, resp)
                 return resp
 
+        status = "allowed" if action == Action.AUTO else "confirmed"
+
+        # ------------------------------------------------------------------
+        # File-based tool execution (優先走 main.py)
+        # ------------------------------------------------------------------
+        if tool_def:
+            file_executor = self.tools.get_executor(tool_def.name)
+            if file_executor:
+                try:
+                    result_dict = await file_executor(request.model_dump())
+                    result = ExecuteResponse(**result_dict)
+                    result.execution_id = result.execution_id or execution_id
+                    result.status = result.status or status
+                    result.risk = result.risk or risk
+                    result.action = result.action or action
+                    result.reason = result.reason or reason
+                    if self.enable_credential_redact:
+                        result = self._redact_credentials(result)
+                    self._record_audit("tool_executed", request, result)
+                    return result
+                except Exception as e:
+                    logger.warning(
+                        "gateway.file_executor_failed",
+                        tool=tool_def.name,
+                        error=str(e),
+                    )
+                    # Fall through to DispatcherRegistry
+
         # ------------------------------------------------------------------
         # Execute via DispatcherRegistry
         # ------------------------------------------------------------------
-        status = "allowed" if action == Action.AUTO else "confirmed"
         logger.info(
             "gateway.executing",
             tool=request.tool.value,
