@@ -29,6 +29,15 @@ TASK_CANCELLED = "task.cancelled"        # 任务被取消
 TASK_BLOCKED = "task.blocked"            # 任务被阻塞（权限/资源）
 AGENT_STATUS_CHANGED = "agent.status_changed"  # Runtime 报告 Agent 状态
 
+# ── Security Agent 事件类型 ─────────────────────────────
+EVENT_SEC_MONITOR = "security.monitor_result"
+EVENT_SEC_ALERT = "security.alert"
+EVENT_SEC_BLOCKED = "security.blocked"
+EVENT_SEC_EBPF = "security.ebpf_alert"
+EVENT_SEC_FUSE = "security.fuse_triggered"
+EVENT_SEC_AUDIT_BREACH = "security.audit_breach"
+EVENT_WORKFLOW_TRIGGER = "workflow.trigger"
+
 
 Callback = Callable[[SystemEvent], Coroutine[Any, Any, None] | None]
 

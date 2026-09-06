@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import (
+    DefenseAction,
     ExecuteRequest,
     ExecuteResponse,
     RiskLevel,
@@ -34,6 +35,8 @@ from .policy_engine import PolicyEngine
 from .security_rule import SecurityRule, DecisionResult
 from .tool_dispatchers import DispatcherRegistry
 from .tool_file_loader import scan_tools
+from .sec_monitor import OpContextClassifier, SecMonitor
+from .sec_executor import SecExecutor
 from .logger import get_logger
 
 logger = get_logger("tool_gateway")
@@ -273,6 +276,9 @@ class ToolGateway:
         tool_registry: Optional[ToolRegistry] = None,
         dispatcher_registry: Optional[DispatcherRegistry] = None,
         security_rule: Optional[SecurityRule] = None,
+        sec_monitor: Optional[SecMonitor] = None,
+        sec_executor: Optional[SecExecutor] = None,
+        op_context: Optional[OpContextClassifier] = None,
         work_dir: Optional[str] = None,
         enable_cwd_jail: bool = True,
         enable_credential_redact: bool = True,
@@ -284,6 +290,9 @@ class ToolGateway:
         self.dispatchers = dispatcher_registry or DispatcherRegistry()
         self.work_dir = work_dir or _DEFAULT_WORK_DIR
         self.security_rule = security_rule
+        self.sec_monitor = sec_monitor
+        self.sec_executor = sec_executor
+        self.op_context = op_context or OpContextClassifier()
         self.enable_cwd_jail = enable_cwd_jail
         self.enable_credential_redact = enable_credential_redact
         self.enable_audit = enable_audit
@@ -411,6 +420,35 @@ class ToolGateway:
             )
             self._record_audit("policy_denied", request, resp)
             return resp
+
+        # ===== LAYER 4: Security Monitor =====
+        if self.sec_monitor:
+            threats = await self.sec_monitor.scan_command(
+                agent_id=request.agent_id or "unknown",
+                command=cmd_str,
+                pid=os.getpid(),
+                sandbox=request.source_type.value if hasattr(request.source_type, 'value') else str(request.source_type),
+            )
+            if threats:
+                top = threats[0]
+                if top.defense == DefenseAction.DENY:
+                    logger.warning(
+                        "gateway.layer4_blocked",
+                        command=cmd_str,
+                        threat=top.threat_name,
+                        reason=top.reason,
+                    )
+                    resp = ExecuteResponse(
+                        execution_id=execution_id,
+                        status="denied",
+                        error=f"[SECURITY BLOCKED] {top.reason}",
+                        exit_code=137,
+                        risk=RiskLevel.CRITICAL,
+                        action=Action.DENY,
+                        reason=top.reason,
+                    )
+                    self._record_audit("security_blocked", request, resp)
+                    return resp
 
         # ------------------------------------------------------------------
         # Layer 3: JIT 授权检查

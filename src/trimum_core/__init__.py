@@ -7,6 +7,8 @@ from trimum_core.agent_socket import AgentSocketServer, AgentSocketClient, Socke
 from trimum_core.behavior_monitor import BehaviorMonitor
 from trimum_core.memory_bridge import MemoryBridge
 from trimum_core.planner_agent import PlannerAgent
+from trimum_core.sec_monitor import SecMonitor, ThreatMatcher, OpContextClassifier, ThreatSignature
+from trimum_core.sec_executor import SecExecutor, SecBlocker, SecAudit, SecNotif
 from trimum_core.security_rule import SecurityRule, DecisionResult
 from trimum_core.threat_workflows import THREAT_WORKFLOWS, get_workflow_by_name, get_workflows_by_trigger
 from trimum_core.system_monitor import SystemMonitor
@@ -129,7 +131,15 @@ __all__ = [
     "SystemEvent",
     "SystemMonitor",
     "DecisionResult",
+    "OpContextClassifier",
+    "SecAudit",
+    "SecBlocker",
+    "SecExecutor",
+    "SecMonitor",
+    "SecNotif",
     "SecurityRule",  # 注意：是 SecurityRule 类，\_\_all\_\_ 列出实际类名
+    "ThreatMatcher",
+    "ThreatSignature",
     "ToolType",
     "WorkflowDefinition",
     "WorkflowDefV2",
