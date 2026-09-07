@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trimum-mvp"
+version = "0.1.0"
+description = "trimum AI Shell MVP: natural language -> safe shell commands"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+trm = "trimum_mvp.cli:app"
+
+[tool.setuptools]
+packages = ["trimum_mvp"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]

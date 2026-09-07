@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trimum-agent-sdk"
+version = "0.1.0"
+description = "trimum Agent SDK — Pydantic AI 安全包装"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic-ai>=0.1.0",
+    "trimum-core",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

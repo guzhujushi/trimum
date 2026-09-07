@@ -1,0 +1,110 @@
+# ================================================================
+# trimum — .gitignore（只排除不需要上传的，其余全保留）
+# ================================================================
+
+# ---- Python build artifacts ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+
+# ---- Python tool caches ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+
+# ---- Virtual envs ----
+.venv/
+venv/
+**/.trimum-env/
+
+# ---- IDE / Editor ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~lock*
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Databases (user data, not schema) ----
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Secrets / credentials ----
+.env
+.env.*
+*.env.local
+**/secrets/
+*.key
+*.pem
+*.crt.private
+
+# ---- Generated / temp ----
+tmp/
+generated/
+*.generated.*
+.sonar/
+
+# ---- Large binaries ----
+*.iso
+*.img
+*.qcow2
+*.vdi
+*.vmdk
+*.box
+*.pkg
+*.dmg
+*.exe
+*.msi
+*.bin
+*.tar.gz.enc
+
+# ---- Theme lock/preview images (may contain faces) ----
+desktop/themes/*/unlock.png
+desktop/themes/*/preview.png
+desktop/themes/*/preview-unlock.png
+
+# ---- Git / patches ----
+*.orig
+*.rej
+*.patch.tmp
+
+# ---- Backups ----
+*.backup*
+*.bak
+*.old
+
+# ---- Arch Linux packaging ----
+pkg/
+*.pkg.tar.zst
+
+# ---- Node / JS (if used) ----
+node_modules/
+*.js.map
+
+# ---- Analysis dumps ----
+issues.csv
+*.issues.csv
+
+# ---- AI / LLM cache ----
+embeddings-cache/
+chroma-data/

@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+# =============================================================================
+# trimum-theme — trimum 主题切换器
+#
+# 用法:
+#   trimum-theme list              列出可用主题
+#   trimum-theme set <name>        切换活动主题（更新 symlink + 应用壁纸 + 重载）
+#   trimum-theme preview <name>    预览主题颜色与壁纸列表
+#
+# 设计:
+#   - 活动主题由 symlink 链决定: hypr/current -> <name>（kitty/waybar/wallpapers 同理）
+#   - 主题数据源: desktop/themes/<name>/colors.toml
+#   - 若 ~/.config 下有 install.sh 安装的副本，会同步更新其中 current 链接
+# =============================================================================
+set -euo pipefail
+
+# ---- 定位 TRIMUM_HOME（/opt/trimum > 脚本相对路径）----
+TRIMUM_HOME="${TRIMUM_HOME:-}"
+if [ -z "$TRIMUM_HOME" ]; then
+  if [ -d /opt/trimum ]; then
+    TRIMUM_HOME=/opt/trimum
+  else
+    TRIMUM_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+fi
+export TRIMUM_HOME
+
+THEMES_DIR="$TRIMUM_HOME/desktop/themes"
+DOTFILES_DIR="$TRIMUM_HOME/desktop/dotfiles"
+INSTALLED_DIR="$HOME/.config"
+
+# ---- 输出工具 ----
+info() { printf '\033[1;34m[trimum]\033[0m %s\n' "$*"; }
+ok()   { printf '\033[1;32m[trimum]\033[0m %s\n' "$*"; }
+err()  { printf '\033[1;31m[trimum]\033[0m %s\n' "$*" >&2; }
+
+# ---- 基础函数 ----
+
+# 读取 colors.toml 字符串字段（key = "value"）
+toml_get() {
+  sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*\"\(.*\)\".*/\1/p" "$1" | head -n 1
+}
+
+list_themes() {
+  local theme
+  for theme in "$THEMES_DIR"/*/; do
+    [ -f "$theme/colors.toml" ] && basename "$theme"
+  done | sort
+}
+
+theme_exists() {
+  [ -f "$THEMES_DIR/$1/colors.toml" ]
+}
+
+# 更新 current 链接：仓库 dotfiles + ~/.config 已安装副本
+# 仅当主题在该组件下存在目录时才切换，避免产生悬空链接
+set_current_link() {
+  local app="$1" name="$2"
+  if [ -d "$DOTFILES_DIR/$app/$name" ]; then
+    ln -sfn "$name" "$DOTFILES_DIR/$app/current"
+    if [ -d "$INSTALLED_DIR/$app" ] && [ ! -L "$INSTALLED_DIR/$app" ]; then
+      ln -sfn "$name" "$INSTALLED_DIR/$app/current" 2>/dev/null || true
+    fi
+  fi
+}
+
+# 应用活动主题壁纸（与 desktop/dotfiles/hypr/wallpaper.sh 逻辑一致）
+apply_wallpaper() {
+  local wall_dir wallpaper
+  wall_dir="$INSTALLED_DIR/wallpapers/current"
+  [ -d "$wall_dir" ] || wall_dir="$DOTFILES_DIR/wallpapers/current"
+  wallpaper="$(find -L "$wall_dir" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) \
+    2>/dev/null | sort | head -n 1 || true)"
+  if [ -z "$wallpaper" ]; then
+    info "未找到壁纸目录: $wall_dir（跳过壁纸设置）"
+    return 0
+  fi
+  if command -v swww >/dev/null 2>&1 && pgrep -x swww-daemon >/dev/null 2>&1; then
+    swww img "$wallpaper" --transition-type wipe --transition-fps 60 || true
+    ok "壁纸已应用 (swww): $(basename "$wallpaper")"
+  elif command -v hyprctl >/dev/null 2>&1 && hyprctl hyprpaper >/dev/null 2>&1; then
+    hyprctl hyprpaper wallpaper ",$wallpaper" || true
+    ok "壁纸已应用 (hyprpaper): $(basename "$wallpaper")"
+  else
+    info "未检测到 swww/hyprpaper，跳过壁纸设置: $(basename "$wallpaper")"
+  fi
+}
+
+# 重载 Hyprland / waybar / kitty
+reload_compositor() {
+  if command -v hyprctl >/dev/null 2>&1; then
+    if hyprctl reload >/dev/null 2>&1; then
+      ok "Hyprland 已重载"
+    else
+      info "Hyprland 未运行，跳过重载"
+    fi
+  fi
+  if command -v waybar >/dev/null 2>&1; then
+    pkill -x waybar 2>/dev/null || true
+    sleep 0.3
+    setsid waybar >/dev/null 2>&1 < /dev/null & disown || true
+  fi
+  if command -v kitty >/dev/null 2>&1; then
+    kitty @ load-config 2>/dev/null || true
+  fi
+}
+
+notify() {
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send -a trimum "主题已切换" "当前主题: $1" >/dev/null 2>&1 || true
+  fi
+}
+
+# ---- 命令实现 ----
+
+cmd_list() {
+  local current t
+  current="$(readlink "$DOTFILES_DIR/hypr/current" 2>/dev/null || echo '')"
+  info "可用主题 ($(list_themes | wc -l) 套):"
+  for t in $(list_themes); do
+    if [ "$t" = "$current" ]; then
+      printf '  \033[1;32m● %s\033[0m（当前）\n' "$t"
+    else
+      printf '  \033[1;30m○ %s\033[0m\n' "$t"
+    fi
+  done
+}
+
+cmd_set() {
+  local name="$1"
+  theme_exists "$name" || { err "未知主题: $name（可用: trimum-theme list）"; return 1; }
+
+  set_current_link hypr "$name"
+  set_current_link kitty "$name"
+  set_current_link waybar "$name"
+  set_current_link wallpapers "$name"
+
+  apply_wallpaper
+  reload_compositor
+  notify "$name"
+  ok "已切换到主题: $name"
+}
+
+# 色板一行（truecolor 背景块）
+swatch() {
+  local label="$1" hex="$2"
+  local r g b
+  r=$((16#${hex:1:2})); g=$((16#${hex:3:2})); b=$((16#${hex:5:2}))
+  printf '  \033[48;2;%d;%d;%dm  \033[0m  %-16s %s\n' "$r" "$g" "$b" "$label" "$hex"
+}
+
+cmd_preview() {
+  local name="$1" toml mode
+  theme_exists "$name" || { err "未知主题: $name"; return 1; }
+  toml="$THEMES_DIR/$name/colors.toml"
+  mode="$(toml_get "$toml" mode)"
+  [ -n "$mode" ] || mode="dark"
+
+  info "主题: $name（模式: $mode）"
+  echo
+  echo "  基础色:"
+  swatch "accent"            "$(toml_get "$toml" accent)"
+  swatch "background"        "$(toml_get "$toml" background)"
+  swatch "dark_background"   "$(toml_get "$toml" dark_background)"
+  swatch "darker_background" "$(toml_get "$toml" darker_background)"
+  swatch "foreground"        "$(toml_get "$toml" foreground)"
+  swatch "selection"         "$(toml_get "$toml" selection)"
+  swatch "muted"             "$(toml_get "$toml" muted)"
+  echo
+  echo "  16 色:"
+  swatch "red"          "$(toml_get "$toml" red)"
+  swatch "green"        "$(toml_get "$toml" green)"
+  swatch "yellow"       "$(toml_get "$toml" yellow)"
+  swatch "blue"         "$(toml_get "$toml" blue)"
+  swatch "magenta"      "$(toml_get "$toml" magenta)"
+  swatch "cyan"         "$(toml_get "$toml" cyan)"
+  swatch "bright_red"   "$(toml_get "$toml" bright_red)"
+  swatch "bright_green" "$(toml_get "$toml" bright_green)"
+  echo
+  info "壁纸 (desktop/themes/$name/backgrounds/):"
+  find -L "$DOTFILES_DIR/wallpapers/$name" -maxdepth 1 -type f 2>/dev/null | sort | sed 's/^/  /' || true
+}
+
+usage() {
+  cat <<'EOF'
+用法: trimum-theme <command> [args]
+
+命令:
+  list               列出可用主题
+  set <name>         切换活动主题（更新 symlink、应用壁纸、重载 Hyprland）
+  preview <name>     预览主题颜色与壁纸列表
+
+环境变量:
+  TRIMUM_HOME        项目根目录（默认 /opt/trimum，否则取脚本所在目录的上级）
+EOF
+}
+
+# ---- 入口 ----
+case "${1:-}" in
+  list)             cmd_list ;;
+  set)              [ $# -ge 2 ] || { usage; exit 1; }; cmd_set "$2" ;;
+  preview)          [ $# -ge 2 ] || { usage; exit 1; }; cmd_preview "$2" ;;
+  -h|--help|help)   usage ;;
+  *)                usage; exit 1 ;;
+esac

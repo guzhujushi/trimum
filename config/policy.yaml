@@ -1,0 +1,147 @@
+# AI Native trimum — 默认权限策略
+# 版本：v1.1
+
+# 策略引擎规则
+# risk_level: low | medium | high | critical
+# action: auto | confirm | sandbox | deny
+
+rules:
+  # ── 读取类操作（低风险，自动执行）──
+  - pattern: "ls|cat|head|tail|find -name|grep -r|tree|pwd|whoami"
+    risk: low
+    action: auto
+
+  # 文件系统查询
+  - pattern: "df -h|du -sh|du -h.*sort|free -h|ps aux|top -bn1|vmstat|iostat"
+    risk: low
+    action: auto
+
+  # Git 只读操作
+  - pattern: "git status|git diff|git log|git show|git branch|git stash list"
+    risk: low
+    action: auto
+
+  # 系统服务状态
+  - pattern: "systemctl status|journalctl|systemctl list-units|systemctl is-active"
+    risk: low
+    action: auto
+
+  # Docker 只读
+  - pattern: "docker ps|docker images|docker inspect|docker logs"
+    risk: low
+    action: auto
+
+  # 网络查询
+  - pattern: "ping -c|curl -I|wget --spider|ss -tlnp|ip addr|ip route"
+    risk: low
+    action: auto
+
+  # ── 中等风险（需要确认）──
+
+  # 安装/更新
+  - pattern: "pacman -S|pacman -U|yay -S|paru -S|pip install|npm install|cargo install|go install"
+    risk: medium
+    action: confirm
+  - pattern: "pacman -Syu|yay -Syu|paru -Syu"
+    risk: medium
+    action: confirm
+    description: "系统更新可能导致服务中断，确认后再执行"
+
+  # Docker 操作
+  - pattern: "docker build|docker run|docker pull|docker compose up"
+    risk: medium
+    action: confirm
+
+  # Git 写入
+  - pattern: "git commit|git push|git merge|git checkout.*-b|git branch.*-d"
+    risk: medium
+    action: confirm
+    description: "修改将被记录到审计日志"
+
+  # Systemd 服务操作
+  - pattern: "systemctl restart|systemctl reload|systemctl enable|systemctl disable"
+    risk: medium
+    action: confirm
+    description: "服务重启影响可用性"
+
+  # 文件操作
+  - pattern: "rm [^-]|rmdir|mv|cp [^-]|ln -s|chmod [0-7][0-7][0-7]|chown"
+    risk: medium
+    action: confirm
+    description: "文件修改操作，建议先确认"
+
+  # ── 高风险（强确认 + 记录）──
+
+  # 系统配置修改
+  - pattern: "sed -i.*/etc/|echo.*>> /etc/|nmcli|timedatectl|localectl"
+    risk: high
+    action: confirm
+    description: "系统配置修改影响所有用户"
+
+  # 防火墙/网络配置
+  - pattern: "nft add|nft delete|iptables|ufw enable|ufw disable"
+    risk: high
+    action: confirm
+
+  # 用户管理
+  - pattern: "useradd|userdel|passwd|usermod|groupadd|groupdel"
+    risk: high
+    action: confirm
+    description: "用户修改敏感操作"
+
+  # SSH 配置
+  - pattern: "ssh-keygen|ssh-copy-id|systemctl restart sshd"
+    risk: high
+    action: confirm
+    description: "SSH 配置影响远程访问"
+
+  # 包删除
+  - pattern: "pacman -R|yay -R|paru -R|apt remove|apt purge"
+    risk: high
+    action: confirm
+
+  # ── 禁止操作（直接拒绝）──
+
+  # 根目录删除
+  - pattern: "rm -rf /|rm -rf /*|rm -rf ~|mkfs\\.|dd if=/dev/zero|:(){ :|:& };:"
+    risk: critical
+    action: deny
+    description: "❌ 高危操作已拦截"
+    message: "该操作可能导致系统损坏，已自动拒绝。"
+
+  # 系统安全文件
+  - pattern: "cat /etc/shadow|cat /etc/passwd|cat ~/.ssh/|cat /etc/sudoers"
+    risk: critical
+    action: deny
+    description: "❌ 敏感文件访问已拦截"
+
+  # 内核操作
+  - pattern: "modprobe|insmod|rmmod|sysctl -w|echo.* > /proc/"
+    risk: critical
+    action: deny
+    description: "❌ 内核操作已拦截"
+
+# 默认行为：未匹配规则时
+default_action: confirm
+default_risk: medium
+
+# 白名单目录（Agent 可以访问）
+allowed_paths:
+  home: "~"
+  projects: "~/Projects"
+  documents: "~/Documents"
+  config: "~/.config"
+  downloads: "~/Downloads"
+  tmp: "/tmp"
+
+# 黑名单目录（Agent 禁止访问）
+denied_paths:
+  - "/etc/shadow"
+  - "/etc/passwd"
+  - "/etc/sudoers"
+  - "/etc/ssh"
+  - "/root/.ssh"
+  - "~/.ssh"
+  - "~/.gnupg"
+  - "~/.aws"
+  - "~/.config/git/config"  # 如含 token

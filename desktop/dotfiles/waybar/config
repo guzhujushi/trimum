@@ -1,0 +1,56 @@
+// waybar 共享配置 — trimum
+// 模块/布局与主题无关；配色由 current/style.css 提供（切换主题时自动跟随）
+{
+    "layer": "top",
+    "position": "top",
+    "height": 30,
+    "spacing": 4,
+    "modules-left": ["hyprland/workspaces", "hyprland/window"],
+    "modules-center": ["clock"],
+    "modules-right": ["cpu", "memory", "network", "pulseaudio", "battery", "tray"],
+    "hyprland/workspaces": {
+        "format": "{id}",
+        "on-click": "activate",
+        "sort-by-number": true
+    },
+    "hyprland/window": {
+        "format": "{}",
+        "max-length": 40
+    },
+    "clock": {
+        "format": "{:%H:%M  %a %d %b}",
+        "tooltip-format": "{:%Y-%m-%d %A}"
+    },
+    "cpu": {
+        "format": " CPU {usage}%",
+        "interval": 2
+    },
+    "memory": {
+        "format": " RAM {percentage}%",
+        "interval": 5
+    },
+    "network": {
+        "format-wifi": " {essid}",
+        "format-ethernet": " {ifname}",
+        "format-disconnected": " offline",
+        "tooltip-format": "{ipaddr}"
+    },
+    "pulseaudio": {
+        "format": " {volume}%",
+        "format-muted": " muted",
+        "on-click": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+    },
+    "battery": {
+        "format": " {capacity}%",
+        "format-charging": " {capacity}%",
+        "format-plugged": " {capacity}%",
+        "interval": 30,
+        "states": {
+            "warning": 25,
+            "critical": 10
+        }
+    },
+    "tray": {
+        "spacing": 8
+    }
+}

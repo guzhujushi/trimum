@@ -1,0 +1,196 @@
+"""Async event publish/subscribe system for trimum Core."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from collections import deque
+from typing import Any, Callable, Coroutine
+
+from trimum_core.models import EventSeverity, SystemEvent
+
+
+# ── 命名空间常量 ─────────────────────────────────────────
+# 用于事件/任务类型的命名空间前缀，确保不与其它系统冲突
+NAMESPACE_EVENT = "event."       # 如 event.planner.failed
+NAMESPACE_TASK = "task."         # 如 task.node.completed
+
+# ── Agent / Task 消息类型（Phase 3: Task State Machine）───
+# Workflow Engine → Event Bus → Agent Runtime / Sub-Agent
+TASK_CREATED = "task.created"            # 任务已创建
+TASK_QUEUED = "task.queued"              # 任务已入队
+TASK_DISPATCHING = "task.dispatching"    # 正在分派
+TASK_ASSIGNED = "task.assigned"          # Workflow 下发任务给 Agent
+TASK_STARTED = "task.started"            # Agent 确认开始执行
+TASK_COMPLETED = "task.completed"        # Agent 报告执行完成
+TASK_FAILED = "task.failed"              # Agent 报告执行失败
+TASK_TIMEOUT = "task.timeout"            # 任务超时
+TASK_CANCELLED = "task.cancelled"        # 任务被取消
+TASK_BLOCKED = "task.blocked"            # 任务被阻塞（权限/资源）
+AGENT_STATUS_CHANGED = "agent.status_changed"  # Runtime 报告 Agent 状态
+
+# ── Security Agent 事件类型 ─────────────────────────────
+EVENT_SEC_MONITOR = "security.monitor_result"
+EVENT_SEC_ALERT = "security.alert"
+EVENT_SEC_BLOCKED = "security.blocked"
+EVENT_SEC_EBPF = "security.ebpf_alert"
+EVENT_SEC_FUSE = "security.fuse_triggered"
+EVENT_SEC_AUDIT_BREACH = "security.audit_breach"
+EVENT_WORKFLOW_TRIGGER = "workflow.trigger"
+
+
+Callback = Callable[[SystemEvent], Coroutine[Any, Any, None] | None]
+
+
+class EventBus:
+    """Async pub/sub event bus.
+
+    Features:
+    - Subscribe by event_type; `*` matches all events.
+    - Each callback runs in its own asyncio Task (non-blocking publish).
+    - In-memory history ring buffer (last 100 events).
+    """
+
+    _MAX_HISTORY = 100
+
+    def __init__(self) -> None:
+        self._subscribers: dict[str, list[Callback]] = {}
+        self._history: deque[SystemEvent] = deque(maxlen=self._MAX_HISTORY)
+
+    # ------------------------------------------------------------------
+    # Publish
+    # ------------------------------------------------------------------
+
+    async def emit_event(
+        self,
+        event_type: str,
+        source: str,
+        payload: dict | None = None,
+    ) -> None:
+        """Convenience: create and publish a SystemEvent in one call.
+
+        Automatically prepends NAMESPACE_EVENT.
+        """
+        event = SystemEvent(
+            event_type=f"{NAMESPACE_EVENT}{event_type}",
+            source=source,
+            severity=EventSeverity.INFO,
+            payload=payload or {},
+            timestamp=time.time(),
+        )
+        await self.publish(event)
+
+    async def emit_task(
+        self,
+        task_type: str,
+        payload: dict | None = None,
+        source: str = "workflow",
+        severity: str | None = None,
+    ) -> None:
+        """Convenience: create and publish a task SystemEvent.
+
+        Automatically prepends NAMESPACE_TASK.
+        Used by WorkflowEngine for node/workflow lifecycle events.
+
+        Args:
+            task_type: Type string (e.g. "node.completed", "workflow.started")
+            payload: Event payload dict
+            source: Event source identifier
+            severity: Override severity (default INFO). Use "warn" for blocked/timeout.
+        """
+        event = SystemEvent(
+            event_type=f"{NAMESPACE_TASK}{task_type}",
+            source=source,
+            severity=EventSeverity(severity) if severity else EventSeverity.INFO,
+            payload=payload or {},
+            timestamp=time.time(),
+        )
+        await self.publish(event)
+
+    async def publish(self, event: SystemEvent) -> None:
+        """Publish an event to all matching subscribers.
+
+        Each subscriber callback is dispatched as an independent asyncio
+        Task so that a slow or failing subscriber never blocks the caller
+        or other subscribers.
+        """
+        if event.timestamp is None:
+            event.timestamp = time.time()
+
+        # Keep a copy for history
+        self._history.append(event.model_copy(deep=True))
+
+        # Collect matching callbacks
+        targets: list[Callback] = []
+        # Wildcard subscribers always receive the event
+        wildcard = self._subscribers.get("*", [])
+        targets.extend(wildcard)
+
+        # Type-specific subscribers
+        type_subs = self._subscribers.get(event.event_type, [])
+        targets.extend(type_subs)
+
+        # Fire each in its own Task, catching & logging errors silently
+        for cb in targets:
+            asyncio.ensure_future(self._safe_call(cb, event))
+
+    # ------------------------------------------------------------------
+    # Subscribe / Unsubscribe
+    # ------------------------------------------------------------------
+
+    def subscribe(self, event_type: str, callback: Callback) -> None:
+        """Register *callback* for *event_type*.
+
+        Pass `*` to receive *all* events.
+        """
+        self._subscribers.setdefault(event_type, []).append(callback)
+
+    def unsubscribe(self, event_type: str, callback: Callback) -> None:
+        """Remove a previously registered *callback* for *event_type*.
+
+        If the callback is not registered the call is silently ignored.
+        """
+        subs = self._subscribers.get(event_type)
+        if subs is None:
+            return
+        try:
+            subs.remove(callback)
+        except ValueError:
+            pass
+
+        # Clean up empty subscriber lists
+        if not subs:
+            del self._subscribers[event_type]
+
+    # ------------------------------------------------------------------
+    # History
+    # ------------------------------------------------------------------
+
+    def get_history(self, limit: int = 50) -> list[SystemEvent]:
+        """Return the most recent *limit* events (newest last)."""
+        if limit <= 0:
+            return []
+        if limit >= len(self._history):
+            return list(self._history)
+        slice_start = len(self._history) - limit
+        return [self._history[i] for i in range(slice_start, len(self._history))]
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _safe_call(callback: Callback, event: SystemEvent) -> None:
+        """Await *callback* and swallow any exception.
+
+        Exceptions are intentionally suppressed so that one broken
+        subscriber never poisons the event bus for others.
+        """
+        try:
+            result = callback(event)
+            if result is not None:
+                # It is a coroutine function — await it
+                await result
+        except Exception:  # noqa: BLE001
+            # Logged / surfaced through a dedicated channel in production.
+            pass

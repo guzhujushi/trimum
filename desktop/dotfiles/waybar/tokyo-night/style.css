@@ -1,0 +1,151 @@
+/* =============================================================================
+ * waybar 样式：tokyo-night
+ * 配色来源：desktop/themes/tokyo-night/colors.toml
+ * 接入方式：~/.config/waybar/style.css -> current/style.css（current -> tokyo-night）
+ * ============================================================================= */
+
+@define-color accent     #7aa2f7;
+@define-color bg         #1a1b26;
+@define-color bg_dark    #13141c;
+@define-color bg_darker  #0e0e14;
+@define-color bg_light   #24283b;
+@define-color fg         #a9b1d6;
+@define-color fg_dark    #565f89;
+@define-color fg_light   #b4bee6;
+@define-color fg_bright  #c0caf5;
+@define-color sel        #292e42;
+@define-color muted      #414868;
+@define-color red        #f7768e;
+@define-color green      #9ece6a;
+@define-color yellow     #e0af68;
+@define-color blue       #7aa2f7;
+@define-color magenta    #ad8ee6;
+@define-color cyan       #449dab;
+
+* {
+    font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+    font-size: 13px;
+    min-height: 0;
+}
+
+window#waybar {
+    background: transparent;
+    color: @FG@;
+}
+
+window#waybar.top {
+    background-color: alpha(@BG_DARKER@, 0.85);
+    border-bottom: 1px solid @BG_DARK@;
+}
+
+window#waybar.hidden {
+    opacity: 0.2;
+}
+
+tooltip {
+    background: @BG_DARKER@;
+    border: 1px solid @BG_DARK@;
+    border-radius: 8px;
+    color: @FG@;
+}
+
+#workspaces button {
+    padding: 0 8px;
+    margin: 3px 2px;
+    border-radius: 6px;
+    background: transparent;
+    color: @FG_DARK@;
+}
+
+#workspaces button:hover {
+    background: @SEL@;
+    color: @FG_BRIGHT@;
+}
+
+#workspaces button.active {
+    background: #7aa2f7;
+    color: @BG_DARKER@;
+}
+
+#workspaces button.urgent {
+    background: #f7768e;
+    color: @BG_DARKER@;
+}
+
+#window {
+    padding: 0 10px;
+    margin: 3px 2px;
+    border-radius: 6px;
+    color: @FG_LIGHT@;
+}
+
+#clock,
+#cpu,
+#memory,
+#network,
+#pulseaudio,
+#battery,
+#tray {
+    padding: 0 10px;
+    margin: 3px 2px;
+    border-radius: 6px;
+    background: alpha(@SEL@, 0.6);
+    color: @FG@;
+}
+
+#clock {
+    color: @FG_BRIGHT@;
+}
+
+#cpu {
+    color: #449dab;
+}
+
+#memory {
+    color: #ad8ee6;
+}
+
+#network {
+    color: #9ece6a;
+}
+
+#network.disconnected {
+    color: #f7768e;
+}
+
+#pulseaudio {
+    color: #7aa2f7;
+}
+
+#pulseaudio.muted {
+    color: #414868;
+}
+
+#battery {
+    color: #9ece6a;
+}
+
+#battery.warning {
+    color: #e0af68;
+}
+
+#battery.critical {
+    color: #f7768e;
+}
+
+#battery.charging {
+    color: #449dab;
+}
+
+#tray {
+    background: alpha(@SEL@, 0.4);
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+    background-color: #f7768e;
+}
