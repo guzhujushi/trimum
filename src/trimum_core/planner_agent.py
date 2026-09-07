@@ -85,7 +85,10 @@ def _call_llm_api_fallback(
     api_key = api_key or os.environ.get(PLANNER_ENV_API_KEY) or os.environ.get(GLOBAL_ENV_API_KEY, "")
 
     if not api_key:
-        raise RuntimeError("PlannerAgent: API Key 未设置 (检查 PLANNER_LLM_API_KEY 或 TRIMUM_LLM_API_KEY)")
+        raise TrimumError(
+            TRMErrorCode.LLM_CALL_FAILED,
+            message="PlannerAgent: API Key not set (check PLANNER_LLM_API_KEY or TRIMUM_LLM_API_KEY)",
+        )
 
     url = f"{base_url.rstrip('/')}/chat/completions"
     payload = json.dumps({
@@ -112,19 +115,29 @@ def _call_llm_api_fallback(
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        raise RuntimeError(
-            f"LLM API HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:500]}"
+        raise TrimumError(
+            TRMErrorCode.LLM_CALL_FAILED,
+            message=f"LLM API HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:500]}",
         ) from e
     except Exception as e:
-        raise RuntimeError(f"LLM API 调用失败: {e}") from e
+        raise TrimumError(
+            TRMErrorCode.LLM_CALL_FAILED,
+            message=f"LLM API call failed: {e}",
+        ) from e
 
     choices = body.get("choices", [])
     if not choices:
-        raise RuntimeError(f"LLM API 返回空 choices: {json.dumps(body, ensure_ascii=False)[:300]}")
+        raise TrimumError(
+            TRMErrorCode.LLM_RESPONSE_INVALID,
+            message=f"LLM API returned empty choices: {json.dumps(body, ensure_ascii=False)[:300]}",
+        )
 
     content = choices[0].get("message", {}).get("content", "")
     if not content:
-        raise RuntimeError("LLM API 返回空 content")
+        raise TrimumError(
+            TRMErrorCode.LLM_RESPONSE_INVALID,
+            message="LLM API returned empty content",
+        )
 
     return content
 
@@ -294,7 +307,10 @@ class PlannerAgent:
             # 1. LLM 调用（优先 Agent SDK，回落 urllib）
             workflow_json = await self._decompose_with_llm(request, context)
             if workflow_json is None:
-                raise RuntimeError("LLM 返回空 Workflow 数据")
+                raise TrimumError(
+                    TRMErrorCode.WORKFLOW_EXECUTION_FAILED,
+                    message="LLM returned empty workflow data",
+                )
 
             # 2. JSON → WorkflowDefinition
             wf_def = self._json_to_workflow(workflow_json, plan_id)
@@ -472,13 +488,22 @@ class PlannerAgent:
     def _validate_workflow(wf: WorkflowDefinition) -> None:
         """验证 workflow: 必须有节点, 每个节点有 id 和 handler."""
         if not wf.nodes:
-            raise ValueError("Workflow 没有节点")
+            raise TrimumError(
+                TRMErrorCode.WORKFLOW_VALIDATION_FAILED,
+                message="Workflow has no nodes",
+            )
 
         for i, node in enumerate(wf.nodes):
             if not node.id:
-                raise ValueError(f"节点 {i} 缺少 id")
+                raise TrimumError(
+                    TRMErrorCode.WORKFLOW_VALIDATION_FAILED,
+                    message=f"Node {i} missing id",
+                )
             if not node.handler:
-                raise ValueError(f"节点 '{node.id}' 缺少 handler")
+                raise TrimumError(
+                    TRMErrorCode.WORKFLOW_VALIDATION_FAILED,
+                    message=f"Node '{node.id}' missing handler",
+                )
 
     # ---- YAML 保存 ----
 

@@ -22,7 +22,7 @@ from .agent_socket import (
     MSG_STATUS,
 )
 from .event_bus import EventBus, AGENT_STATUS_CHANGED
-from .models import EventSeverity
+from .models import EventSeverity, TRMErrorCode, TrimumError
 
 log = logging.getLogger("trimum_core.agent_runtime")
 
@@ -96,14 +96,21 @@ class AgentRuntime:
         Sub-agent script location: ~/.local/share/trimum/agents/{type}/main.py
 
         Returns True if started successfully.
+
+        Raises:
+            TrimumError: TRM-1001 if max agents reached or agent already running
         """
         if len(self._agents) >= self._max_agents:
-            log.warning("Max agents reached (%d)", self._max_agents)
-            return False
+            raise TrimumError(
+                TRMErrorCode.RUNTIME_INIT_FAILED,
+                message=f"Max agents reached ({self._max_agents})",
+            )
 
         if agent_id in self._agents:
-            log.warning("Agent %s already running", agent_id)
-            return False
+            raise TrimumError(
+                TRMErrorCode.AGENT_ALREADY_EXISTS,
+                message=f"Agent {agent_id} already running",
+            )
 
         # Stub: sub-agent script will be implemented in Phase 3 Agent SDK
         # script = Path.home() / ".local/share/trimum/agents" / agent_type / "main.py"
@@ -141,10 +148,15 @@ class AgentRuntime:
         """Stop a sub-agent process.
 
         Sends stop signal via Socket, waits for clean shutdown.
+
+        Raises:
+            TrimumError: TRM-3001 if agent not found
         """
         if agent_id not in self._agents:
-            log.warning("Agent %s not found", agent_id)
-            return False
+            raise TrimumError(
+                TRMErrorCode.AGENT_NOT_FOUND,
+                message=f"Agent {agent_id} not found",
+            )
 
         # TODO Phase 3: send stop via Socket, wait for shutdown
         del self._agents[agent_id]

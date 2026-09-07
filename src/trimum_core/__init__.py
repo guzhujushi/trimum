@@ -14,6 +14,8 @@ from trimum_core.threat_workflows import THREAT_WORKFLOWS, get_workflow_by_name,
 from trimum_core.system_monitor import SystemMonitor
 from trimum_core.models import (
     Action,
+    TRMErrorCode,
+    TrimumError,
     AuditRecord,
     DefenseAction,
     OpContext,
@@ -71,6 +73,8 @@ __version__ = "0.4.0"
 
 __all__ = [
     "Action",
+    "TRMErrorCode",
+    "TrimumError",
     "AgentEvents",
     "AgentInfo",
     "AgentManifest",

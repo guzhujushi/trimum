@@ -17,7 +17,7 @@ from trimum_core.agent_cert import (
     ensure_cert_dirs,
 )
 from shutil import which
-from trimum_core.models import AgentManifest
+from trimum_core.models import AgentManifest, TRMErrorCode, TrimumError
 
 # Try json5 for comment support
 HAS_JSON5 = False
@@ -105,9 +105,16 @@ class AgentRegistry:
         return missing
 
     def unregister(self, name: str) -> bool:
-        """Remove an agent type by name. Returns True if removed."""
+        """Remove an agent type by name. Returns True if removed.
+
+        Raises:
+            TrimumError: TRM-3001 if agent not found
+        """
         if name not in self._agents:
-            return False
+            raise TrimumError(
+                TRMErrorCode.AGENT_NOT_FOUND,
+                message=f"Agent '{name}' not found in registry",
+            )
         self._remove_from_capability_index(name)
         del self._agents[name]
         return True
@@ -121,8 +128,18 @@ class AgentRegistry:
         return list(self._agents.values())
 
     def get_agent(self, name: str) -> Optional[AgentManifest]:
-        """Get a single agent manifest by name."""
-        return self._agents.get(name)
+        """Get a single agent manifest by name.
+
+        Raises:
+            TrimumError: TRM-3001 if agent not found
+        """
+        agent = self._agents.get(name)
+        if agent is None:
+            raise TrimumError(
+                TRMErrorCode.AGENT_NOT_FOUND,
+                message=f"Agent '{name}' not found in registry",
+            )
+        return agent
 
     def find_by_capability(self, capability: str) -> list[AgentManifest]:
         """Find all agents that claim the given capability.

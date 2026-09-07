@@ -10,8 +10,8 @@ from typing import Optional
 
 import json
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .models import (
@@ -22,6 +22,7 @@ from .models import (
     AgentInfo,
     SystemEvent,
     ContextEntry,
+    TrimumError,
 )
 from .tool_gateway import ToolGateway
 from .policy_engine import PolicyEngine
@@ -29,6 +30,21 @@ from .event_bus import EventBus
 from .context_manager import ContextManager
 from .agent_manager import AgentManager
 from .config import Config, ensure_dirs
+
+
+# ── TrimumError → HTTPException handler ─────────────────────────
+
+async def trimum_error_handler(request: Request, exc: TrimumError) -> JSONResponse:
+    """Global FastAPI exception handler: TrimumError → JSONResponse."""
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={
+            "error_code": exc.code.value,
+            "category": exc.category,
+            "message": exc.message,
+            "context": exc.context,
+        },
+    )
 from .logger import setup_logging, get_logger
 from .ipc_handler import IpcHandler
 
@@ -130,6 +146,9 @@ def create_app(config: Config) -> FastAPI:
         version="0.2.0",
         description="trimum AI Runtime - system-level agent execution engine",
     )
+
+    # ─── Exception handlers ─────────────────────────────────────
+    app.add_exception_handler(TrimumError, trimum_error_handler)
 
     # Store state
     app.state.trimum = state
