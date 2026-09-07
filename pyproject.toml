@@ -3,9 +3,9 @@ requires = ["setuptools>=64.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "trimum-core"
+name = "trimum-server"
 version = "0.2.1"
-description = "trimum Core Daemon - system-level AI agent runtime"
+description = "trimum Server Edition - headless multi-agent system runtime"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110",
