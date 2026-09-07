@@ -184,7 +184,10 @@ class WorkflowEngine:
                 return self._handlers[key]
         if self._default_handler:
             return self._default_handler
-        raise RuntimeError(f"没有处理器能处理节点 '{node.id}' (handler={node.handler})")
+        raise TrimumError(
+            TRMErrorCode.WORKFLOW_NODE_NOT_FOUND,
+            message=f"No handler for node '{node.id}' (handler={node.handler})",
+        )
 
     # ── DAG 校验 ──────────────────────────────────────────
 
@@ -195,9 +198,15 @@ class WorkflowEngine:
 
         for edge in workflow.edges:
             if edge.source not in node_ids:
-                raise ValueError(f"边引用不存在的源节点: {edge.source}")
+                raise TrimumError(
+                    TRMErrorCode.WORKFLOW_VALIDATION_FAILED,
+                    message=f"Edge references non-existent source node: {edge.source}",
+                )
             if edge.target not in node_ids:
-                raise ValueError(f"边引用不存在的目标节点: {edge.target}")
+                raise TrimumError(
+                    TRMErrorCode.WORKFLOW_VALIDATION_FAILED,
+                    message=f"Edge references non-existent target node: {edge.target}",
+                )
 
         # Kahn 拓扑排序 + 环检测
         in_degree: dict[str, int] = {n.id: 0 for n in workflow.nodes}
@@ -219,7 +228,10 @@ class WorkflowEngine:
                     queue.append(neighbor)
 
         if visited != len(workflow.nodes):
-            raise ValueError("DAG 中存在环")
+            raise TrimumError(
+                TRMErrorCode.WORKFLOW_CIRCULAR_DEPENDENCY,
+                message="DAG contains circular dependency",
+            )
 
     @staticmethod
     def topological_sort(workflow: WorkflowDefinition) -> list[str]:
@@ -837,7 +849,10 @@ class WorkflowDefV2(BaseModel):
         with open(str(path), encoding="utf-8") as f:
             data = yaml.safe_load(f)
         if not isinstance(data, dict):
-            raise ValueError(f"Invalid workflow YAML: {path}")
+            raise TrimumError(
+                TRMErrorCode.WORKFLOW_PARSE_ERROR,
+                message=f"Invalid workflow YAML: {path}",
+            )
         return WorkflowDefV2(**data)
 
     @staticmethod

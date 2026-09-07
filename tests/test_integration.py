@@ -373,8 +373,12 @@ async def test_registry_workflow_chain():
     assert reader_manifest is not None
     assert reader_manifest.description == "Reads files"
 
-    nonexistent = registry.get_agent("nonexistent")
-    assert nonexistent is None
+    from trimum_core.models import TrimumError
+
+    with pytest.raises(TrimumError) as exc_info:
+        registry.get_agent("nonexistent")
+    assert exc_info.value.code.value == "TRM-3001"
+    assert "nonexistent" in exc_info.value.message
 
     # ── Workflow Engine with handlers ──
     engine = WorkflowEngine(event_bus=bus)
