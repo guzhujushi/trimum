@@ -19,7 +19,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from .models import RiskLevel, Action
+from .models import RiskLevel, Action, TRMErrorCode, TrimumError
 from .policy_engine import PolicyEngine
 
 log = logging.getLogger("trimum_core.security_agent")
@@ -368,13 +368,25 @@ class SecurityRule:
         agent_id: str,
         ctx: dict[str, Any],
     ) -> bool:
-        """检查 Agent 是否超出资源阈值."""
+        """检查 Agent 是否超出资源阈值.
+
+        Raises:
+            TrimumError: 如果超出资源限制，抛出 TRM-2009
+        """
         _ = agent_id  # unused placeholder
 
         if ctx.get("cpu_percent", 0) > self._resource_limits["max_cpu_percent"]:
-            return False
+            raise TrimumError(
+                TRMErrorCode.RESOURCE_LIMIT_EXCEEDED,
+                message=f"Agent CPU usage {ctx.get('cpu_percent', 0)}% exceeds limit",
+                context={"limit": self._resource_limits["max_cpu_percent"], "actual": ctx.get("cpu_percent", 0)},
+            )
         if ctx.get("memory_mb", 0) > self._resource_limits["max_memory_mb"]:
-            return False
+            raise TrimumError(
+                TRMErrorCode.RESOURCE_LIMIT_EXCEEDED,
+                message=f"Agent memory {ctx.get('memory_mb', 0)}MB exceeds limit",
+                context={"limit": self._resource_limits["max_memory_mb"], "actual": ctx.get("memory_mb", 0)},
+            )
         return True
 
     def set_resource_limit(self, name: str, value: float) -> None:
