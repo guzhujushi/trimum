@@ -1,7 +1,7 @@
 # trimum — 未完成待办清单
 
-> 最后更新：2026-09-07 21:46
-> Phase 3 核心 + Security Agent 全链路 + 四想法 X4 已完成 ✅
+> 最后更新：2026-09-08 21:50
+> Phase 3 核心 + Security Agent 全链路 + 四想法 X4 + Skill 层已完成 ✅
 > 当前焦点：Phase 3 收尾（真机前可做项）
 
 ---
@@ -74,10 +74,15 @@
 - 智能模式：仅 Layer 1 未命中 + Layer 2 可疑时触发
 - 注意：LLM 调用走 httpx（已有依赖），不引入新依赖
 
-### X1 Skill 层
-- `src/trimum_core/skill_loader.py` + `skill_executor.py`
-- `~/.trimum/skills/<name>/skill.yaml` + SKILL.md
-- 验收：yaml 可加载；capability 调用；至少一个 demo 能跑
+### X1 Skill 层 ✅
+- `src/trimum_core/skill_loader.py` — YAML 加载/验证/变量插值
+- `src/trimum_core/skill_router.py` — `skill:<name>` 路由到执行器
+- `src/trimum_core/skill_executor.py` — 6 种 step 类型执行器
+- `~/.trimum/skills/hello-world/skill.yaml` — 2-step 基础 echo skill
+- `~/.trimum/skills/git-deploy/skill.yaml` — 3-step git pull→build→restart（含 precheck）
+- `tests/test_skill_integration.py` — 22 个测试全部通过 ✅
+- `__init__.py` 已导出所有 Skill 组件
+- 验收：yaml 可加载 ✅ ；capability 调用 ✅ ；demo 能跑 ✅
 
 ### X2 ExperienceLearner
 - `src/trimum_core/experience_learner.py`
