@@ -1,8 +1,18 @@
 # trimum — 未完成待办清单
 
-> 最后更新：2026-09-08 21:50
-> Phase 3 核心 + Security Agent 全链路 + 四想法 X4 + Skill 层已完成 ✅
+> 最后更新：2026-09-09 22:50
+> X1 Skill 层 + X2 ExperienceLearner + #14.5 TRM 错误码系统全部完成 ✅
 > 当前焦点：Phase 3 收尾（真机前可做项）
+
+## 验收状态（2026-09-09）
+- 全量测试：293 passed / 3 failed / 1 skipped
+  - 3 failed 均为 Windows 环境问题（`test_tool_file_loading.py` shell/git 句柄无效），非代码问题
+- X1 Skill 层：22/22 测试通过 ✅
+  - 核心：Loader + Router + Executor + 2 个示例 skill
+  - 集成验证：AgentRegistry `find_by_capability("skill:xxx")` 可匹配
+  - 未完成：AgentRegistry ↔ SkillRouter 运行时连接（当前 Registry 不知道 Router 存在）
+- X2 ExperienceLearner：51/51 测试通过 ✅
+- #14.5 TRM 错误码：65 个码 + 6 模块集成 + TrimumError 异常类 ✅
 
 ---
 
@@ -46,7 +56,7 @@
 - #18 json5 依赖 — `pyproject.toml` 已加 `"json5>=0.9"` ✅
 - docs/SECURITY-DEFENSE-PLAN.md — 825 行 / 36KB ✅
 - src/trimum_core/security_agent_agenda.md — 8050 字节 ✅
-- 测试：202 pass ✅
+- 测试：293 pass ✅（3 fail Windows 假阳性）
 
 ---
 
@@ -54,7 +64,7 @@
 
 | 优先级 | 范围 | 真机前可做？ |
 |--------|------|------------|
-| 🔴 立即 | #14.5 错误码体系 + #11 LLM 混合策略 + X1/X2 | ✅ 可做 |
+| 🔴 立即 | #11 LLM 混合策略 + X1 Skill 集成 | ✅ 可做 |
 | 🟡 真机前 | #3.7 资源配额接口 + BehaviorMonitor 闭环 + #3.9 CLI | ✅ 可做 |
 | 🟢 等真机 | #14 Landlock + #15 真机验证 + #17 重扫 | ❌ 需 Linux |
 | 🔵 远期 | CLI、UI、一键安装、官网 | Phase 4+ |
@@ -67,6 +77,12 @@
 - 新建 `docs/ERROR-CODE-SPEC.md`
 - 三段式错误码：TRM-1xxx Runtime / 2xxx Security / 3xxx Agent / 4xxx Tool
 - `models.py` 增加 `TrimumError(Exception)` + 错误码协议
+
+### X1 AgentRegistry ↔ SkillRouter 运行时集成 🟡
+- AgentRegistry 目前不知道 SkillRouter 存在
+- 需要：AgentRegistry 初始化和运行时持有 SkillRouter 引用
+- 或者：Planner/Core 层在解析 `skill:xxx` 能力时调用 SkillRouter
+- 需要集成测试覆盖：注册 agent → skill 匹配 → 执行
 
 ### #11 Policy Engine 升级：正则 → 混合（LLM + 规则）
 - 当前：PolicyEngine 是纯正则规则匹配
@@ -84,10 +100,11 @@
 - `__init__.py` 已导出所有 Skill 组件
 - 验收：yaml 可加载 ✅ ；capability 调用 ✅ ；demo 能跑 ✅
 
-### X2 ExperienceLearner
-- `src/trimum_core/experience_learner.py`
+### X2 ExperienceLearner ✅
+- `src/trimum_core/experience_learner.py` — 完整的 `ExperienceLearner` 类
 - 监听 `*.failed` 事件 → LLM 分析 → 写入 Agent memory/experience.db
-- 仅在失败时触发 LLM
+- 仅在失败时触发 LLM（零 token 浪费）
+- 51 个单元测试全部通过 ✅
 
 ---
 
