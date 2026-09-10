@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 
@@ -500,16 +500,27 @@ class ToolDefinition(BaseModel):
 
 
 class AgentManifest(BaseModel):
-    """Agent type manifest loaded from agent.json."""
+    """Agent type manifest loaded from agent.json/agent.json5.
+
+    Supports both the legacy nested ``permissions``/``events``/``entry``
+    schema and the flat preset-agent schema used by Ubuntu preset agents
+    (``exec_allow``/``exec_deny``/``read``/``write``).
+    """
 
     name: str
     version: str
     description: str = ""
+    display_name: str = ""
+    author: str = ""
     capabilities: list[str]
     depends_on: list[str] = []  # 依赖的 CLI/MCP 工具列表
-    permissions: AgentPermissions
-    events: AgentEvents
-    entry: str
+    exec_allow: list[str] = []
+    exec_deny: list[str] = []
+    read: list[str] = []
+    write: list[str] = []
+    permissions: AgentPermissions = Field(default_factory=AgentPermissions)
+    events: AgentEvents = Field(default_factory=AgentEvents)
+    entry: str = "./main.py"
     risk_level: RiskLevel = RiskLevel.MEDIUM
     # 长期提示词文件路径（类 AGENTS.md），减少每次调用注入的 tokens
     system_prompt_path: str = ""
@@ -517,8 +528,27 @@ class AgentManifest(BaseModel):
     # 工作目录限制（cwd jail）
     work_dir: str = ""  # 允许访问的工作目录根路径，空=不限制
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise_preset_permissions(cls, values: Any) -> Any:
+        """Map the flat preset-agent schema into the legacy permissions model."""
+        if not isinstance(values, dict):
+            return values
 
-# ── Agent 任务通信模型 ──────────────────────────────────
+        data = dict(values)
+        if "permissions" not in data:
+            data["permissions"] = {
+                "read": data.get("read", []),
+                "write": data.get("write", []),
+                "exec": data.get("exec_allow", []),
+                "deny_exec": data.get("exec_deny", []),
+            }
+        if "events" not in data:
+            data["events"] = {}
+        if "entry" not in data:
+            data["entry"] = "./main.py"
+        return data
+
 
 class AgentTask(BaseModel):
     """Workflow Engine → Agent 的任务对象（通过 Event Bus 传递）。

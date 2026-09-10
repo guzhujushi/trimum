@@ -1,8 +1,16 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# Keep this file itself on LF
+.gitattributes text eol=lf
+
 # Shell scripts should always use LF
 *.sh text eol=lf
+*.bash text eol=lf
+
+# systemd units and extensionless shell scripts should always use LF
+*.service text eol=lf
+scripts/trm text eol=lf
 
 # Lua files (Hyprland config) should use LF
 *.lua text eol=lf

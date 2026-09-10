@@ -160,11 +160,13 @@ class WorkflowEngine:
         self,
         event_bus: EventBus,
         default_handler: Optional[NodeHandler] = None,
+        skill_router: Any = None,  # SkillRouter, imported lazily
     ) -> None:
         self._bus = event_bus
         self._default_handler = default_handler
         self._handlers: dict[str, NodeHandler] = {}
         self._active_workflows: dict[str, asyncio.Task] = {}
+        self._skill_router = skill_router
 
     # ── 处理器注册 ────────────────────────────────────────
 
@@ -174,16 +176,56 @@ class WorkflowEngine:
     def set_default_handler(self, handler: NodeHandler) -> None:
         self._default_handler = handler
 
+    def set_skill_router(self, skill_router: Any) -> None:
+        """Attach a SkillRouter instance for resolving ``skill:<name>`` handlers."""
+        self._skill_router = skill_router
+
     async def _resolve_handler(self, node: NodeDefinition) -> NodeHandler:
+        # 1. Exact match
         if node.handler and node.handler in self._handlers:
             return self._handlers[node.handler]
+
+        # 2. Dot-notation prefix match
         if node.handler and "." in node.handler:
             provider, action = node.handler.split(".", 1)
             key = f"{provider}.{action}"
             if key in self._handlers:
                 return self._handlers[key]
+
+        # 3. Skill router: handler like "skill:hello-world" or "skill.hello-world"
+        if node.handler and self._skill_router is not None:
+            from .skill_router import SkillRouter as _SR
+            skill_name = _SR.extract_skill_name(node.handler)
+            if skill_name is not None:
+                skill_def = self._skill_router.get_skill(skill_name)
+                if skill_def is not None:
+
+                    async def _skill_handler(wf_id: str, nd: NodeDefinition, ctx: dict) -> Any:
+                        extra_args = dict(nd.config.get("args", {})) if nd.config else {}
+                        result = await self._skill_router.execute_skill(
+                            skill_name,
+                            agent_id=ctx.get("agent_id"),
+                            extra_args=extra_args,
+                        )
+                        if result.success:
+                            return {
+                                "success": True,
+                                "output": result.output_summary,
+                                "steps": len(result.step_results),
+                                "experience": result.experience,
+                            }
+                        raise TrimumError(
+                            TRMErrorCode.TOOL_EXECUTION_FAILED,
+                            message=f"Skill '{skill_name}' failed: {result.error}",
+                            context={"skill": skill_name, "error": result.error},
+                        )
+
+                    return _skill_handler
+
+        # 4. Default handler fallback
         if self._default_handler:
             return self._default_handler
+
         raise TrimumError(
             TRMErrorCode.WORKFLOW_NODE_NOT_FOUND,
             message=f"No handler for node '{node.id}' (handler={node.handler})",

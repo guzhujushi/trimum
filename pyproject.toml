@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trimum-core"
-version = "0.2.1"
+version = "0.5.0"
 description = "trimum Core Daemon - system-level AI agent runtime"
 requires-python = ">=3.12"
 dependencies = [
@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 trmd = "trimum_core.main:run"
+trm = "trimum_core.main:health"
 trimum-client = "trimum_core.trimum_client:main"
 
 [tool.setuptools.packages.find]

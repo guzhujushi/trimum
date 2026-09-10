@@ -66,6 +66,8 @@ class AppState:
         self.context: Optional[ContextManager] = None
         self.socket_server: Optional[stdlib_socket.socket] = None
         self.ipc: Optional[IpcHandler] = None
+        # Security components (injected by main.py on start)
+        self.sec_monitor = None
 
 
 def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
@@ -308,7 +310,11 @@ def create_app(config: Config) -> FastAPI:
 
 
 def run_core(config: Config | None = None) -> None:
-    """Run the trimum Core daemon."""
+    """Run the trimum Core daemon.
+
+    Lightweight alternative entrypoint (used by tests/external callers
+    that don't need the full main.py security init chain).
+    """
     import asyncio
 
     if config is None:
