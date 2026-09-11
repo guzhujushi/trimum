@@ -10,6 +10,9 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .config import Config
+from .policy_engine import PolicyEngine
+
 
 
 def run() -> None:
@@ -205,4 +208,4 @@ def cli_dispatch() -> None:
     run()
 
 if __name__ == "__main__":
-    run()
+    cli_dispatch()
