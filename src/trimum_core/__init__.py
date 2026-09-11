@@ -6,6 +6,9 @@ from trimum_core.agent_runtime import AgentRuntime
 from trimum_core.agent_socket import AgentSocketServer, AgentSocketClient, SocketMessage
 from trimum_core.behavior_monitor import BehaviorMonitor
 from trimum_core.memory_bridge import MemoryBridge
+from trimum_core.skill_loader import SkillLoader, SkillDefinition, SkillStep, SkillValidate, parse_skill_yaml
+from trimum_core.skill_router import SkillRouter
+from trimum_core.skill_executor import SkillExecutor, SkillExecutionResult, SkillStepResult
 from trimum_core.planner_agent import PlannerAgent
 from trimum_core.sec_monitor import SecMonitor, ThreatMatcher, OpContextClassifier, ThreatSignature
 from trimum_core.sec_executor import SecExecutor, SecBlocker, SecAudit, SecNotif
@@ -69,7 +72,7 @@ from trimum_core.workflow_engine import (
     WorkflowStepCondition,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "Action",
@@ -123,6 +126,15 @@ __all__ = [
     "get_workflow_by_name",
     "get_workflows_by_trigger",
     "RouteEntry",
+    "SkillDefinition",
+    "SkillExecutionResult",
+    "SkillExecutor",
+    "SkillLoader",
+    "SkillRouter",
+    "SkillStep",
+    "SkillStepResult",
+    "SkillValidate",
+    "parse_skill_yaml",
     "ShellDispatcher",
     "SystemDispatcher",
     "ToolDefinition",
