@@ -21,7 +21,7 @@ dependencies = [
 
 [project.scripts]
 trmd = "trimum_core.main:run"
-trm = "trimum_core.main:health"
+trm = "trimum_core.main:cli_dispatch"
 trimum-client = "trimum_core.trimum_client:main"
 
 [tool.setuptools.packages.find]

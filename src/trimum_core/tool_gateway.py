@@ -15,6 +15,7 @@ import importlib
 import importlib.util
 import os
 import re
+import sys
 import time
 import types
 import uuid
@@ -300,6 +301,10 @@ class ToolGateway:
 
     'confirm' actions are passed through to the caller; the caller decides
     whether to prompt the user.
+
+    When ``interactive=True``, the gateway prompts on stderr for y/n confirmation
+    before executing commands that received a ``confirm`` action from the policy
+    engine. This is used by the CLI ``trm install`` and ``trm exec`` commands.
     """
 
     def __init__(
@@ -316,6 +321,7 @@ class ToolGateway:
         enable_credential_redact: bool = True,
         enable_audit: bool = True,
         enable_jit_auth: bool = True,
+        interactive: bool = False,
     ) -> None:
         self.policy = policy_engine or PolicyEngine()
         self.tools = tool_registry or ToolRegistry()
@@ -329,6 +335,7 @@ class ToolGateway:
         self.enable_credential_redact = enable_credential_redact
         self.enable_audit = enable_audit
         self.enable_jit_auth = enable_jit_auth
+        self.interactive = interactive
         # JIT 令牌表: agent_id -> list[JITToken]
         self._jit_tokens: dict[str, list[JITToken]] = {}
         # 审计日志（内存环缓冲区）
@@ -423,6 +430,27 @@ class ToolGateway:
             )
             self._record_audit("policy_denied", request, resp)
             return resp
+
+        # ── 终端交互确认（interactive=True 且 action=confirm） ──
+        if action == Action.CONFIRM and self.interactive:
+            confirmed = await self._prompt_confirm(
+                cmd_str, risk, reason, request.agent_id or "terminal"
+            )
+            if not confirmed:
+                resp = ExecuteResponse(
+                    execution_id=execution_id,
+                    status="denied",
+                    error="User cancelled",
+                    exit_code=1,
+                    risk=risk,
+                    action=Action.DENY,
+                    reason="User declined confirmation prompt",
+                )
+                self._record_audit("user_cancelled", request, resp)
+                return resp
+            # 用户确认后，降级为 AUTO 继续执行
+            action = Action.AUTO
+            reason = f"User confirmed: {reason}"
 
         # ------------------------------------------------------------------
         # Layer 2: Agent Permission Check
@@ -752,6 +780,55 @@ class ToolGateway:
                 return "Tool requires JIT authorization"
 
         return None  # 不需要 JIT
+
+    # ------------------------------------------------------------------
+    # 终端交互确认
+    # ------------------------------------------------------------------
+
+    async def _prompt_confirm(
+        self,
+        cmd_str: str,
+        risk: RiskLevel,
+        reason: str,
+        caller: str,
+    ) -> bool:
+        """在 stderr 上输出确认提示并读取 y/n 输入。
+
+        Args:
+            cmd_str: 要执行的命令字符串
+            risk: 风险评估等级
+            reason: 风险原因（匹配的策略规则说明）
+            caller: 调用方标识（agent_id 或 "terminal"）
+
+        Returns:
+            True 表示用户确认，False 表示拒绝。
+        """
+        loop = asyncio.get_event_loop()
+
+        risk_icons = {
+            "low": "[i]",
+            "medium": "[!]",
+            "high": "[!!]",
+            "critical": "[!!!]",
+        }
+        icon = risk_icons.get(risk.value if hasattr(risk, 'value') else str(risk).lower(), "[?]")
+
+        print(f"\n{icon} trimum: 需要确认", file=sys.stderr)
+        print(f"   来源: {caller}", file=sys.stderr)
+        print(f"   风险: {risk.value if hasattr(risk, 'value') else risk}", file=sys.stderr)
+        print(f"   原因: {reason}", file=sys.stderr)
+        print(f"   命令: {cmd_str}", file=sys.stderr)
+        print(file=sys.stderr)
+
+        def _read_confirm() -> bool:
+            try:
+                answer = input("   确认执行？[y/N] ")
+                return answer.strip().lower() in ("y", "yes")
+            except (EOFError, KeyboardInterrupt):
+                return False
+
+        confirmed = await loop.run_in_executor(None, _read_confirm)
+        return confirmed
 
     def issue_jit_token(
         self,

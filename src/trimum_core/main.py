@@ -212,5 +212,24 @@ def health() -> None:
         sys.exit(0)
 
 
+
+
+def cli_dispatch() -> None:
+    """CLI dispatch entry point (``trm`` command).
+
+    Usage::
+
+        trm              -> runs daemon (same as ``trmd``)
+        trm health       -> quick health check
+
+    This is registered as the ``trm`` console_scripts entry in ``pyproject.toml``.
+    """
+    if len(sys.argv) > 1:
+        sub = sys.argv[1]
+        if sub == "health":
+            health()
+            return
+    # Default: run daemon
+    run()
 if __name__ == "__main__":
     run()
