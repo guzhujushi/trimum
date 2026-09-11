@@ -238,4 +238,4 @@ def cli_dispatch() -> None:
     run()
 
 if __name__ == "__main__":
-    run()
+    cli_dispatch()
