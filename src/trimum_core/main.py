@@ -230,6 +230,5 @@ def cli_dispatch() -> None:
             health()
             return
     # Default: run daemon
-    run()
 if __name__ == "__main__":
-    run()
+    cli_dispatch()
