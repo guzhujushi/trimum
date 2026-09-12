@@ -322,6 +322,55 @@ class Action(str, Enum):
     DENY = "deny"
 
 
+class SecurityMode(str, Enum):
+    """安全等级模式 — Agent 可按职责选择自己需要的安全级别。
+
+    从打到严：
+        regex    — 纯正则，零 LLM 调用，最低成本（可信任务/工具）
+        balanced — 正则 + LLM 灰色地带分析 + 结果缓存（默认）
+        sandbox  — 全量 LLM 审查 + 文件信任检查 + 资源限制（高危 Agent）
+    """
+
+    REGEX = "regex"
+    BALANCED = "balanced"
+    SANDBOX = "sandbox"
+
+
+class FileTrustLevel(int, Enum):
+    """文件信任等级 — 按文件首次出现时间衰减。
+
+    数字越大越可信。
+    """
+
+    ISOLATED = 0    # <1h：最高管控（仅 sandbox 模式用到此级）
+    HIGH = 1        # 1h~24h：高管控
+    MEDIUM = 2      # 1d~7d：中管控
+    LOW = 3         # 7d~30d：低管控
+    TRUSTED = 4     # >30d：完全信任，不调 LLM
+
+
+class LLMDecision(BaseModel):
+    """LLM 生成的决策结果，带缓存。"""
+
+    command_hash: str = Field(description="命令的 SHA256 前缀 8 位")
+    risk: RiskLevel
+    action: Action
+    reason: str
+    confidence: float = Field(ge=0.0, le=1.0, default=0.5)
+    expires_at: float = Field(description="Unix timestamp 过期时间")
+
+
+class AgentSecurityConfig(BaseModel):
+    """Agent 安全配置 — 从 agent.json5 的 security 字段加载。"""
+
+    mode: SecurityMode = SecurityMode.BALANCED
+    llm_threshold: str = "suspicious"  # never | suspicious | always
+    file_trust_enabled: bool = True
+    cache_ttl_seconds: int = 300
+    cache_max_entries: int = 1000
+    resource_limits: dict[str, int] = Field(default_factory=dict)
+
+
 class ToolType(str, Enum):
     """Supported tool types."""
 

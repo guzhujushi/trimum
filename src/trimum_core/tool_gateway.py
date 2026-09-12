@@ -37,6 +37,9 @@ from .models import (
     JITToken,
 )
 from .policy_engine import PolicyEngine
+from .llm_policy import LlmPolicyEngine
+from .security_config import SecurityConfig
+from .file_trust import FileTrustTracker
 from .security_rule import SecurityRule, DecisionResult
 from .tool_dispatchers import DispatcherRegistry
 from .tool_file_loader import scan_tools
@@ -322,8 +325,14 @@ class ToolGateway:
         enable_audit: bool = True,
         enable_jit_auth: bool = True,
         interactive: bool = False,
+        llm_policy: Optional[LlmPolicyEngine] = None,
+        security_config: Optional[SecurityConfig] = None,
+        file_trust_tracker: Optional[FileTrustTracker] = None,
     ) -> None:
         self.policy = policy_engine or PolicyEngine()
+        self.llm_policy = llm_policy
+        self.sec_config = security_config or SecurityConfig()
+        self.ft_tracker = file_trust_tracker or FileTrustTracker(db_path=":memory:")
         self.tools = tool_registry or ToolRegistry()
         self.dispatchers = dispatcher_registry or DispatcherRegistry()
         self.work_dir = work_dir or _DEFAULT_WORK_DIR
@@ -410,6 +419,30 @@ class ToolGateway:
         # ------------------------------------------------------------------
         source_type = getattr(request, "source_type", None)
         risk, action, reason = self.policy.evaluate(cmd_str, source_type=source_type)
+
+        # ── LLM enhanced check (if configured and not deny) ──
+        if self.llm_policy and action != Action.DENY:
+            try:
+                agent_id = getattr(request, "agent_id", None)
+                mode = self.sec_config.get_mode(agent_id)
+                file_trust = None
+                if hasattr(request, "args") and isinstance(request.args, list):
+                    for arg in request.args:
+                        if "/" in str(arg):
+                            ft = self.ft_tracker.get_trust_level(str(arg))
+                            if ft is not None:
+                                file_trust = ft
+                                break
+                if mode.value != "regex":
+                    llm_risk, llm_action, llm_reason = await self.llm_policy.evaluate(
+                        command=cmd_str,
+                        source_type=source_type,
+                        mode=mode,
+                        file_trust=file_trust,
+                    )
+                    risk, action, reason = llm_risk, llm_action, llm_reason
+            except Exception as e:
+                logger.warning("gateway.llm_policy_fallback", error=str(e))
 
         if action == Action.DENY:
             logger.warning(

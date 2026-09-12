@@ -15,6 +15,9 @@ from trimum_core.sec_executor import SecExecutor, SecBlocker, SecAudit, SecNotif
 from trimum_core.security_rule import SecurityRule, DecisionResult
 from trimum_core.threat_workflows import THREAT_WORKFLOWS, get_workflow_by_name, get_workflows_by_trigger
 from trimum_core.system_monitor import SystemMonitor
+from trimum_core.security_config import SecurityConfig
+from trimum_core.file_trust import FileTrustTracker
+from trimum_core.llm_policy import LlmPolicyEngine, LLMDecisionCache
 from trimum_core.models import (
     Action,
     TRMErrorCode,
@@ -22,6 +25,10 @@ from trimum_core.models import (
     AuditRecord,
     DefenseAction,
     OpContext,
+    SecurityMode,
+    FileTrustLevel,
+    LLMDecision,
+    AgentSecurityConfig,
     SecVerdict,
     ThreatCategory,
     ThreatMatch,
@@ -145,6 +152,14 @@ __all__ = [
     "SocketMessage",
     "SystemEvent",
     "SystemMonitor",
+    "SecurityConfig",
+    "FileTrustTracker",
+    "LlmPolicyEngine",
+    "LLMDecisionCache",
+    "SecurityMode",
+    "FileTrustLevel",
+    "LLMDecision",
+    "AgentSecurityConfig",
     "DecisionResult",
     "OpContextClassifier",
     "SecAudit",
