@@ -221,6 +221,9 @@ def cli_dispatch() -> None:
 
         trm              -> runs daemon (same as ``trmd``)
         trm health       -> quick health check
+        trm install      -> interactive first-time setup guide
+        trm exec <cmd>   -> AI Agent 执行自然语言指令（流式）
+        trm version      -> show version
 
     This is registered as the ``trm`` console_scripts entry in ``pyproject.toml``.
     """
@@ -229,6 +232,34 @@ def cli_dispatch() -> None:
         if sub == "health":
             health()
             return
+        elif sub == "install":
+            install()
+            return
+        elif sub == "exec":
+            _exec_command(" ".join(sys.argv[2:]))
+            return
+        elif sub == "version":
+            from . import __version__
+            print(f"trimum v{__version__}")
+            return
     # Default: run daemon
+    run()
+
+
+def _exec_command(prompt: str) -> None:
+    """trm exec 入口 — 交互式 AI Agent 执行。"""
+    if not prompt:
+        print("用法: trm exec \"<自然语言指令>\"")
+        print("例:   trm exec \"查看 /tmp 下有哪些大文件\"")
+        print("      trm exec \"清理 /tmp 下 3 天前的日志文件\"")
+        sys.exit(1)
+
+    import asyncio
+    from .agent_loop import AgentLoop
+
+    loop = AgentLoop(agent_name="trm-exec")
+    asyncio.run(loop.run(prompt))
+
+
 if __name__ == "__main__":
     cli_dispatch()
