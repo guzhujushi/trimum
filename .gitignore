@@ -108,3 +108,6 @@ issues.csv
 # ---- AI / LLM cache ----
 embeddings-cache/
 chroma-data/
+
+# temp server files
+._*

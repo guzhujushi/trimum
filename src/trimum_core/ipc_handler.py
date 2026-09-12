@@ -85,8 +85,19 @@ class RpcRouter:
     def __init__(self) -> None:
         self._handlers: dict[str, Handler] = {}
 
-    def register(self, method: str, handler: Handler) -> None:
-        self._handlers[method] = handler
+    def register(self, method: str, handler: Handler | None = None) -> Callable | None:
+        """Register a handler by method name.
+        Can be used as a decorator: @router.register("health")
+        or as a function: router.register("health", handler).
+        """
+        if handler is not None:
+            self._handlers[method] = handler
+            return None
+        # Decorator mode: return a wrapper that receives the handler function
+        def decorator(fn: Handler) -> Handler:
+            self._handlers[method] = fn
+            return fn
+        return decorator
 
     def get(self, method: str) -> Handler | None:
         return self._handlers.get(method)

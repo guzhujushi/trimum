@@ -1,8 +1,8 @@
 # trimum — 未完成待办清单
 
-> 最后更新：2026-09-07 21:46
+> 最后更新：2026-09-12 14:55
 > Phase 3 核心 + Security Agent 全链路 + 四想法 X4 已完成 ✅
-> 当前焦点：Phase 3 收尾（真机前可做项）
+> 新项：OpenCLI Bridge Tool 完成 ⛓️ 当前焦点：UBUNTU 真机验证 + 网卡修复
 
 ---
 
@@ -61,28 +61,50 @@
 
 ---
 
-## 🔴 立即（真机前可做）
+## 🔴 立即（真机前必做）
 
-### #14.5 TRM 错误码体系
-- 新建 `docs/ERROR-CODE-SPEC.md`
-- 三段式错误码：TRM-1xxx Runtime / 2xxx Security / 3xxx Agent / 4xxx Tool
-- `models.py` 增加 `TrimumError(Exception)` + 错误码协议
+### 🔧 修复记录：Ubuntu 网卡（2026-09-12 17:58 已修复）
+- 问题：HWE 内核升级 6.8→7.0 后 Tenda AX650 U9（AIC8800 芯片）驱动失效
+- 修复：GRUB 默认内核改回 6.8.0-41-generic，update-grub + reboot
+- 教训：内核升级前必须检查第三方驱动（闭源芯片驱动尤其）
+- 下一步：锁定内核版本 + 研究 DKMS 编译
 
-### #11 Policy Engine 升级：正则 → 混合（LLM + 规则）
-- 当前：PolicyEngine 是纯正则规则匹配
-- 目标：SecurityRule 能调用 LLM 辅助评估运行时行为
-- 智能模式：仅 Layer 1 未命中 + Layer 2 可疑时触发
-- 注意：LLM 调用走 httpx（已有依赖），不引入新依赖
+### 🚧 未完成
+- [ ] 锁定内核版本：`apt-mark hold linux-image-generic-hwe-24.04`
+- [ ] DKMS 编译 AIC8800 驱动至内核源码树（一劳永逸适配未来内核）
 
-### X1 Skill 层
-- `src/trimum_core/skill_loader.py` + `skill_executor.py`
-- `~/.trimum/skills/<name>/skill.yaml` + SKILL.md
-- 验收：yaml 可加载；capability 调用；至少一个 demo 能跑
+### 🎯 2026-09-11 校验结论：X1/X2/真机均已就绪
 
-### X2 ExperienceLearner
-- `src/trimum_core/experience_learner.py`
-- 监听 `*.failed` 事件 → LLM 分析 → 写入 Agent memory/experience.db
-- 仅在失败时触发 LLM
+### ✅ 2026-09-12 新增：OpenCLI Bridge Tool 完成
+- **代码**：`~/.trimum/tools/opencli/`（main.py + tool.json5 + generate_tools.py）
+- **架构**：桥接 opencli CLI（JS 引擎），trimum Agent 通过 Tool Gateway 调用
+- **部署**：目标 Ubuntu（100.115.86.48）已装 OpenCLI 1.8.7 + Node 20.20.2
+- **待验证**：`opencli hackernews top --limit 3 --format json` 实际调用
+
+**X1 Skill 层** → 已实现 ✅
+- `skill_loader.py`（148 行）、`skill_executor.py`（291 行）、`skill_router.py` 均存在
+- 测试：50 个 skill/experience 相关测试全通过
+- **待确认**：demo skill 是否已跑通、yaml 加载链路是否完整
+
+**X2 ExperienceLearner** → 已实现 ✅
+- `experience_learner.py`（508 行）：事件监听 + LLM 分析 + 写 experience.db
+
+**目标真机已就绪** ✅
+- Ubuntu 24.04 x86_64
+- Python 3.12.3（trimum 要求 ✅）
+- 915G 磁盘，仅 12G 已用（2%）
+- 7.4G 内存，6.0G 可用
+- git / curl / wget / make / gcc 齐全
+- frpc systemd 常驻、SSH 隧道(`ssh -p 8322 guzhujushi@8.145.36.108`) 稳定
+
+**更新优先级（已验证后重新排序）：**
+| 优先级 | 项目 | 说明 |
+|--------|------|------|
+| 🔴 立即 | #15 真机部署 trmd | 隧道已通、环境已就绪，是 Phase 3 收尾的硬目标 |
+| 🔴 立即 | #11 LLM 混合策略 | Policy Engine 核心短板 |
+| 🟡 中优 | #3.9 CLI 流式输出 | 纯代码，不限环境 |
+| 🟡 中优 | #3.7 Cgroup 接口层 | Windows mock 可做 |
+| 🟢 低优 | X1 demo skill 跑通验收 | 代码已写但需真实验证 |
 
 ---
 
