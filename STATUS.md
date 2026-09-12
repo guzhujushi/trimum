@@ -1,8 +1,8 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-11（v13 — Ubuntu Deploy: 安装脚本/Systemd/配置/CLI/预设Agent/Workflow）
+> 最后更新：2026-09-12（v14 — 全量测试 296/297 pass ✅  /  OpenCLI Bridge / 网卡修复 / SafeMind 设计）
 >
-> 当前阶段：Phase 3 收尾 + Ubuntu Deploy ✅
+> 当前阶段：Phase 3 收尾 + Ubuntu 真机常见网络场景工具化 + 红蓝对抗安全加固 (SafeMind 模式)
 
 ---
 
@@ -158,17 +158,18 @@
 
 ## 下一步（优先级排序）
 
-1. 🔴 **Agent SDK 封装** — 集成 openai-agents-python 作为底层，在其上包装 Tool Gateway + Security Agent 权限层（当前 `src/agent-sdk/` 是空目录，是最关键的未完成项）
-2. 🔴 **上下文窗口管理** — 复刻 Pydantic AI Harness 的 Compaction 模式：工具输出截断 + 滑动窗口。当前无任何上下文控制，长期运行 Agent 必然 token 爆炸
-3. 🟡 **全链路集成** — Security Agent ↔ Agent Router / Tool Gateway / API Server 连接起来
-4. 🟡 **可观测性基座** — LLM 调用封装 + Token 计数 + 结构化日志（管道到 disk/
-5. 🟡 **凭据脱敏** — Tool Gateway 执行前扫描 API key/token 模式，替换为 `***`
-6. 🟡 **弹窗确认的 API/UI 入口** — 用户如何收到弹窗、如何确认
-7. 🟢 **Transform Agent 稳定性测试** — 不同输入生成 TARL 正确率验证（含 #8.5 confidence 字段）
-8. 🟢 **Workflow Engine TARL 接入** — match() 用 KV 前缀索引替代正则
-9. 🟢 **Security Agent TARL 接入** — `cmd:` 前缀直接映射策略规则
-10. 🟢 **Policy Engine 学习模式** — Behavior Monitor 观察→动态生成 allow ruleset
-11. 🟢 **SonarQube 重扫** — 确认修复效果，无回归
+1. 🔴 **SafeMind 红蓝对抗安全加固** — 隔离实验室环境 (safe_lab.py) + 红队 agent (red_team.py) + 检测规则验证器 (scarecrow/verifier.py)
+2. 🔴 **Agent SDK 封装** — 集成 openai-agents-python 作为底层，在其上包装 Tool Gateway + Security Agent 权限层（当前 `src/agent-sdk/` 是空目录，是最关键的未完成项）
+3. 🔴 **全链路集成测试通过** — 当前 296/297 pass，修复 AuditEvent 导出 bug
+4. 🟡 **普通网络场景工具化** — OpenCLI 桥接适配器按需启用
+5. 🟡 **Policy Engine 升级（正则→LLM 混合）** — 当前纯正则，需要在可疑行为时调 LLM
+6. 🟡 **BehaviorMonitor 闭环** — 反馈闭环，动态调整行为基线
+7. 🟡 **DKMS 编译 AIC8800 网卡驱动** — 一劳永逸，不让内核锁死
+8. 🟡 **CLI 流式输出** — trm CLI 加 rich/typer 流式渲染
+9. 🟡 **弹窗确认的 API/UI 入口** — 用户如何收到弹窗、如何确认
+10. 🟢 **`D:\trimum\tmp\` 清理** — 68 个 codex 临时文件
+11. 🟢 **`src/trimum-mvp/` 清理** — 废弃的 MVP 代码
+12. 🟢 **SonarQube 重扫** — 确认修复效果，无回归
 ---
 
 ## Ubuntu Deploy 任务进度（2026-09-11）
