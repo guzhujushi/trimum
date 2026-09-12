@@ -121,8 +121,12 @@
 - 对接 SecMonitor，使检测结果→BehaviorMonitor 更新行为基线
 
 ### #3.9 / G9 CLI 流式输出
-- trimum CLI (`trm`) 增加流式输出模式（typer + rich）
-- `trimum_client.py` 已有 JSON-RPC 客户端基础，需要加 streaming 支持
+- ✅ `trm exec <natural language>` 入口已完成（AgentLoop + LiveConsole + Rich）
+- **待改进（Phase 3.5）**：
+  - [ ] **多步 Agent 循环**：不是一次性计划，而是执行结果→LLM分析→下一步→直到完成
+  - [ ] **确认交互增强**：每步展示操作摘要，用户可同意/修改/跳过
+  - [ ] **Live 面板**：实时 EventBus 进度面板（Rich Live），不是 print
+  - [ ] **Operator 模式**：允许用户在循环中修改 prompt/调整计划
 
 ---
 
