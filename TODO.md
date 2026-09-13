@@ -104,10 +104,23 @@
 - **步骤**：
   1. 上传源码到 `/home/guzhujushi/trimum/`
   2. `pip install -e .` 或 `uv pip install -e .`
-  3. `python -m trimum_core.main --version`
+  3. `python -m trimum_core.main --version` → 需要确认是否有 workflow_event_driver.py
   4. `python -m trimum_core.main health`
   5. 修复 Linux-only 导入失败（Unix socket 等）
   6. 启动 `trmd` 验证 API Server 可达
+
+### 🔴 真机部署 TODO（2026-09-13 当前阻塞）
+- [ ] **确认目标机源码路径结构** — 跑一下 find 看文件到底在哪：
+  ```bash
+  ls -la /opt/trimum/src/trimum_core/workflow_event_driver*
+  ls -la /home/guzhujushi/trimum/src/trimum_core/workflow_event_driver*
+  ```
+- [ ] **目标机安装依赖** — `sudo /opt/trimum/venv/bin/pip install rich psutil`
+- [ ] **重新 pip install -e 或复制整个 src 到 /opt/trimum/src/**
+- [ ] **重启 trmd** — `sudo systemctl restart trmd` → health 返回 200
+- [ ] **验证新模块** — 确认 WorkflowEventDriver, PsutilController, TokenUsageTracker, TokenStatusPanel 都能导入
+- [ ] **清理 /tmp 临时文件**
+
 - **验收**：`trm health` 全部 ok，`curl http://127.0.0.1:8321/health` 返回 200
 
 ### ~~2️⃣ #11 LLM 混合策略~~ ✅ 已完成（见上）
