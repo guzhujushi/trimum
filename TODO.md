@@ -1,8 +1,8 @@
 # trimum — 未完成待办清单
 
-> 最后更新：2026-09-12 20:11（v15 — 全面待办重构 + 状态修正）
+> 最后更新：2026-09-13 19:45（v15 — 全面待办重构 + 状态修正）
 > Phase 3 核心 + Security Agent 全链路 + 四想法 X4 + OpenCLI Bridge 已完成 ✅
-> 当前焦点：Phase 3 收尾（#15 真机部署 + #11 LLM 混合策略）+ 网卡修复
+> 当前焦点：Phase 3 收尾（#15 真机部署验收）
 
 ---
 
@@ -52,6 +52,31 @@
 
 ---
 
+## ✅ 近期交付
+
+### #11 LLM 混合策略（7438c75）
+- [x] LlmPolicyEngine wrapper（正则 + LLM 双模式）
+- [x] api_server AppState 注入 LlmPolicyEngine → ToolGateway 完整链路
+- [x] 低风险 [llm-passthrough]、高风险调 LLM、无 key [llm-fallback]
+- [x] LLMDecisionCache（5min TTL / max_entries / eviction）
+- [x] 11 集成测试全过 + 266/269 完整套件通过
+
+### #3.9 多步 Agent 循环（49579b8）
+- [x] run_interactive() — 多步循环（LLM 分析 → 执行 → 结果 → 下一步）
+- [x] 确认交互增强 — 每步 4 行操作摘要 + 可修改命令后执行
+- [x] Operator 模式 — 循环中 /stop /skip /edit <cmd> / /retry
+- [x] `trm exec --interactive` CLI 入口
+- [ ] Live 面板（Rich Live） — 后续优化项
+
+### #16 清理
+- [x] 删除 D:\trimum-phase2、D:\trimum-wt-agent 目录
+- [x] 删除 git 分支 phase2 / phase2-wt-agent / teen（本地+远程）
+- [x] 确认 D:\trimum-dev 是 VMware 虚拟机，保留
+- [x] 核心模块同步到 arch/server/ubuntu 分支目录
+- [x] 4/4 版本目录 import 测试通过
+
+
+
 ## 快速定位（最新层级）
 
 | 优先级 | # | 任务 | 环境 |
@@ -85,13 +110,7 @@
   6. 启动 `trmd` 验证 API Server 可达
 - **验收**：`trm health` 全部 ok，`curl http://127.0.0.1:8321/health` 返回 200
 
-### 2️⃣ #11 LLM 混合策略（PolicyEngine 核心短板）
-- **当前**：纯正则匹配，无 LLM 辅助分析
-- **升级**：新增 `LlmPolicyEngine` wrapper
-  - 正则命中高风险/疑似 → 调 LLM 二次确认
-  - LLM 不可用时回退正则决策
-  - 结果缓存（同指令 5 分钟内复用）
-- **验收**：高风险走 LLM，低风险直通正则
+### ~~2️⃣ #11 LLM 混合策略~~ ✅ 已完成（见上）
 
 ### 3️⃣ 修复记录 + 网卡 DKMS（跟踪项）
 - ✅ 网卡已修复（内核回退 6.8.0-41 + 锁定）
@@ -120,7 +139,7 @@
 - 扩展：新操作类型学习的反馈闭环
 - 对接 SecMonitor，使检测结果→BehaviorMonitor 更新行为基线
 
-### #3.9 / G9 CLI 流式输出
+### ~~#3.9 / G9 CLI 流式输出~~ ✅ 已完成
 - ✅ `trm exec <natural language>` 入口已完成（AgentLoop + LiveConsole + Rich）
 - **待改进（Phase 3.5）**：
   - [ ] **多步 Agent 循环**：不是一次性计划，而是执行结果→LLM分析→下一步→直到完成
