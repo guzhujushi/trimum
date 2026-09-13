@@ -1,6 +1,6 @@
 # trimum — 未完成待办清单
 
-> 最后更新：2026-09-13 19:45（v15 — 全面待办重构 + 状态修正）
+> 最后更新：2026-09-13 20:50（v15 — 全面待办重构 + 状态修正）
 > Phase 3 核心 + Security Agent 全链路 + 四想法 X4 + OpenCLI Bridge 已完成 ✅
 > 当前焦点：Phase 3 收尾（#15 真机部署验收）
 
@@ -124,15 +124,10 @@
 
 ## 🟡 中优（真机前可做）
 
-### #3.7 / G6 子 Agent 资源配额
-- **当前状态**：`security_rule.py` 中有 `_check_resource_limits()` 进程内软限（psutil 采样），`set_resource_limit()`/`get_resource_limits()` 接口已存在
-- **升级方向**：
-  1. 先写 `cgroup_controller.py` — Cgroup v2 接口抽象层（读写 `/sys/fs/cgroup/`），提供 `set_cpu_limit()` / `set_memory_limit()` / `set_io_limit()` / `apply()` 方法
-  2. `ResourceController` 基类 + `PsutilController`（现有软限回退）+ `CgroupV2Controller`（Linux 真机时激活）
-  3. `SecurityRule._check_resource_limits()` 改为调用 `ResourceController.check()`
-  4. Agent Runtime spawn 时通过 `cgroup_controller.apply(agent_id, limits)` 注册 cgroup 层级
-- 验收：Cgroup v2 接口可创建子 cgroup、可设置 CPU/mem 限、超限触发 Event Bus `security.alert`
-- **注意**：Cgroup v2 功能实现需 Linux，但接口层和测试（mock `/sys/fs/cgroup/`）可在 Windows 完成
+### ~~#3.7 / G6 子 Agent 资源配额~~ ✅ 已完成
+
+见近期交付
+
 
 ### #13 BehaviorMonitor 闭环
 - BehaviorMonitor 已有基础框架（滑动窗口、分类、异常检测、频率检测）
