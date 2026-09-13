@@ -161,12 +161,14 @@ class WorkflowEngine:
         event_bus: EventBus,
         default_handler: Optional[NodeHandler] = None,
         skill_router: Any = None,  # SkillRouter, imported lazily
+        driver: Optional[Any] = None,  # WorkflowEventDriver, imported lazily
     ) -> None:
         self._bus = event_bus
         self._default_handler = default_handler
         self._handlers: dict[str, NodeHandler] = {}
         self._active_workflows: dict[str, asyncio.Task] = {}
         self._skill_router = skill_router
+        self._driver = driver
 
     # ── 处理器注册 ────────────────────────────────────────
 
@@ -191,6 +193,32 @@ class WorkflowEngine:
             key = f"{provider}.{action}"
             if key in self._handlers:
                 return self._handlers[key]
+
+        # 2b. Agent dispatch via WorkflowEventDriver
+        #     handler like "agent:analyzer" or node.config has "agent_type"
+        agent_type = node.config.get("agent_type", "")
+        if (node.handler and node.handler.startswith("agent:")) or agent_type:
+            resolved_agent_type = agent_type or node.handler.split(":", 1)[1]
+
+            if self._driver is not None:
+                from .models import WorkflowDriverCommand
+
+                async def _agent_handler(wf_id: str, nd: NodeDefinition, ctx: dict) -> Any:
+                    cmd = WorkflowDriverCommand(
+                        cmd="start_agent",
+                        wf_id=wf_id,
+                        node_id=nd.id,
+                        agent_type=resolved_agent_type,
+                        input_data=nd.config.get("input_data", {}),
+                        subscribe_topics=[f"node.{wf_id}.{nd.id}.*"],
+                        confirm_required=nd.config.get("confirm", False),
+                        confirm_prompt=nd.config.get("confirm_prompt", ""),
+                        timeout_seconds=nd.timeout_seconds,
+                    )
+                    result = await self._driver._handle_start_agent(cmd)  # type: ignore[union-attr]
+                    return result
+
+                return _agent_handler
 
         # 3. Skill router: handler like "skill:hello-world" or "skill.hello-world"
         if node.handler and self._skill_router is not None:

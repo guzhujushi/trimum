@@ -7,7 +7,7 @@ import time
 from collections import deque
 from typing import Any, Callable, Coroutine
 
-from trimum_core.models import SystemEvent
+from trimum_core.models import EventSeverity, SystemEvent
 
 
 Callback = Callable[[SystemEvent], Coroutine[Any, Any, None] | None]
@@ -21,8 +21,65 @@ NAMESPACE_EVENT = "event."
 NAMESPACE_TASK = "task."
 """Prefix for task namespace events."""
 
+# 安全/监控事件常量（供 sec_monitor.py 等引用）
+AGENT_STATUS_CHANGED = "agent.status_changed"
+EVENT_SEC_MONITOR = "security.monitor_result"
+EVENT_SEC_ALERT = "security.alert"
+EVENT_SEC_BLOCKED = "security.blocked"
+EVENT_SEC_EBPF = "security.ebpf_alert"
+EVENT_SEC_FUSE = "security.fuse_triggered"
+EVENT_SEC_AUDIT_BREACH = "security.audit_breach"
+EVENT_WORKFLOW_TRIGGER = "workflow.trigger"
+
 
 class EventBus:
+
+    async def emit_event(
+        self,
+        event_type: str,
+        source: str,
+        payload: dict | None = None,
+    ) -> None:
+        """Convenience: create and publish a SystemEvent in one call.
+
+        Automatically prepends NAMESPACE_EVENT.
+        """
+        event = SystemEvent(
+            event_type=f"{NAMESPACE_EVENT}{event_type}",
+            source=source,
+            severity=EventSeverity.INFO,
+            payload=payload or {},
+            timestamp=time.time(),
+        )
+        await self.publish(event)
+
+    async def emit_task(
+        self,
+        task_type: str,
+        payload: dict | None = None,
+        source: str = "workflow",
+        severity: str | None = None,
+    ) -> None:
+        """Convenience: create and publish a task SystemEvent.
+
+        Automatically prepends NAMESPACE_TASK.
+        Used by WorkflowEngine for node/workflow lifecycle events.
+
+        Args:
+            task_type: Type string (e.g. "node.completed", "workflow.started")
+            payload: Event payload dict
+            source: Event source identifier
+            severity: Override severity (default INFO). Use "warn" for blocked/timeout.
+        """
+        event = SystemEvent(
+            event_type=f"{NAMESPACE_TASK}{task_type}",
+            source=source,
+            severity=EventSeverity(severity) if severity else EventSeverity.INFO,
+            payload=payload or {},
+            timestamp=time.time(),
+        )
+        await self.publish(event)
+
     """Async pub/sub event bus.
 
     Features:

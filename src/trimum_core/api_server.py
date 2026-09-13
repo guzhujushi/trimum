@@ -32,7 +32,6 @@ from .config import Config, ensure_dirs
 from .logger import setup_logging, get_logger
 from .ipc_handler import IpcHandler
 from .workflow_event_driver import WorkflowEventDriver
-from .workflow_event_driver import WorkflowEventDriver
 
 logger = get_logger("api_server")
 
@@ -249,7 +248,7 @@ def create_app(config: Config) -> FastAPI:
     @app.on_event("startup")
     async def startup():
         """Initialize services on startup."""
-        import asyncio as _asyncio
+        import asyncio
 
         # Ensure directories exist
         ensure_dirs(config)
@@ -276,7 +275,7 @@ def create_app(config: Config) -> FastAPI:
 
         # Start WorkflowEventDriver (bridge between Engine and Agent)
         state.driver = WorkflowEventDriver(
-            bus=getattr(state, "event_bus", state.bus),
+            bus=state.event_bus,
             agent_manager=state.agent_manager,
             driver_host=config.host,
             driver_port=getattr(config, "driver_port", 0) or 0,
@@ -284,8 +283,7 @@ def create_app(config: Config) -> FastAPI:
         )
         await state.driver.start()
 
-        logger.info("trinum_core_started"
-, host=config.host, port=config.port)
+        logger.info("trinum_core_started", host=config.host, port=config.port)
 
     @app.on_event("shutdown")
     async def shutdown():
