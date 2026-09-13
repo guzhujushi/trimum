@@ -42,7 +42,24 @@ class AppState:
     def __init__(self, config: Config):
         self.config = config
         self.policy = PolicyEngine(Path(config.policy_path))
-        self.tool_gateway = ToolGateway(self.policy)
+        from .llm_policy import LlmPolicyEngine
+        from .security_config import SecurityConfig
+        from .file_trust import FileTrustTracker
+
+        # LLM 增强策略（#11）：复用 policy 引擎 + 安全配置
+        sec_cfg = SecurityConfig()
+        sec_cfg.load()
+        self.llm_policy = LlmPolicyEngine(
+            policy_engine=self.policy,
+            security_config=sec_cfg,
+        )
+        self.file_trust = FileTrustTracker(db_path=":memory:")
+
+        self.tool_gateway = ToolGateway(
+            self.policy,
+            llm_policy=self.llm_policy,
+            file_trust_tracker=self.file_trust,
+        )
         self.event_bus = EventBus()
         self.agent_manager = AgentManager(
             max_agents=config.max_agents,
