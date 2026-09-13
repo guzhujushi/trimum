@@ -13,6 +13,7 @@ import asyncio
 from typing import Any, Optional
 
 from rich.console import Console
+from rich.console import RenderResult
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
@@ -209,4 +210,75 @@ class LiveConsole:
         _console.print(table)
 
 
-__all__ = ["LiveConsole"]
+__all__ = ["LiveConsole", "TokenStatusPanel"]
+
+
+class TokenStatusPanel:
+    """Rich renderable for live token + resource tracking during interactive sessions."""
+
+    def __init__(self):
+        self._agent_id: str = ""
+        self.refresh_interval: float = 2.0
+        self._refresh_interval: float = self.refresh_interval
+        self._cpu_percent: float = 0.0
+        self._memory_mb: float = 0.0
+        self._memory_limit_mb: float = 512.0
+        self._token_used: int = 0
+        self._token_limit: int = 0
+        self._calls_5min: int = 0
+        self._calls_limit: int = 0
+
+    def set_agent(self, agent_id: str) -> None:
+        """设置当前 agent。"""
+        self._agent_id = agent_id
+
+    def update(
+        self,
+        cpu_percent: float = 0,
+        memory_mb: float = 0,
+        token_used: int = 0,
+        token_limit: int = 0,
+        calls_5min: int = 0,
+        calls_limit: int = 0,
+    ) -> None:
+        """由 AgentLoop 调用推送新数据。"""
+        self._cpu_percent = cpu_percent
+        self._memory_mb = memory_mb
+        self._token_used = token_used
+        self._token_limit = token_limit
+        self._calls_5min = calls_5min
+        self._calls_limit = calls_limit
+
+    def __rich_console__(self, console, options) -> RenderResult:
+        """渲染 Rich Panel。"""
+        token_ratio = self._ratio(self._token_used, self._token_limit)
+        cpu_ratio = self._ratio(self._cpu_percent, 100.0)
+        memory_ratio = self._ratio(self._memory_mb, self._memory_limit_mb)
+        calls_ratio = self._ratio(self._calls_5min, self._calls_limit)
+
+        lines = [
+            self._line("Token Usage", self._format_bar(token_ratio), f"{self._token_used} / {self._token_limit}"),
+            self._line("CPU", self._format_bar(cpu_ratio), f"{self._cpu_percent:.1f}%"),
+            self._line("Memory", self._format_bar(memory_ratio), f"{self._memory_mb:.0f} / {self._memory_limit_mb:.0f} MB"),
+            self._line("Calls (5min)", self._format_bar(calls_ratio), f"{self._calls_5min} / {self._calls_limit}"),
+        ]
+
+        yield Panel(Text("\n".join(lines)), expand=False)
+
+    @staticmethod
+    def _format_bar(ratio: float, width: int = 20) -> str:
+        """返回如 ████████░░░░ 的 Unicode 进度条。"""
+        filled = min(int(ratio * width), width)
+        return "█" * filled + "░" * (width - filled)
+
+    @staticmethod
+    def _ratio(value: float, limit: float) -> float:
+        """计算进度条比例，limit <= 0 时返回 0。"""
+        if limit <= 0:
+            return 0.0
+        return max(0.0, min(value / limit, 1.0))
+
+    @staticmethod
+    def _line(label: str, bar: str, value: str) -> str:
+        """生成一行左标签 + Unicode 进度条 + 右侧数值。"""
+        return f"{label:<14}{bar}   {value}"

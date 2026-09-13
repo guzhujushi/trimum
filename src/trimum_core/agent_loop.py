@@ -37,8 +37,9 @@ from .models import (
 from .security_config import SecurityConfig
 from .llm_policy import LlmPolicyEngine
 from .file_trust import FileTrustTracker
-from .live_console import LiveConsole
+from .live_console import LiveConsole, TokenStatusPanel
 from .config import Config
+from .resource_controller import TokenUsageTracker, TokenUsage, PsutilController
 
 log = logging.getLogger("trimum_core.agent_loop")
 
@@ -62,7 +63,7 @@ class InteractiveLoopConfig:
     operator_mode: bool = True
     confirm_plan: bool = True
     step_by_step_confirm: bool = True
-    use_live_panel: bool = False  # 预留，当前版本使用静态 console
+    use_live_panel: bool = True  # 预留，当前版本使用静态 console
 
     def __post_init__(self):
         valid_modes = {"full", "review", "auto"}
@@ -117,6 +118,11 @@ class AgentLoop:
 
         # 循环配置（默认 full interactive）
         self.loop_config: InteractiveLoopConfig = InteractiveLoopConfig()
+
+        # Token 资源追踪（可视化用）
+        self.token_tracker = TokenUsageTracker(window_minutes=5)
+        self.resource_controller = PsutilController()
+        self._token_panel = TokenStatusPanel()
 
     # ── 主入口 ──
 
@@ -299,6 +305,21 @@ class AgentLoop:
                 "result": step_result,
             })
 
+            # 更新资源/Token 追踪面板
+            try:
+                usage = await self.resource_controller.get_usage(self.agent_name)
+                tok = self.token_tracker.get_usage(self.agent_name)
+                self._token_panel.update(
+                    cpu_percent=usage.cpu_percent,
+                    memory_mb=usage.memory_mb,
+                    token_used=tok.total_tokens,
+                    token_limit=10000,
+                    calls_5min=tok.calls,
+                    calls_limit=30,
+                )
+            except Exception:
+                pass
+
             # 检查是否完成
             if step_result.get("status") == "ok" and current_step.get("done", False):
                 self.console.success("✅ 任务完成!")
@@ -338,8 +359,10 @@ class AgentLoop:
 
             current_step = next_step
 
-        # 最终总结
+        # 最终总结：展示资源消耗面板
         self.console.divider()
+        tok = self.token_tracker.get_usage(self.agent_name)
+        self.console.print(f"📊  资源消耗 — Token: {tok.total_tokens} ({tok.prompt_tokens} prompt + {tok.completion_tokens} completion) | 调用: {tok.calls} 次")
         self.console.show_summary(results)
         summary = await self._summarize(task, results)
         if summary:
