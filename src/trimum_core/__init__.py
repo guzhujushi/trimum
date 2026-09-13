@@ -1,7 +1,6 @@
 """trimum Core."""
 
 from trimum_core.agent_registry import AgentRegistry
-from trimum_core.agent_router import AgentRouter, RouteEntry
 from trimum_core.planner_agent import PlannerAgent
 from trimum_core.models import (
     Action,
@@ -44,7 +43,6 @@ __all__ = [
     "AgentManifest",
     "AgentPermissions",
     "AgentRegistry",
-    "AgentRouter",
     "AgentStatus",
     "ConfirmRequest",
     "ContextEntry",
@@ -57,7 +55,6 @@ __all__ = [
     "PlannerAgent",
     "PolicyRule",
     "RiskLevel",
-    "RouteEntry",
     "ToolDefinition",
     "SpawnRequest",
     "SpawnResponse",
