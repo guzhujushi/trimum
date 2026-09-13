@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .event_bus import EventBus
@@ -42,12 +43,46 @@ from .config import Config
 log = logging.getLogger("trimum_core.agent_loop")
 
 
+@dataclass
+class InteractiveLoopConfig:
+    """交互式循环配置。
+
+    max_iterations:      最大迭代次数（防止无限循环）
+    interactive_mode:    交互模式：
+                         "full"   — 全程可确认/修改/跳过
+                         "review" — 每次回顾时确认
+                         "auto"   — 低风险自动跑，高风险弹窗
+    operator_mode:       Operator 模式，允许循环中修改 prompt
+    confirm_plan:        是否在生成计划后要求用户确认
+    step_by_step_confirm: 是否每步都要求确认
+    use_live_panel:      是否使用 Rich Live 实时面板
+    """
+    max_iterations: int = 20
+    interactive_mode: str = "full"
+    operator_mode: bool = True
+    confirm_plan: bool = True
+    step_by_step_confirm: bool = True
+    use_live_panel: bool = False  # 预留，当前版本使用静态 console
+
+    def __post_init__(self):
+        valid_modes = {"full", "review", "auto"}
+        if self.interactive_mode not in valid_modes:
+            raise ValueError(f"interactive_mode 必须是 {valid_modes}，传入 {self.interactive_mode}")
+
+
 class AgentLoop:
     """交互式 Agent 执行循环。
 
+    支持两种运行模式：
+    1. run()              — 一次性计划执行（原有模式）
+    2. run_interactive()  — 多步循环模式（LLM 分析结果→生成下一步→直到完成）
+
     Usage:
         loop = AgentLoop()
+        # 一次性执行
         await loop.run("删除 /tmp 下所有 .log 文件")
+        # 多步循环
+        await loop.run_interactive("写个 python 脚本统计 /var/log 各文件大小")
     """
 
     def __init__(
@@ -79,6 +114,9 @@ class AgentLoop:
 
         # 默认安全等级
         self.mode: SecurityMode = sec_config.get_mode(agent_name)
+
+        # 循环配置（默认 full interactive）
+        self.loop_config: InteractiveLoopConfig = InteractiveLoopConfig()
 
     # ── 主入口 ──
 
@@ -208,6 +246,201 @@ class AgentLoop:
             }],
         }
 
+    # ── 多步循环模式 ──
+
+    async def run_interactive(self, task: str, loop_config: Optional[InteractiveLoopConfig] = None) -> list[dict]:
+        """多步交互式 Agent 循环。
+
+        流程：
+        LLM 分析任务 → 执行第一步 → 结果反馈 LLM → LLM 分析下一步 → 直到完成
+
+        Operator 模式：循环中可输入 /continue /stop /retry /edit <cmd> 等指令
+        """
+        if loop_config:
+            self.loop_config = loop_config
+
+        config = self.loop_config
+        results: list[dict] = []
+        context_history: list[dict] = []  # 每步结果 -> 供 LLM 分析下一步
+
+        self.console.divider()
+        self.console.info(f"🎯 任务: {task}")
+        self.console.info(f"交互模式: {config.interactive_mode} | Operator模式: {'开' if config.operator_mode else '关'}")
+        self.console.divider()
+
+        # 第一步：LLM 分析任务生成首个计划
+        first_step = await self._plan_single_step(task, context=None)
+        if not first_step or "command" not in first_step:
+            self.console.error("无法生成执行计划")
+            return []
+
+        plan = {"title": "循环执行", "steps": [first_step]}
+        self.console.show_plan(plan.get("title", "执行计划"), plan["steps"])
+
+        # 计划确认
+        if config.confirm_plan:
+            ok = await self.console.confirm("确认开始执行计划?")
+            if not ok:
+                self.console.info("已取消")
+                return []
+
+        current_step = first_step
+        iteration = 0
+
+        while iteration < config.max_iterations:
+            iteration += 1
+            self.console.info(f"— 第 {iteration}/{config.max_iterations} 轮 —")
+
+            # 执行当前步骤
+            step_result = await self._execute_step(current_step)
+            results.append(step_result)
+            context_history.append({
+                "step": current_step,
+                "result": step_result,
+            })
+
+            # 检查是否完成
+            if step_result.get("status") == "ok" and current_step.get("done", False):
+                self.console.success("✅ 任务完成!")
+                break
+
+            # 检查执行失败
+            if step_result.get("status") == "error":
+                if config.operator_mode:
+                    choice = await self.console.prompt("执行出错。输入 /retry 重试, /edit <cmd> 修改命令, /stop 中止")
+                    if choice == "/stop":
+                        break
+                    current_step = self._handle_operator_edit(choice, current_step)
+                    continue
+                else:
+                    self.console.error(f"步骤执行失败: {step_result.get('error', '未知错误')}")
+                    break
+
+            # LLM 分析上一步结果，决定下一步
+            next_step = await self._plan_single_step(task, context=context_history)
+
+            # LLM 判定任务完成
+            if not next_step or next_step.get("done", False):
+                self.console.success("✅ LLM 判定任务已完成!")
+                break
+
+            # 展示下一步前，提供 Operator 介入机会
+            if config.operator_mode:
+                self.console.info(f"下一步建议: {next_step.get('name', '')} — {next_step.get('command', '')}")
+                choice = await self.console.prompt("回车继续, 或输入 /skip 跳过 /stop 中止 /edit <cmd> 修改")
+                if choice == "/stop":
+                    break
+                elif choice == "/skip":
+                    continue
+                elif choice == "/edit":
+                    choice2 = await self.console.prompt("新命令: ")
+                    next_step["command"] = choice2
+
+            current_step = next_step
+
+        # 最终总结
+        self.console.divider()
+        self.console.show_summary(results)
+        summary = await self._summarize(task, results)
+        if summary:
+            self.console.info(summary, emoji="📋")
+
+        return results
+
+    def _handle_operator_edit(self, choice: str, step: dict) -> dict:
+        """处理 Operator 指令：/edit <cmd> 修改命令。"""
+        prefix = "/edit "
+        if choice.startswith(prefix):
+            new_cmd = choice[len(prefix):].strip()
+            if new_cmd:
+                step["command"] = new_cmd
+                self.console.info(f"已修改命令: {new_cmd}", emoji="✏️")
+        return step
+
+    async def _plan_single_step(self, task: str, context: Optional[list[dict]]) -> Optional[dict]:
+        """调用 LLM 生成单步计划。返回 step dict 或 None。"""
+        import httpx
+        import os
+
+        llm_cfg = self.sec_config.get_llm_config()
+        base_url = llm_cfg.get("base_url", "https://api.deepseek.com/v1")
+        model = llm_cfg.get("model", "deepseek-chat")
+        api_key = llm_cfg.get("api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
+        timeout_s = llm_cfg.get("timeout_seconds", 15)
+
+        if not api_key:
+            self.console.warning("未配置 API key，使用正则模式")
+            return self._fallback_single_step(task)
+
+        sys_prompt = """你是安全的 Shell 助手。结合上下文决定下一步执行什么。
+
+返回 JSON，字段：
+{
+    "name": "步骤名",
+    "command": "要执行的命令",
+    "risk": "low|medium|high|critical",
+    "done": true/false,   // true=任务已完成，无需更多步骤
+    "reason": "为什么这么做"
+}
+
+规则：
+- 优先用安全的命令
+- 删除/写入/安装需要 high 风险
+- 如果任务已完成，done=true 且 command 可为空"""
+
+        # 构建消息
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": f"任务: {task}\n"},
+        ]
+
+        if context:
+            # 附加上下文历史（限制长度）
+            context_text = json.dumps(context[-5:], ensure_ascii=False, default=str)
+            messages.append({"role": "user", "content": f"执行历史:\n{context_text[:3000]}\n\n下一步?"})
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout_s) as client:
+                resp = await client.post(
+                    f"{base_url.rstrip('/')}/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "temperature": 0.1,
+                        "max_tokens": 512,
+                    },
+                )
+                resp.raise_for_status()
+                content = resp.json()["choices"][0]["message"]["content"]
+
+                # 提取 JSON
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1]
+                    content = content.rsplit("```", 1)[0]
+                content = content.strip()
+
+                step = json.loads(content)
+                if "command" in step and step.get("command"):
+                    return step
+                if step.get("done"):
+                    return {"name": "done", "command": "", "risk": "low", "done": True, "reason": step.get("reason", "")}
+                return None
+
+        except Exception as e:
+            log.warning("LLM 单步计划失败: %s", e)
+            return self._fallback_single_step(task)
+
+    def _fallback_single_step(self, task: str) -> dict:
+        """无 LLM 时的单步回退。"""
+        return {
+            "name": "执行命令",
+            "command": task,
+            "risk": "medium",
+            "done": False,
+            "reason": "LLM 不可用，直接执行",
+        }
+
     # ── 单步执行 ──
 
     async def _execute_step(self, step: dict) -> dict:
@@ -248,15 +481,34 @@ class AgentLoop:
                 "elapsed_ms": 0, "command": command,
             }
 
+        # 增强确认交互：展示操作摘要
         if ev_action == Action.CONFIRM or interactive:
-            ok = await self.console.confirm(f"执行: {command}", default=False)
+            # 逐行展示摘要
+            summary_lines = [
+                f"  {'操作':>8}: {name}",
+                f"  {'命令':>8}: {command[:120]}{'...' if len(command) > 120 else ''}",
+                f"  {'风险':>8}: {ev_risk.name}",
+                f"  {'说明':>8}: {ev_reason or description}",
+            ]
+            for line in summary_lines:
+                self.console.print(line)
+
+            ok = await self.console.confirm(f"执行以上操作?", default=False)
             if not ok:
-                self.console.step_skip(name, "用户取消")
-                await self._publish("task.skipped", name=name, reason="用户取消")
-                return {
-                    "name": name, "status": "cancelled", "output": "用户取消",
-                    "elapsed_ms": 0, "command": command,
-                }
+                # Operator 模式：可选择修改后执行
+                if self.loop_config.operator_mode:
+                    modify = await self.console.confirm("是否修改命令?", default=False)
+                    if modify:
+                        new_cmd = await self.console.prompt("新命令", default=command)
+                        command = new_cmd
+                        ok = True  # 修改后放行
+                if not ok:
+                    self.console.step_skip(name, "用户取消")
+                    await self._publish("task.skipped", name=name, reason="用户取消")
+                    return {
+                        "name": name, "status": "cancelled", "output": "用户取消",
+                        "elapsed_ms": 0, "command": command,
+                    }
 
         # 3. 执行
         await self._publish("task.started", name=name, command=command)

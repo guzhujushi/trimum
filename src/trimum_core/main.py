@@ -237,7 +237,12 @@ def cli_dispatch() -> None:
             install()
             return
         elif sub == "exec":
-            _exec_command(" ".join(sys.argv[2:]))
+            # 解析 --interactive / -i 标志
+            args = sys.argv[2:]
+            interactive = "--interactive" in args or "-i" in args
+            args = [a for a in args if a not in ("--interactive", "-i")]
+            prompt = " ".join(args)
+            _exec_command(prompt, interactive=interactive)
             return
         elif sub == "version":
             from . import __version__
@@ -247,19 +252,25 @@ def cli_dispatch() -> None:
     run()
 
 
-def _exec_command(prompt: str) -> None:
-    """trm exec 入口 — 交互式 AI Agent 执行。"""
+def _exec_command(prompt: str, interactive: bool = False) -> None:
+    """trm exec 入口 — 交互式 AI Agent 执行。
+
+    interactive=True 时进入多步循环模式。
+    """
     if not prompt:
-        print("用法: trm exec \"<自然语言指令>\"")
+        print("用法: trm exec [--interactive|-i] \"<自然语言指令>\"")
         print("例:   trm exec \"查看 /tmp 下有哪些大文件\"")
-        print("      trm exec \"清理 /tmp 下 3 天前的日志文件\"")
+        print("      trm exec -i \"写个脚本统计日志文件大小\"")
         sys.exit(1)
 
     import asyncio
     from .agent_loop import AgentLoop
 
     loop = AgentLoop(agent_name="trm-exec")
-    asyncio.run(loop.run(prompt))
+    if interactive:
+        asyncio.run(loop.run_interactive(prompt))
+    else:
+        asyncio.run(loop.run(prompt))
 
 
 if __name__ == "__main__":
