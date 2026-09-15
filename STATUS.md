@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-12（v14 — 全量测试 296/297 pass ✅  /  OpenCLI Bridge / 网卡修复 / SafeMind 设计）
+> 最后更新：2026-09-13（v15 — 新增 live_console.TokenStatusPanel 实时资源面板）
 >
 > 当前阶段：Phase 3 收尾 + Ubuntu 真机常见网络场景工具化 + 红蓝对抗安全加固 (SafeMind 模式)
 
@@ -77,6 +77,8 @@
 - [ ] Agent SDK 封装（openai-agents-python 集成）
 - [ ] 预设 Agent + Workflow 模板
 - [ ] Tool + Agent 鉴权的全链路集成测试
+
+- [x] **TokenStatusPanel**（live_console.py）— Rich token/resource 实时面板（token/CPU/memory/calls 进度条 + `__all__` 导出）
 
 #### 弹性沙箱体系（新，2026-09-01）
 - [x] **Security Agent**（security_agent.py）— 弹性沙箱决策中心

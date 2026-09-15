@@ -85,34 +85,34 @@ def run() -> None:
         return sec_monitor
 
     # ── 启动 ───────────────────────────────────────────────────
-    async def main():
-        # 1. 设置日志
+    # 先初始化安全组件（同步包装）
+    import asyncio
+
+    async def _init():
         setup_logging(config)
         logger = get_logger("main")
-
-        # 2. 创建 FastAPI app（含 EventBus / ToolGateway / AgentManager）
         app = create_app(config)
-
-        # 3. 获取 AppState 并注入安全组件
         state = app.state.trimum
         logger.info("initializing_security_components")
         sec_monitor = await init_security(state.tool_gateway, state.event_bus)
         state.sec_monitor = sec_monitor
         logger.info("security_components_ready", monitor=type(sec_monitor).__name__)
-
-        # 4. 启动 HTTP server
         logger.info("starting_http_server", host=config.host, port=config.port)
-        cfg = uvicorn.Config(
-            app,
-            host=config.host,
-            port=config.port,
-            log_level=config.log_level.lower(),
-            reload=False,
-        )
-        server = uvicorn.Server(cfg)
-        await server.serve()
+        return app, config
 
-    asyncio.run(main())
+    app, config = asyncio.run(_init())
+
+    # 使用 uvicorn.run() 替代手动 Server.serve()
+    # uvicorn 0.52.4 中 Server.startup() 在手动调用 config.load()
+    # 之前不创建 lifespan 属性；server.serve() 也可能因 create_server
+    # 卡住。uvicorn.run() 是官方推荐入口，自带完整生命周期管理。
+    uvicorn.run(
+        app,
+        host=config.host,
+        port=config.port,
+        log_level=config.log_level.lower(),
+        reload=False,
+    )
 
 
 # ── 快速健康检查 CLI（无 daemon 模式） ─────────────────────────

@@ -298,7 +298,16 @@ def create_app(config: Config) -> FastAPI:
             driver_port=getattr(config, "driver_port", 0) or 0,
             confirm_timeout=getattr(config, "confirm_timeout", 300.0) or 300.0,
         )
-        await state.driver.start()
+        # Start WorkflowEventDriver in background (don't block startup)
+        async def _delay_start():
+            try:
+                await asyncio.wait_for(state.driver.start(), timeout=10.0)
+                logger.info("workflow_event_driver_started")
+            except asyncio.TimeoutError:
+                logger.warning("workflow_event_driver_startup_timeout")
+            except Exception as e:
+                logger.warning("workflow_event_driver_startup_failed", error=str(e))
+        asyncio.create_task(_delay_start())
 
         logger.info("trinum_core_started", host=config.host, port=config.port)
 
