@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from enum import Enum
@@ -22,7 +23,7 @@ import yaml
 from pathlib import Path
 
 from .event_bus import EventBus
-from .models import AgentTask
+from .models import AgentTask, SystemEvent, TRMErrorCode, TrimumError, WorkflowDriverCommand
 
 
 # ── 节点状态（Phase 3: Task State Machine）───────────────
@@ -182,6 +183,48 @@ class WorkflowEngine:
             key = f"{provider}.{action}"
             if key in self._handlers:
                 return self._handlers[key]
+
+        # 2b. Agent dispatch via WorkflowEventDriver
+        #     handler like "agent:analyzer" or node.config has "agent_type"
+        agent_type = node.config.get("agent_type", "")
+        if (node.handler and node.handler.startswith("agent:")) or agent_type:
+            if self._driver is not None:
+                return self._handle_agent_node
+
+        # 2c. Pre-registered agent-type handlers ("agent:xx" → registered via
+        #     register_handler("agent:xx", ...) — caught by step 1 above)
+
+        # 3. Skill router: handler like "skill:hello-world" or "skill.hello-world"
+        if node.handler and self._skill_router is not None:
+            from .skill_router import SkillRouter as _SR
+            skill_name = _SR.extract_skill_name(node.handler)
+            if skill_name is not None:
+                skill_def = self._skill_router.get_skill(skill_name)
+                if skill_def is not None:
+
+                    async def _skill_handler(wf_id: str, nd: NodeDefinition, ctx: dict) -> Any:
+                        extra_args = dict(nd.config.get("args", {})) if nd.config else {}
+                        result = await self._skill_router.execute_skill(
+                            skill_name,
+                            agent_id=ctx.get("agent_id"),
+                            extra_args=extra_args,
+                        )
+                        if result.success:
+                            return {
+                                "success": True,
+                                "output": result.output_summary,
+                                "steps": len(result.step_results),
+                                "experience": result.experience,
+                            }
+                        raise TrimumError(
+                            TRMErrorCode.TOOL_EXECUTION_FAILED,
+                            message=f"Skill '{skill_name}' failed: {result.error}",
+                            context={"skill": skill_name, "error": result.error},
+                        )
+
+                    return _skill_handler
+
+        # 4. Default handler fallback
         if self._default_handler:
             return self._default_handler
         raise TrimumError(
@@ -610,6 +653,138 @@ class WorkflowEngine:
             }, severity="warning")
             if runtime.attempts <= node.retry_count:
                 await asyncio.sleep(node.retry_delay)
+
+    # ── Agent 节点执行（通过 Driver Socket 派发） ───────────
+
+    async def _handle_agent_node(
+        self,
+        wf_id: str,
+        node: NodeDefinition,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """通过 WorkflowEventDriver 完整执行一个 Agent 节点。
+
+        与普通 handler 不同，该方法：
+        1. 从 node.config 或 handler 前缀中提取 agent_type
+        2. 构造 WorkflowDriverCommand 发送给 Driver
+        3. 通过 Event Bus 订阅 Agent 完成/失败事件
+        4. 等待 Agent 执行完成（带超时）
+        5. 清理订阅后返回结果
+
+        Returns:
+            dict with keys: success, agent_id, result, output_data, error
+        """
+        # ── 解析 agent_type ──
+        agent_type = node.config.get("agent_type", "")
+        if not agent_type and node.handler and node.handler.startswith("agent:"):
+            agent_type = node.handler.split(":", 1)[1]
+        if not agent_type:
+            raise TrimumError(
+                TRMErrorCode.WORKFLOW_NODE_NOT_FOUND,
+                message=f"Agent node '{node.id}' has no agent_type (handler={node.handler})",
+            )
+
+        if self._driver is None:
+            raise TrimumError(
+                TRMErrorCode.RUNTIME_INIT_FAILED,
+                message="WorkflowEventDriver not attached — cannot dispatch agent node",
+            )
+
+        # ── 构造 Driver 命令 ──
+        cmd = WorkflowDriverCommand(
+            cmd="start_agent",
+            wf_id=wf_id,
+            node_id=node.id,
+            agent_type=agent_type,
+            input_data=node.config.get("input_data", {}),
+            subscribe_topics=[f"node.{wf_id}.{node.id}.*"],
+            confirm_required=node.config.get("confirm", False),
+            confirm_prompt=node.config.get("confirm_prompt", ""),
+            timeout_seconds=node.timeout_seconds,
+        )
+
+        # ── 订阅 Agent 完成/失败事件 ──
+        completed_event = asyncio.Event()
+        agent_result: dict[str, Any] = {}
+        agent_error: str = ""
+
+        async def _on_agent_done(event: SystemEvent) -> None:
+            nonlocal agent_result, agent_error
+            payload = event.payload or {}
+            status = payload.get("status", "")
+            agent_result = {
+                "result": payload.get("result"),
+                "output_data": payload.get("output_data", {}),
+                "error": payload.get("error", ""),
+            }
+            agent_error = payload.get("error", "")
+            completed_event.set()
+
+        # emit_task 发出的事件有 "task." 前缀
+        # 实际 event_type: "task.node.completed"（节点在 payload 中）
+        # 所以订阅完整 pattern 并在回调中按 payload 过滤
+        async def _on_agent_done_filtered(event: SystemEvent) -> None:
+            payload = event.payload or {}
+            # 只响应匹配当前 wf_id + node_id 的事件
+            if payload.get("wf_id") == wf_id and payload.get("node_id") == node.id:
+                await _on_agent_done(event)
+
+        node_completed_pattern = "task.node.completed"
+        self._bus.subscribe(node_completed_pattern, _on_agent_done_filtered)
+
+        try:
+            # ── 发送 start_agent 命令给 Driver ──
+            # 注意：_handle_start_agent 是 driver 的同步方法（非阻塞），
+            # 它返回启动结果，Agent 在后台运行。我们需要等待 Agent
+            # 发布完成事件到 Event Bus。
+            spawn_result = await self._driver._handle_start_agent(cmd)  # type: ignore[union-attr]
+
+            if spawn_result.get("status") != "ok" and spawn_result.get("status") != "initialized":
+                raise TrimumError(
+                    TRMErrorCode.AGENT_TASK_FAILED,
+                    message=f"Agent '{agent_type}' failed to start: {spawn_result.get('message', '')}",
+                    context=spawn_result,
+                )
+
+            # ── 等待 Agent 完成（带超时） ──
+            try:
+                await asyncio.wait_for(
+                    completed_event.wait(),
+                    timeout=node.timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                raise TrimumError(
+                    TRMErrorCode.AGENT_TASK_TIMEOUT,
+                    message=f"Agent '{agent_type}' (node={node.id}) timed out after {node.timeout_seconds}s",
+                )
+
+            # ── 检查 Agent 结果 ──
+            if agent_error:
+                raise TrimumError(
+                    TRMErrorCode.AGENT_TASK_FAILED,
+                    message=f"Agent '{agent_type}' failed: {agent_error}",
+                    context=agent_result,
+                )
+
+            return {
+                "success": True,
+                "agent_id": spawn_result.get("agent_id", ""),
+                "result": agent_result.get("result"),
+                "output_data": agent_result.get("output_data", {}),
+                "error": "",
+            }
+
+        except TrimumError:
+            raise
+
+        except Exception as e:
+            raise TrimumError(
+                TRMErrorCode.AGENT_TASK_FAILED,
+                message=f"Agent '{agent_type}' dispatch failed: {e}",
+            )
+
+        finally:
+            self._bus.unsubscribe(node_completed_pattern, _on_agent_done_filtered)
 
     # ── 输入聚合 ──────────────────────────────────────────
 
