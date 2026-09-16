@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from .install_fn import install
 
 
 def run() -> None:
@@ -84,34 +85,34 @@ def run() -> None:
         return sec_monitor
 
     # ── 启动 ───────────────────────────────────────────────────
-    async def main():
-        # 1. 设置日志
+    # 先初始化安全组件（同步包装）
+    import asyncio
+
+    async def _init():
         setup_logging(config)
         logger = get_logger("main")
-
-        # 2. 创建 FastAPI app（含 EventBus / ToolGateway / AgentManager）
         app = create_app(config)
-
-        # 3. 获取 AppState 并注入安全组件
         state = app.state.trimum
         logger.info("initializing_security_components")
         sec_monitor = await init_security(state.tool_gateway, state.event_bus)
         state.sec_monitor = sec_monitor
         logger.info("security_components_ready", monitor=type(sec_monitor).__name__)
-
-        # 4. 启动 HTTP server
         logger.info("starting_http_server", host=config.host, port=config.port)
-        cfg = uvicorn.Config(
-            app,
-            host=config.host,
-            port=config.port,
-            log_level=config.log_level.lower(),
-            reload=False,
-        )
-        server = uvicorn.Server(cfg)
-        await server.serve()
+        return app, config
 
-    asyncio.run(main())
+    app, config = asyncio.run(_init())
+
+    # 使用 uvicorn.run() 替代手动 Server.serve()
+    # uvicorn 0.52.4 中 Server.startup() 在手动调用 config.load()
+    # 之前不创建 lifespan 属性；server.serve() 也可能因 create_server
+    # 卡住。uvicorn.run() 是官方推荐入口，自带完整生命周期管理。
+    uvicorn.run(
+        app,
+        host=config.host,
+        port=config.port,
+        log_level=config.log_level.lower(),
+        reload=False,
+    )
 
 
 # ── 快速健康检查 CLI（无 daemon 模式） ─────────────────────────
@@ -236,7 +237,12 @@ def cli_dispatch() -> None:
             install()
             return
         elif sub == "exec":
-            _exec_command(" ".join(sys.argv[2:]))
+            # 解析 --interactive / -i 标志
+            args = sys.argv[2:]
+            interactive = "--interactive" in args or "-i" in args
+            args = [a for a in args if a not in ("--interactive", "-i")]
+            prompt = " ".join(args)
+            _exec_command(prompt, interactive=interactive)
             return
         elif sub == "version":
             from . import __version__
@@ -246,19 +252,25 @@ def cli_dispatch() -> None:
     run()
 
 
-def _exec_command(prompt: str) -> None:
-    """trm exec 入口 — 交互式 AI Agent 执行。"""
+def _exec_command(prompt: str, interactive: bool = False) -> None:
+    """trm exec 入口 — 交互式 AI Agent 执行。
+
+    interactive=True 时进入多步循环模式。
+    """
     if not prompt:
-        print("用法: trm exec \"<自然语言指令>\"")
+        print("用法: trm exec [--interactive|-i] \"<自然语言指令>\"")
         print("例:   trm exec \"查看 /tmp 下有哪些大文件\"")
-        print("      trm exec \"清理 /tmp 下 3 天前的日志文件\"")
+        print("      trm exec -i \"写个脚本统计日志文件大小\"")
         sys.exit(1)
 
     import asyncio
     from .agent_loop import AgentLoop
 
     loop = AgentLoop(agent_name="trm-exec")
-    asyncio.run(loop.run(prompt))
+    if interactive:
+        asyncio.run(loop.run_interactive(prompt))
+    else:
+        asyncio.run(loop.run(prompt))
 
 
 if __name__ == "__main__":

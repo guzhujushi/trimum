@@ -750,3 +750,43 @@ class AuditRecord(BaseModel):
     error: str = ""
     duration: float = 0.0
     token_estimate: int = 0  # 本次任务消耗的 token 估算
+
+
+class WorkflowDriverCommand(BaseModel):
+    """Engine -> Driver command."""
+
+    cmd: str = ""  # start_agent / cancel_agent / cancel_workflow / health
+    wf_id: str = ""
+    node_id: str = ""
+    agent_type: str = ""
+    input_data: dict[str, Any] = Field(default_factory=dict)
+    subscribe_topics: list[str] = Field(default_factory=list)
+    confirm_required: bool = False
+    confirm_prompt: str = ""
+    timeout_seconds: float = 120.0
+
+
+class WorkflowDriverCallback(BaseModel):
+    """Driver -> Engine callback."""
+
+    method: str = ""  # node_completed / node_blocked / workflow_progress / error
+    wf_id: str = ""
+    node_id: str = ""
+    status: str = ""  # completed / failed / timeout
+    result: Any = None
+    output_data: dict[str, Any] = Field(default_factory=dict)
+    error: str = ""
+    pct: float = 0.0
+    message: str = ""
+
+
+class ConfirmRequest(BaseModel):
+    """Confirmation request waiting for user approval."""
+
+    confirm_id: str = ""
+    wf_id: str = ""
+    node_id: str = ""
+    prompt: str = ""
+    created_at: float = 0.0
+    expires_at: float = 0.0
+    status: str = "pending"  # pending / accepted / rejected / timeout

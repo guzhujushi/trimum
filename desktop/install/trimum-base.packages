@@ -1,0 +1,71 @@
+# Trimum Ubuntu Desktop — Core system packages
+# Based on Omabuntu/Omakub base, curated for developer workstation
+
+# ── Essential build tools ──
+build-essential
+cmake
+pkg-config
+autoconf
+bison
+libffi-dev
+libssl-dev
+libncurses-dev
+libreadline-dev
+libgdbm-dev
+zlib1g-dev
+libsqlite3-0
+
+# ── Terminal & shell ──
+kitty
+zsh
+tmux
+bat
+eza
+fzf
+ripgrep
+fd-find
+zoxide
+starship
+fastfetch
+
+# ── Development ──
+curl
+wget
+git
+gh
+jq
+pipx
+unzip
+xz-utils
+lazygit
+lazydocker
+
+# ── Media & tools ──
+mpv
+ffmpeg
+ffmpegthumbnailer
+imagemagick
+libmagickwand-dev
+pinta
+flameshot
+libvips42t64
+fonts-firacode
+fonts-cascadia-code
+
+# ── GNOME desktop ──
+gnome-tweaks
+gnome-shell-extension-manager
+gnome-software-plugin-flatpak
+gnome-sushi
+nautilus-image-converter
+nautilus-open-any-terminal
+
+# ── System utilities ──
+ufw
+flatpak
+unzip
+gpg
+plocate
+wl-clipboard
+xdg-terminal-exec
+localsearch
