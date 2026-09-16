@@ -1,7 +1,7 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-15 23:22
-> 当前阶段：Phase 3 收尾 — #15 真机部署 ✅，本地服务器基础工具链 P1 ✅
+> 最后更新：2026-09-16 21:33
+> 当前阶段：Phase 3 收尾 — #15 真机部署 ✅，本地服务器基础工具链 P1 ✅，P2 Docker 安装进行中
 > 测试：242/245 passed（3 fail = Windows subprocess 编码问题，Linux 必绿）；远程 33/33 import 全过
 > 当前分支：`ubuntu`（最新）；arch-linux / server / main 需同步
 
@@ -47,9 +47,12 @@
 - PostgreSQL + pgvector 等 Phase 5 RAG 需要时再上（BOM 已记录）
 
 #### 安装计划（分 4 期）
-- [x] **P1 基础工具**（已完成 2026-09-15）：tmux htop btop ripgrep fd-find zsh zoxide bat fzf fastfetch unzip jq tree gh
-- [ ] **P2 Docker 环境**（约 30 分钟）：docker.io + docker-compose-plugin；限额 2GB 内存 / 20GB 盘；dockerd 只 bind 127.0.0.1
-- [ ] **P3 Web 服务**（约 40 分钟）：nginx（反代 trumd 8321 + 静态托管）、certbot（如果上域名）、redis 按需
+- [x] **P1 基础工具**（已完成 2026-09-15）：tmux htop btop ripgrep fd-find zsh zoxide bat btop fzf fastfetch unzip jq tree gh
+- [x] **P2 Docker 脚本已完成**（2026-09-16）：install_docker.sh 已上传到本地服务器 /tmp/
+  - [ ] **待执行**：sudo bash /tmp/install_docker.sh（需要用户手动跑）
+  - [ ] 验证：docker --version、docker compose version、docker run hello-world
+  - [ ] 配置镜像加速后 restart docker
+- [ ] **P3 Web 服务**（约 40 分钟）：nginx（反代 trmd 8321 + 静态托管）、certbot（如果上域名）、redis 按需
 - [ ] **P4 进阶**（后续）：本地 embed/vLLM、NAS 服务、CI runner
 
 #### 内存分配建议（8GB）
@@ -63,6 +66,21 @@
 ---
 
 ## 🟡 中优（本机可做）
+
+### 2.6A 基础设施确认（2026-09-16）
+
+- [x] **Snapper 跨发行版确认**：
+  - ✅ 所有主流发行版（Arch / Ubuntu / Fedora / openSUSE）均可用
+  - ⚠️ 前提：需要 **Btrfs** 或 LVM-thin 文件系统
+  - 待确认本地服务器分区格式：`lsblk -f` 或 `findmnt -o FSTYPE /`
+- [ ] **Coding Agent（选装）**：参考 ECC 项目评估
+  - ECC 方案：Agent 独立 sandbox + 编码工具链（Codex CLI/Claude CLI）
+  - 前置条件：Landrock 安全策略落地后接入
+  - 验收标准：Agent 仅能读写白名单目录 + 无权限逃逸
+  - 定位：**选装组件**，非核心依赖
+  - 依赖：Codex CLI（已装 v0.147.0）/ Claude CLI
+  - 前置条件：Landlock 安全策略落地后接入
+  - 验收标准：Agent 仅能读写白名单目录 + 无权限逃逸
 
 ### 2.6️⃣ 明天待办 — 分支同步 + 继续服务器搭建
 - [ ] **同步所有 Git 分支**：main 落后 ubuntu 20 commits、server 落后 23、arch-linux 落后 69（需保留各分支独有 desktop/arch 配置）
