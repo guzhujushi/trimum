@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-12（v14 — 全量测试 296/297 pass ✅  /  OpenCLI Bridge / 网卡修复 / SafeMind 设计）
+> 最后更新：2026-09-13（v15 — 新增 live_console.TokenStatusPanel 实时资源面板）
 >
 > 当前阶段：Phase 3 收尾 + Ubuntu 真机常见网络场景工具化 + 红蓝对抗安全加固 (SafeMind 模式)
 
@@ -53,7 +53,7 @@
   - 已配置排除（图片 / Waybar CSS / 源文件编码）
 - [x] README.md 重写（亮点前置表格 + 架构图 + 组件表 + 开发状态 + 快速开始）
 
-### Phase 3 — Agent SDK & 通信架构
+### Phase 3 — Agent SDK & 通信架构（进行中）
 - [x] **Agent Socket**（agent_socket.py）— Unix Socket Server/Client，JSON-RPC 帧协议
   - AgentSocketServer：监听 Socket，接收子 Agent 连接，收发 start/stop/status 信号
   - AgentSocketClient：子 Agent 端连接 Runtime 的客户端
@@ -74,12 +74,13 @@
   - check_landlock() / get_landlock_ruleset() — Phase 4 实现
 - [x] **Event Bus 扩展**（event_bus.py）
   - Agent 消息类型常量：TASK_ASSIGNED / TASK_STARTED / TASK_COMPLETED / TASK_FAILED / AGENT_STATUS_CHANGED
-- [x] Agent SDK 封装（openai-agents-python 集成）
-- [x] 预设 Agent + Workflow 模板（maintenance/fs-helper/system-monitor + ubuntu-daily）
-- [x] Tool + Agent 鉴权的全链路集成测试
-- [x] SkillRouter ↔ WorkflowEngine 集成
+- [ ] Agent SDK 封装（openai-agents-python 集成）
+- [ ] 预设 Agent + Workflow 模板
+- [ ] Tool + Agent 鉴权的全链路集成测试
 
-#### 弹性沙箱体系
+- [x] **TokenStatusPanel**（live_console.py）— Rich token/resource 实时面板（token/CPU/memory/calls 进度条 + `__all__` 导出）
+
+#### 弹性沙箱体系（新，2026-09-01）
 - [x] **Security Agent**（security_agent.py）— 弹性沙箱决策中心
   - 跨 Agent/工具访问决策（can_access / can_execute）
   - 跨沙箱 / 同一沙箱不同工具的访问规则
@@ -93,8 +94,8 @@
   - 突发高频检测（按操作类型阈值）
   - 跨沙箱操作检测
   - 新操作类型检测
-- [x] Security Agent ↔ Agent Router / Tool Gateway 的全链路集成
-- [ ] 弹窗确认的 UI / API 入口（Phase 6）
+- [ ] Security Agent ↔ Agent Router / Tool Gateway 的全链路集成
+- [ ] 弹窗确认的 UI / API 入口
 
 ### Phase 4 — Security Runtime（计划中）
 - [ ] Landlock LSM 集成（os.landlock / ctypes）
