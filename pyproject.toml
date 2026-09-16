@@ -3,9 +3,9 @@ requires = ["setuptools>=64.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "trimum-ubuntu"
-version = "0.2.1"
-description = "Trimum Ubuntu Desktop Edition - GNOME-based multi-agent system runtime"
+name = "trimum-core"
+version = "0.5.0"
+description = "trimum Core Daemon - system-level AI agent runtime"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110",
@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 trmd = "trimum_core.main:run"
+trm = "trimum_core.main:cli_dispatch"
 trimum-client = "trimum_core.trimum_client:main"
 
 [tool.setuptools.packages.find]
@@ -28,5 +29,6 @@ where = ["src"]
 
 [tool.sonar]
 sourceEncoding = "UTF-8"
-sonar.exclusions = "**/*.webp,**/*.jpg,**/*.png"
+sonar.exclusions = "**/*.webp,**/*.jpg,**/*.png,**/desktop/**"
+sonar.css.exclusions = "**/waybar/**"
 sonar.python.version = "3.12"

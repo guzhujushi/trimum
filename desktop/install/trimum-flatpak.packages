@@ -1,0 +1,22 @@
+# Trimum Ubuntu Desktop — Flatpak applications
+
+# ── Communication ──
+org.signal.Signal
+io.element.Element
+org.telegram.desktop
+
+# ── Development ──
+com.visualstudio.code
+rest.insomnia.Insomnia
+org.gnome.Builder
+
+# ── Media ──
+org.videolan.VLC
+com.spotify.Client
+org.gimp.GIMP
+org.inkscape.Inkscape
+
+# ── Utilities ──
+org.flameshot.Flameshot
+com.github.tchx84.Flatseal
+org.gnome.Solanum

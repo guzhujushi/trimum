@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 from .models import RiskLevel, Action, TRMErrorCode, TrimumError
 from .policy_engine import PolicyEngine
+from .resource_controller import ResourceController, PsutilController, ResourceUsage, ResourceLimits, ResourceCheckResult
 
 log = logging.getLogger("trimum_core.security_agent")
 
@@ -84,6 +85,7 @@ class SecurityRule:
             "max_cpu_percent": 80.0,
             "max_memory_mb": 512,
         }
+        self._resource_controller: Optional[ResourceController] = None
 
     # ------------------------------------------------------------------
     # 核心决策接口
@@ -182,7 +184,7 @@ class SecurityRule:
             )
 
         # Step 3: 资源阈值检查
-        resource_ok = self._check_resource_limits(agent_id, resource_ctx)
+        resource_ok = await self._check_resource_limits(agent_id, resource_ctx)
 
         # Step 4: 合并决策
         if risk == RiskLevel.CRITICAL:
@@ -363,39 +365,63 @@ class SecurityRule:
     # 资源限制
     # ------------------------------------------------------------------
 
-    def _check_resource_limits(
+    def set_resource_controller(self, controller: ResourceController) -> None:
+        """注入 ResourceController 实例（默认使用 PsutilController）。"""
+        self._resource_controller = controller
+
+    def ensure_resource_controller(self) -> ResourceController:
+        """返回当前 ResourceController，未注入时创建 PsutilController。"""
+        if self._resource_controller is None:
+            self._resource_controller = PsutilController()
+        return self._resource_controller
+
+    async def _check_resource_limits(
         self,
         agent_id: str,
         ctx: dict[str, Any],
     ) -> bool:
-        """检查 Agent 是否超出资源阈值.
+        """检查 Agent 是否超出资源阈值. 通过 ResourceController 获取实时数据。
 
         Raises:
             TrimumError: 如果超出资源限制，抛出 TRM-2009
         """
-        _ = agent_id  # unused placeholder
+        controller = self.ensure_resource_controller()
 
-        if ctx.get("cpu_percent", 0) > self._resource_limits["max_cpu_percent"]:
-            raise TrimumError(
-                TRMErrorCode.RESOURCE_LIMIT_EXCEEDED,
-                message=f"Agent CPU usage {ctx.get('cpu_percent', 0)}% exceeds limit",
-                context={"limit": self._resource_limits["max_cpu_percent"], "actual": ctx.get("cpu_percent", 0)},
+        # 通过 ResourceController 获取资源数据（优先使用 ctx 传入的实时数据）
+        try:
+            usage = await controller.get_usage(agent_id)
+        except Exception:
+            usage = None
+
+        if usage is None:
+            usage = ResourceUsage(
+                cpu_percent=ctx.get("cpu_percent", 0),
+                memory_mb=ctx.get("memory_mb", 0),
             )
-        if ctx.get("memory_mb", 0) > self._resource_limits["max_memory_mb"]:
+
+        # 检查资源是否超限
+        result = await controller.check_limits(agent_id, usage)
+        if not result.allowed:
+            first = result.violations[0] if result.violations else None
+            if first:
+                raise TrimumError(
+                    TRMErrorCode.RESOURCE_LIMIT_EXCEEDED,
+                    message=first.message,
+                    context={"limit": first.limit, "actual": first.actual},
+                )
             raise TrimumError(
                 TRMErrorCode.RESOURCE_LIMIT_EXCEEDED,
-                message=f"Agent memory {ctx.get('memory_mb', 0)}MB exceeds limit",
-                context={"limit": self._resource_limits["max_memory_mb"], "actual": ctx.get("memory_mb", 0)},
+                message="Resource limit exceeded",
             )
         return True
 
     def set_resource_limit(self, name: str, value: float) -> None:
-        """动态调整资源阈值."""
+        """动态调整资源阈值。"""
         if name in self._resource_limits:
             self._resource_limits[name] = value
 
     def get_resource_limits(self) -> dict[str, float]:
-        """获取当前资源阈值."""
+        """获取当前资源阈值。"""
         return dict(self._resource_limits)
 
     # ------------------------------------------------------------------

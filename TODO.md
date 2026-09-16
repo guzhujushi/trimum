@@ -1,170 +1,187 @@
-# trimum — 未完成待办清单
+# trimum — 待办清单
 
-> 最后更新：2026-09-07 21:46
-> Phase 3 核心 + Security Agent 全链路 + 四想法 X4 已完成 ✅
-> 当前焦点：Phase 3 收尾（真机前可做项）
-
----
-
-## ✅ 已完成（Phase 3 + Security Agent + 工具 + 杂项）
-
-### Phase 3 核心 ✅
-- #1 TARL-SPEC — TARL v1.0 完整规范 ✅
-- #2 TARL Parser — 246 行 KV 行 parser + Serializer ✅
-- #3.3 凭据脱敏 — `_redact_credentials()` 完整实现 ✅
-- #3.4 cwd Jail — `_check_cwd_jail()` 路径白名单 ✅
-- #3.5 AI/人类流量标签 — SourceType + PolicyEngine source 过滤 + 7 测试 ✅
-- #3.6 JIT 一次性授权 — `_check_jit_auth` + `issue_jit_token` + `grant_jit_token` ✅
-- #3.8 审计日志 — `_record_audit()` JSON 到 logger + AuditEvent ✅
-- #6 Agent File 化 — agent.json5 + AGENT.md + main.py ✅
-- #7 Security TARL — TARL 安全规则 ✅
-- #8 Transform Agent — 274 行 LLM 调用 + confidence + TransformResult ✅
-- #8.5 confidence — TransformResult 含 is_certain/needs_confirmation/needs_planner ✅
-- #12 Router/Planner — AgentRouter 已删除，AgentRegistry 承载 ✅
-- #19 Workflow 文件化加载 — load_yaml / load_from_dir + 2 示例 ✅
-- #20 记忆文件放到 Agent 文件夹 — ContextManager db_path→db_dir ✅
-- #21 Certs 移到 Agent 文件夹 — Agent 文件夹 cert.json 优先级 ✅
-- #22 Agent depends_on — check_dependencies() + 12 测试 ✅
-
-### Security Agent 全链路（原 P3-new #30-#34）✅
-- #9 SecurityRule ↔ ToolGateway 全链路集成 — execute() Layer 4 调 sec_monitor.scan_command() ✅
-- #9 测试 — `test_gateway_security_rule_allows_safe_command` + `test_gateway_security_rule_with_rule_allows` ✅
-- #30 SecurityRule Layer 4 — sec_monitor 已集成进 ToolGateway.execute() ✅
-- #31 sec_monitor.py — ThreatMatcher + OpContextClassifier + AuditChainVerifier + SecMonitor（440 行）✅
-- #32 sec_executor.py — SecBlocker/SecAudit/SecNotif/SecExecutor（200 行）✅
-- #33 内置安全工作流 — threat_workflows.py（216 行）✅
-- #34 监听器注册机制 — workflow_listener.py（282 行）✅
-- #3.3 `_redact_credentials()` 完整实现 + execute() 末尾调用 ✅
-
-### 工具文件化 ✅
-- Scraper Tool (`~/.trimum/tools/scraper/main.py`) — Scrapling 0.4.15 Fetcher + StealthyFetcher，反爬突破（豆瓣/百度/知乎）✅
-- DocParser Tool (`~/.trimum/tools/docparser/main.py`) — PDF/DOCX/PPTX/XLSX/MD 5 种格式 ✅
-- 工具依赖注册头 `__dependencies__` ✅
-
-### 杂项 ✅
-- X4 证书体系 — agent_cert.py 官方/自签/无证三档 + 机器指纹 ✅
-- #18 json5 依赖 — `pyproject.toml` 已加 `"json5>=0.9"` ✅
-- docs/SECURITY-DEFENSE-PLAN.md — 825 行 / 36KB ✅
-- src/trimum_core/security_agent_agenda.md — 8050 字节 ✅
-- 测试：202 pass ✅
+> 最后更新：2026-09-15 23:22
+> 当前阶段：Phase 3 收尾 — #15 真机部署 ✅，本地服务器基础工具链 P1 ✅
+> 测试：242/245 passed（3 fail = Windows subprocess 编码问题，Linux 必绿）；远程 33/33 import 全过
+> 当前分支：`ubuntu`（最新）；arch-linux / server / main 需同步
 
 ---
 
-## 快速定位
+## 核心理念
 
-| 优先级 | 范围 | 真机前可做？ |
-|--------|------|------------|
-| 🔴 立即 | #14.5 错误码体系 + #11 LLM 混合策略 + X1/X2 | ✅ 可做 |
-| 🟡 真机前 | #3.7 资源配额接口 + BehaviorMonitor 闭环 + #3.9 CLI | ✅ 可做 |
-| 🟢 等真机 | #14 Landlock + #15 真机验证 + #17 重扫 | ❌ 需 Linux |
-| 🔵 远期 | CLI、UI、一键安装、官网 | Phase 4+ |
+**trimum 不是一次性代码冲刺，是长期成长的项目。** 不需要把 TODO 填得密密麻麻。以下清单按"下一步最有价值"排序，不是"能想到的都列上"。
 
 ---
 
-## 🔴 立即（真机前可做）
+## 🔴 立即（当前阻塞项）
 
-### #14.5 TRM 错误码体系
-- 新建 `docs/ERROR-CODE-SPEC.md`
-- 三段式错误码：TRM-1xxx Runtime / 2xxx Security / 3xxx Agent / 4xxx Tool
-- `models.py` 增加 `TrimumError(Exception)` + 错误码协议
+### 1️⃣ #15 真机部署验收 — ✅ 已完成
 
-### #11 Policy Engine 升级：正则 → 混合（LLM + 规则）
-- 当前：PolicyEngine 是纯正则规则匹配
-- 目标：SecurityRule 能调用 LLM 辅助评估运行时行为
-- 智能模式：仅 Layer 1 未命中 + Layer 2 可疑时触发
-- 注意：LLM 调用走 httpx（已有依赖），不引入新依赖
+#### 解决经过（2026-09-15）
+- **实际根因**：venv 是 `pip install -e`（可编辑安装）指向 `/home/guzhujushi/trimum/src/`，而代码一直被部署到 `/opt/trimum/src/`——该目录从未被加载
+- `main.py` 中 `server.serve()` 在 uvicorn 0.52.4 下因 `lifespan` 属性缺失卡住 → 替换为 `uvicorn.run()` 稳定启动
+- `workflow_engine.py`（含 `_handle_agent_node`）同步到正确路径
+- **当前状态**：PID 17337，8321 正常监听，健康检查 ✅
+- trmd systemd 持久化：`network.target` 修正 + `TimeoutStopSec=30` + `Restart=always` + 开机自启 enabled
 
-### X1 Skill 层
-- `src/trimum_core/skill_loader.py` + `skill_executor.py`
-- `~/.trimum/skills/<name>/skill.yaml` + SKILL.md
-- 验收：yaml 可加载；capability 调用；至少一个 demo 能跑
+### 2️⃣ codex 校外替代方案
+- 目前交我算校外不可用；codex 唯一可用 provider（`custom` → deepseek-v4-flash）是 OpenClaw 本地 gateway 实例
+- [ ] **评估**：Windows 本地写代码时，直接用 OpenClaw + codex-plus skill 替代 codex CLI？
+- [ ] 或者调高 `timeoutSeconds` 让交我算校外 HTTPS 连接可用？
 
-### X2 ExperienceLearner
-- `src/trimum_core/experience_learner.py`
-- 监听 `*.failed` 事件 → LLM 分析 → 写入 Agent memory/experience.db
-- 仅在失败时触发 LLM
+### 2.5️⃣ #17 本地服务器环境规划（2026-09-15）
+
+#### 机器现状
+- i3-10100 4C/8T · 8GB RAM · 915GB 盘 · Ubuntu 24.04 + GNOME
+- 已跑：trumd（8321 健康 ✅）、frpc
+- 缺：docker、nginx、psql、redis、基础工具链
+
+#### 分工架构（本地宅基地 vs 阿里云）
+```
+阿里云：域名 + CDN + 公网入口 + 博客前端静态
+本地：  trumd 核心 + SQLite 主库 + NAS/媒体 + 本地 AI + 备份中心
+```
+
+#### 数据库选型（已定：继续 SQLite，不迁 PostgreSQL）
+- SQLite 当前够用：零配置、单文件、FTS5 全文搜索已支持
+- PostgreSQL + pgvector 等 Phase 5 RAG 需要时再上（BOM 已记录）
+
+#### 安装计划（分 4 期）
+- [x] **P1 基础工具**（已完成 2026-09-15）：tmux htop btop ripgrep fd-find zsh zoxide bat fzf fastfetch unzip jq tree gh
+- [ ] **P2 Docker 环境**（约 30 分钟）：docker.io + docker-compose-plugin；限额 2GB 内存 / 20GB 盘；dockerd 只 bind 127.0.0.1
+- [ ] **P3 Web 服务**（约 40 分钟）：nginx（反代 trumd 8321 + 静态托管）、certbot（如果上域名）、redis 按需
+- [ ] **P4 进阶**（后续）：本地 embed/vLLM、NAS 服务、CI runner
+
+#### 内存分配建议（8GB）
+| 用途 | 分配 |
+|---|---|
+| 系统+桌面 | ~2GB |
+| trumd | ~1GB |
+| Docker 容器池 | ~2GB |
+| 空闲（预留） | ~3GB |
 
 ---
 
-## 🟡 中优（真机前可做）
+## 🟡 中优（本机可做）
 
-### #3.7 / G6 子 Agent 资源配额
-- **当前状态**：`security_rule.py` 中有 `_check_resource_limits()` 进程内软限（psutil 采样），`set_resource_limit()`/`get_resource_limits()` 接口已存在
-- **升级方向**：
-  1. 先写 `cgroup_controller.py` — Cgroup v2 接口抽象层（读写 `/sys/fs/cgroup/`），提供 `set_cpu_limit()` / `set_memory_limit()` / `set_io_limit()` / `apply()` 方法
-  2. `ResourceController` 基类 + `PsutilController`（现有软限回退）+ `CgroupV2Controller`（Linux 真机时激活）
-  3. `SecurityRule._check_resource_limits()` 改为调用 `ResourceController.check()`
-  4. Agent Runtime spawn 时通过 `cgroup_controller.apply(agent_id, limits)` 注册 cgroup 层级
-- 验收：Cgroup v2 接口可创建子 cgroup、可设置 CPU/mem 限、超限触发 Event Bus `security.alert`
-- **注意**：Cgroup v2 功能实现需 Linux，但接口层和测试（mock `/sys/fs/cgroup/`）可在 Windows 完成
+### 2.6️⃣ 明天待办 — 分支同步 + 继续服务器搭建
+- [ ] **同步所有 Git 分支**：main 落后 ubuntu 20 commits、server 落后 23、arch-linux 落后 69（需保留各分支独有 desktop/arch 配置）
+- [ ] **P2 安装 Docker**：docker.io + docker-compose-plugin，限制 2GB 内存 / 20GB 盘，dockerd 只 bind 127.0.0.1
+- [ ] **P3 Nginx 反代 + 静态托管** 到 trumd 8321
+- 用电参考：机器全天开约 0.7~1 kWh/天，电费约 13~18 元/月，可考虑不用时睡眠
 
-### #13 BehaviorMonitor 闭环
-- BehaviorMonitor 已有基础框架（滑动窗口、分类、异常检测、频率检测）
-- 扩展：新操作类型学习的反馈闭环
-- 对接 SecMonitor，使检测结果→BehaviorMonitor 更新行为基线
+### 3️⃣ 降低 LLM 集成测试的平台依赖
+- `test_llm_integration.py` 有 3 个 failed 全是 Windows shell 问题（WinError 6/50）
+- [ ] 区分平台：对 Windows 跳过或 mock。让 linux 跑真的，windows 跑假的
+- 目标：**全平台 `306/306 pass, 0 fail`**
 
-### #3.9 / G9 CLI 流式输出
-- trimum CLI (`trm`) 增加流式输出模式（typer + rich）
-- `trimum_client.py` 已有 JSON-RPC 客户端基础，需要加 streaming 支持
+### 4️⃣ 修复 STATUS.md 中的 Return to Zero 获取新 API Key 瓶颈
+- SafeMind 红蓝对抗设计中有"API Key 耗尽→停止→用户填新 Key"的流程
+- [ ] 表格化列出当前项目中所有需要 API Key 的点（codex、LLM 混合策略、transform agent）
+- [ ] 设计一个统一的 API Key Manager（Phase 3.5）
 
----
+### 5️⃣ X1 Skill 集成（已有代码，需跑 demo 验证）
+- 文件完整：`skill_loader.py`、`skill_router.py`、`skill_executor.py`
+- [ ] 写出端到端 demo 测试（一个 YAML skill → router → execute）
+- [ ] demo 通过后标记完成
 
-## 🟢 低优（等真机或可选）
+### 6️⃣ 工具文件化的 `opencli` 加载失败
+- 每次启动 log：`tool_file_loader.module_failed error="name '__tool' is not defined" tool=opencli`
+- [ ] 检查 `~/.trimum/tools/opencli/main.py` 是否缺少 tool 注册头
 
-### #14 Landlock 兜底（Phase 4 预备）
-- `policy_engine.py` 和 `security_rule.py` 已有 stub 接口
-- 等 Arch Linux 真机时实现
-
-### #15 真机 Arch Linux 验证 trmd 启动
-- Unix Socket IPC、Systemd 服务单元、Hyprland 集成
-- 需买服务器后验证
-
-### #16 Codex 遗留清理
-- `D:\trimum\tmp\` 清理
-
-### #17 SonarQube 重扫
-- 确认 181 issues 无回归
-
-### X3 Agent 自优化 — 🟢 低优
+### 7️⃣ X3 Agent 自优化（可选不着急）
 - Agent 可优化自己的 prompt/示例/工具策略（不可改权限/安全边界）
 - 改进建议写入 memory/pending-improvements.json
-- `trm agent improve/apply` 命令管理
+- 接口：`trm agent improve/apply`
+
+### 8️⃣ 清理无关文件并提交
+- [ ] 删除 `D:\trimum\tmp\` 目录（codex 遗留临时文件）
+- [ ] 删除 `tmp_ship/`、`tmp_ship.tar.gz`、`tmp_deploy/`
+- [ ] 删除 `ARCH.md` 和 `PRD.md`（内容已过时，Ubuntu 预置 Agent 计划已完成）
+- [ ] `STATUS.md` 更新到 v16（反映当前状态）
+- [ ] 统一提交、推送到 ubuntu 分支
 
 ---
 
-## 🔵 远期（真机后 / Phase 4+）
+## 🟢 低优（Linux 真机或后续）
 
-### Phase 4 — Security Runtime
-- Landlock/Seccomp/Namespace SandboxProvider 抽象
-- Per-step 权限声明
-- 控制流操作符 parallel/forEach/branch/loop
-- Hash-chain 审计日志 + KV Store
+### 9️⃣ #14 Landlock / Seccomp 沙箱（Phase 4 预备）
+- `policy_engine.py` 和 `security_rule.py` 已有 stub 接口
+- Linux-only，等真机部署后实现
+- 跟 #15 真机部署绑定
 
-### Phase 5 — Memory Layer
-- chroma 向量库扩展
-- Guardrail 模式
+### 🔟 全量测试 → 真机上跑 306/306 pass
+- Windows 有平台差异（3 个 shell 相关 failed + 1 skip）
+- 目标 Ubuntu 下：所有 306 测试通过，0 fail
 
-### Phase 6 — 桌面融合 + 一键安装 + 官网
-- Tray 弹窗 UI ↔ SecurityAgent.confirm()
-- CLI 流式输出 (rich/typer) ⬅️ #3.9 已前置到 🟡 中优
-- **`trm install` 一键安装** — Plugin Marketplace（官方 Agent/Tool/Workflow 仓库）
-- **trimum 官网** — 展示项目、文档、下载入口
-- ISO / 一键安装镜像
-- 语言演进 (PyO3 / TS / Rust)
+### 1️⃣1️⃣ safe_lab.py + red_team.py + verifier.py 红蓝对抗（Phase 4）
+- 已有设计，codex 可协助生成框架代码
+- 需要 LLM API Key 用于红队攻击 Agent
+- 需在真机上跑（实际 agent 调度）
 
-### Phase 7+
-- Agentic Wiki、多通道
+### 1️⃣2️⃣ Agent SDK 包装
+- `src/agent-sdk/` 当前为空
+- 目标：在 openai-agents-python 上包装 Tool Gateway + Security Agent
+- Phase 4+ 工作
 
 ---
 
-## 📋 已关闭建议（DeepSeek 审核）
+## 🔵 远期 / Phase 4+
 
-| 建议 | 结论 |
-|---|---|
-| Transform Agent confidence 字段 | ✅ 已采纳并完成 |
-| TRM 错误码体系 | ✅ 已采纳，#14.5 |
-| Policy Engine 学习模式 | ✅ 已采纳，#13 |
-| Event Bus 虚拟文件接口 | ⚠️ 远期记录在 ARCHITECTURE.md |
-| Memory SQLite→sqlite-vec | ⚠️ 知识记录在 ARCHITECTURE.md |
-| usearch | ❌ 不采纳（量级不匹配） |
-| Agent Marketplace | ❌ 不采纳（太早，Phase 6 再议） |
+| 任务 | 说明 | 前置 |
+|------|------|------|
+| **Agent SDK 包装** | 集成 openai-agents-python | Phase 3 稳定后 |
+| **SafeMind 红蓝对抗** | safe_lab + red_team + verifier | API Key Manager |
+| **trimum 一键安装脚本** | `trm install` + Plugin Marketplace | Phase 4 稳定 |
+| **Tray UI / 弹窗** | SecurityAgent.confirm() UI | Phase 4 |
+| **Agentic Wiki** | 知识库检索 + Agent 编写 | Phase 5+ |
+| **语言演进** | PyO3 / TS / Rust 重写核心 | Phase 6+ |
+
+---
+
+## ✅ 近期已交付（2026-09 上半月）
+
+| 交付 | 详情 |
+|------|------|
+| **#3.7 ResourceController + Token 可视化** | PsutilController / CgroupV2Controller / TokenUsageTracker / TokenStatusPanel Rich 面板 ✅ |
+| **#11 LLM 混合策略** | LlmPolicyEngine(正则+LLM) + LLMDecisionCache + api_server 注入 ✅ |
+| **#3.9 多步 Agent 循环** | run_interactive / 确认交互增强 / Operator 模式(`/stop /skip /edit /retry`) ✅ |
+| **WorkflowEventDriver 集成** | WorkflowEngine + Driver Socket 派发 + 3 类 Driver + `__init__.py` 修复 ✅ |
+| **#16 清理** | 删除 phase2/wt-agent 目录与分支 + 核心模块目录同步 + 4/4 import 测试通过 ✅ |
+| **Security Agent 全链路** | SecMonitor(440l) + SecExecutor(200l) + threat_workflows(216l) + workflow_listener(282l) ✅ |
+| **工具文件化** | Scraper(Scrapling) + DocParser(PDF/DOCX/PPTX/XLSX/MD) + `__dependencies__` 注册头 ✅ |
+| **X4 证书体系** | agent_cert.py 官方/自签/无证三档 + 机器指纹 ✅ |
+| **OpenCLI Bridge** | 代码 + 部署 + 目标 Ubuntu 实测通过 ✅ |
+
+---
+
+## 测试状态明细
+
+| 项目 | 状态 |
+|------|------|
+| 本地全量测试（排除 llm & agent_cert） | 242 passed, 1 skipped ✅ |
+| 本地 3 failed | 全是 Windows subprocess 编码问题，Linux 必绿 |
+| 远程 import 验证 | 33/33 模块全部加载成功 ✅ |
+| 测试覆盖率 | 14 个测试文件，关键模块全覆盖 |
+
+---
+
+## Git 分支同步
+
+| 分支 | 状态 | 备注 |
+|------|------|------|
+| `ubuntu` | ⭐ 最新 | 当前开发分支，已 push |
+| `main` | ⏳ 需同步 | Phase 3 + #11 之后未跟进 |
+| `server` | ⏳ 需同步 | 同上 |
+| `arch-linux` | ⏳ 需同步 | 同上；ipc_handler.py 需手动 cherry-pick |
+
+---
+
+## 本期已关闭项
+
+| 项 | 原因 |
+|----|------|
+| `tool_gateway.py` 截断问题 | ✅ 已修好（866 行完整），MEMORY.md 过时记录已删 |
+| tool_gateway 缺失方法 | ✅ `_record_audit`/`_redact_credentials`/`_check_jit_auth`/`_check_cwd_jail` 全部存在 |
+| Windows 下 shell 测试 | ⚠️ 保留为"已知平台差异"，不做修复（target 是 Linux） |
+| ARCH.md / PRD.md | 📦 Ubuntu 预置 Agent 计划已完成，文件可删 |

@@ -5,7 +5,294 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+
+class TRMErrorCode(str, Enum):
+    """Canonical TRM error codes (TRM-XXXX format).
+
+    Category map:
+        TRM-1xxx = Runtime
+        TRM-2xxx = Security
+        TRM-3xxx = Agent
+        TRM-4xxx = Tool
+        TRM-5xxx = Workflow
+        TRM-6xxx = Memory
+        TRM-7xxx = Network
+        TRM-8xxx = Config
+        TRM-9xxx = Internal
+    See docs/ERROR-CODE-SPEC.md for full spec.
+    """
+
+    # 1xxx — Runtime
+    RUNTIME_INIT_FAILED = "TRM-1001"
+    RUNTIME_ALREADY_RUNNING = "TRM-1002"
+    RUNTIME_SHUTDOWN_FAILED = "TRM-1003"
+    IPC_CONNECTION_FAILED = "TRM-1004"
+    IPC_PROTOCOL_ERROR = "TRM-1005"
+    PROCESS_SPAWN_FAILED = "TRM-1006"
+    TIMEOUT_EXCEEDED = "TRM-1007"
+
+    # 2xxx — Security
+    POLICY_DENIED = "TRM-2001"
+    THREAT_BLOCKED = "TRM-2002"
+    AGENT_FREEZE = "TRM-2003"
+    AGENT_KILLED = "TRM-2004"
+    JIT_TOKEN_EXPIRED = "TRM-2005"
+    JIT_TOKEN_INVALID = "TRM-2006"
+    CWD_JAIL_VIOLATION = "TRM-2007"
+    CREDENTIAL_LEAK_DETECTED = "TRM-2008"
+    RESOURCE_LIMIT_EXCEEDED = "TRM-2009"
+    HASH_CHAIN_BROKEN = "TRM-2010"
+    UNKNOWN_SOURCE_TYPE = "TRM-2011"
+
+    # 3xxx — Agent
+    AGENT_NOT_FOUND = "TRM-3001"
+    AGENT_TYPE_UNKNOWN = "TRM-3002"
+    AGENT_ALREADY_EXISTS = "TRM-3003"
+    AGENT_MANIFEST_INVALID = "TRM-3004"
+    AGENT_ENTRY_NOT_FOUND = "TRM-3005"
+    AGENT_TASK_TIMEOUT = "TRM-3006"
+    AGENT_TASK_FAILED = "TRM-3007"
+    HANDOFF_SNAPSHOT_FAILED = "TRM-3008"
+    DEPENDENCY_MISSING = "TRM-3009"
+    CERTIFICATE_INVALID = "TRM-3010"
+    PERMISSION_INSUFFICIENT = "TRM-3011"
+
+    # 4xxx — Tool
+    TOOL_NOT_FOUND = "TRM-4001"
+    TOOL_EXECUTION_FAILED = "TRM-4002"
+    TOOL_TIMEOUT = "TRM-4003"
+    TOOL_TYPE_UNSUPPORTED = "TRM-4004"
+    FILE_NOT_FOUND = "TRM-4005"
+    FILE_PERMISSION_DENIED = "TRM-4006"
+    MCP_CALL_FAILED = "TRM-4007"
+    MCP_SERVER_NOT_FOUND = "TRM-4008"
+
+    # 5xxx — Workflow
+    WORKFLOW_PARSE_ERROR = "TRM-5001"
+    WORKFLOW_VALIDATION_FAILED = "TRM-5002"
+    WORKFLOW_STATE_INVALID = "TRM-5003"
+    WORKFLOW_NODE_NOT_FOUND = "TRM-5004"
+    WORKFLOW_CIRCULAR_DEPENDENCY = "TRM-5005"
+    WORKFLOW_EXECUTION_FAILED = "TRM-5006"
+    WORKFLOW_STEP_TIMEOUT = "TRM-5007"
+
+    # 6xxx — Memory
+    MEMORY_STORE_FAILED = "TRM-6001"
+    MEMORY_RETRIEVAL_FAILED = "TRM-6002"
+    MEMORY_NAMESPACE_NOT_FOUND = "TRM-6003"
+    FTS5_SEARCH_FAILED = "TRM-6004"
+    MEMORY_DB_CONNECTION_FAILED = "TRM-6005"
+
+    # 7xxx — Network
+    HTTP_REQUEST_FAILED = "TRM-7001"
+    HTTP_TIMEOUT = "TRM-7002"
+    DNS_RESOLUTION_FAILED = "TRM-7003"
+    CONNECTION_REFUSED = "TRM-7004"
+    RATE_LIMIT_EXCEEDED = "TRM-7005"
+    LLM_CALL_FAILED = "TRM-7006"
+    LLM_RESPONSE_INVALID = "TRM-7007"
+
+    # 8xxx — Config
+    CONFIG_FILE_NOT_FOUND = "TRM-8001"
+    CONFIG_PARSE_FAILED = "TRM-8002"
+    CONFIG_VALIDATION_FAILED = "TRM-8003"
+    ENV_VARIABLE_MISSING = "TRM-8004"
+
+    # 9xxx — Internal
+    ASSERTION_FAILED = "TRM-9001"
+    UNREACHABLE_CODE = "TRM-9002"
+    NOT_IMPLEMENTED = "TRM-9003"
+    INTERNAL_STATE_CORRUPTED = "TRM-9004"
+    EVENT_BUS_DISPATCH_FAILED = "TRM-9005"
+
+    @property
+    def category(self) -> str:
+        """Return the category name (runtime, security, agent, ...)."""
+        digit = self.value[4]  # '1' for TRM-1xxx
+        return {
+            "1": "runtime",
+            "2": "security",
+            "3": "agent",
+            "4": "tool",
+            "5": "workflow",
+            "6": "memory",
+            "7": "network",
+            "8": "config",
+            "9": "internal",
+        }.get(digit, "unknown")
+
+    @property
+    def http_status(self) -> int:
+        """Recommended HTTP status code for this error."""
+        code = int(self.value[4:])
+        if 1001 <= code <= 1999:
+            return 500
+        if 2001 <= code <= 2999:
+            if code in (2005, 2006):
+                return 401
+            return 403
+        if 3001 <= code <= 3999:
+            if code in (3001, 3002, 3005):
+                return 404
+            if code == 3003:
+                return 409
+            return 400
+        if 4001 <= code <= 4999:
+            if code in (4005,):
+                return 404
+            if code == 4006:
+                return 403
+            return 500
+        if 5001 <= code <= 5999:
+            return 422
+        if 6001 <= code <= 6999:
+            return 500
+        if 7001 <= code <= 7999:
+            if code in (7002,):
+                return 504
+            return 502
+        if 8001 <= code <= 8999:
+            return 500
+        if 9001 <= code <= 9999:
+            return 500
+        return 500
+
+    @property
+    def log_level(self) -> str:
+        """Recommended logging level."""
+        code = int(self.value[4:])
+        if 1001 <= code <= 1999:
+            return "ERROR"
+        if 2001 <= code <= 2999:
+            if code in (2003, 2004):
+                return "CRITICAL"
+            return "WARNING"
+        if 3001 <= code <= 3999:
+            return "ERROR"
+        if 4001 <= code <= 4999:
+            return "WARNING"
+        if 5001 <= code <= 5999:
+            return "ERROR"
+        if 6001 <= code <= 6999:
+            return "WARNING"
+        if 7001 <= code <= 7999:
+            return "WARNING"
+        if 8001 <= code <= 8999:
+            return "ERROR"
+        if 9001 <= code <= 9999:
+            return "CRITICAL"
+        return "ERROR"
+
+
+class TrimumError(Exception):
+    """Base exception for all trimum errors with a TRM error code.
+
+    Usage:
+        raise TrimumError(TRMErrorCode.AGENT_NOT_FOUND)
+        raise TrimumError(TRMErrorCode.AGENT_NOT_FOUND, message="...")
+        raise TrimumError(
+            TRMErrorCode.TOOL_EXECUTION_FAILED,
+            message="git push failed",
+            context={"exit_code": 128}
+        )
+    """
+
+    def __init__(
+        self,
+        code: TRMErrorCode,
+        message: str = "",
+        context: dict | None = None,
+    ):
+        self.code = code if isinstance(code, TRMErrorCode) else TRMErrorCode(code)
+        self.message = message or self._default_message()
+        self.context = context or {}
+        super().__init__(f"[{self.code.value}] {self.message}")
+
+    @property
+    def category(self) -> str:
+        return self.code.category
+
+    @property
+    def http_status(self) -> int:
+        return self.code.http_status
+
+    @property
+    def log_level(self) -> str:
+        return self.code.log_level
+
+    def _default_message(self) -> str:
+        """Human-readable default message for each error code."""
+        messages = {
+            TRMErrorCode.RUNTIME_INIT_FAILED: "Core runtime failed to initialize",
+            TRMErrorCode.RUNTIME_ALREADY_RUNNING: "Runtime is already running",
+            TRMErrorCode.RUNTIME_SHUTDOWN_FAILED: "Runtime shutdown failed to complete gracefully",
+            TRMErrorCode.IPC_CONNECTION_FAILED: "IPC connection failed",
+            TRMErrorCode.IPC_PROTOCOL_ERROR: "IPC protocol error",
+            TRMErrorCode.PROCESS_SPAWN_FAILED: "Failed to spawn child process",
+            TRMErrorCode.TIMEOUT_EXCEEDED: "Operation exceeded configured timeout",
+            TRMErrorCode.POLICY_DENIED: "Command explicitly denied by policy engine",
+            TRMErrorCode.THREAT_BLOCKED: "Threat matched and blocked by SecMonitor",
+            TRMErrorCode.AGENT_FREEZE: "Agent frozen via SIGSTOP by security action",
+            TRMErrorCode.AGENT_KILLED: "Agent terminated via SIGKILL by security action",
+            TRMErrorCode.JIT_TOKEN_EXPIRED: "JIT authorization token has expired",
+            TRMErrorCode.JIT_TOKEN_INVALID: "JIT token is malformed or not found",
+            TRMErrorCode.CWD_JAIL_VIOLATION: "Command attempted to access path outside cwd jail",
+            TRMErrorCode.CREDENTIAL_LEAK_DETECTED: "Potential credential leak in command output",
+            TRMErrorCode.RESOURCE_LIMIT_EXCEEDED: "Agent exceeded CPU/memory/IO quota",
+            TRMErrorCode.HASH_CHAIN_BROKEN: "Audit log hash chain integrity check failed",
+            TRMErrorCode.UNKNOWN_SOURCE_TYPE: "Operation from unknown/untrusted source type",
+            TRMErrorCode.AGENT_NOT_FOUND: "Agent with given ID not found",
+            TRMErrorCode.AGENT_TYPE_UNKNOWN: "Unknown agent type in manifest",
+            TRMErrorCode.AGENT_ALREADY_EXISTS: "Agent with given ID already registered",
+            TRMErrorCode.AGENT_MANIFEST_INVALID: "Agent manifest failed validation",
+            TRMErrorCode.AGENT_ENTRY_NOT_FOUND: "Agent entry point not found",
+            TRMErrorCode.AGENT_TASK_TIMEOUT: "Agent task exceeded its timeout",
+            TRMErrorCode.AGENT_TASK_FAILED: "Agent task completed with failure",
+            TRMErrorCode.HANDOFF_SNAPSHOT_FAILED: "Failed to create handoff snapshot",
+            TRMErrorCode.DEPENDENCY_MISSING: "Agent's declared dependency is unavailable",
+            TRMErrorCode.CERTIFICATE_INVALID: "Agent certificate validation failed",
+            TRMErrorCode.PERMISSION_INSUFFICIENT: "Agent lacks declared permission for operation",
+            TRMErrorCode.TOOL_NOT_FOUND: "Requested tool is not registered",
+            TRMErrorCode.TOOL_EXECUTION_FAILED: "Tool execution returned non-zero exit",
+            TRMErrorCode.TOOL_TIMEOUT: "Tool execution exceeded timeout",
+            TRMErrorCode.TOOL_TYPE_UNSUPPORTED: "Requested tool type has no handler registered",
+            TRMErrorCode.FILE_NOT_FOUND: "File or path does not exist",
+            TRMErrorCode.FILE_PERMISSION_DENIED: "Insufficient permissions to access file",
+            TRMErrorCode.MCP_CALL_FAILED: "MCP tool call returned error",
+            TRMErrorCode.MCP_SERVER_NOT_FOUND: "MCP server not connected or not found",
+            TRMErrorCode.WORKFLOW_PARSE_ERROR: "Workflow YAML failed to parse",
+            TRMErrorCode.WORKFLOW_VALIDATION_FAILED: "Workflow schema validation failed",
+            TRMErrorCode.WORKFLOW_STATE_INVALID: "Workflow state machine transition not allowed",
+            TRMErrorCode.WORKFLOW_NODE_NOT_FOUND: "Referenced workflow node does not exist",
+            TRMErrorCode.WORKFLOW_CIRCULAR_DEPENDENCY: "Workflow contains circular dependency",
+            TRMErrorCode.WORKFLOW_EXECUTION_FAILED: "Workflow execution terminated with error",
+            TRMErrorCode.WORKFLOW_STEP_TIMEOUT: "Workflow step exceeded its timeout",
+            TRMErrorCode.MEMORY_STORE_FAILED: "Failed to store entry in context memory",
+            TRMErrorCode.MEMORY_RETRIEVAL_FAILED: "Failed to retrieve entry from context memory",
+            TRMErrorCode.MEMORY_NAMESPACE_NOT_FOUND: "Requested memory namespace does not exist",
+            TRMErrorCode.FTS5_SEARCH_FAILED: "Full-text search query failed",
+            TRMErrorCode.MEMORY_DB_CONNECTION_FAILED: "Failed to connect to memory database",
+            TRMErrorCode.HTTP_REQUEST_FAILED: "HTTP request returned non-2xx status",
+            TRMErrorCode.HTTP_TIMEOUT: "HTTP request exceeded timeout",
+            TRMErrorCode.DNS_RESOLUTION_FAILED: "Failed to resolve hostname",
+            TRMErrorCode.CONNECTION_REFUSED: "Remote endpoint refused connection",
+            TRMErrorCode.RATE_LIMIT_EXCEEDED: "External API rate limit hit",
+            TRMErrorCode.LLM_CALL_FAILED: "LLM API call returned error",
+            TRMErrorCode.LLM_RESPONSE_INVALID: "LLM response failed to parse or validate",
+            TRMErrorCode.CONFIG_FILE_NOT_FOUND: "Config file not found at expected path",
+            TRMErrorCode.CONFIG_PARSE_FAILED: "Config file failed to parse",
+            TRMErrorCode.CONFIG_VALIDATION_FAILED: "Config field validation failed",
+            TRMErrorCode.ENV_VARIABLE_MISSING: "Required environment variable is not set",
+            TRMErrorCode.ASSERTION_FAILED: "Internal invariant assertion failed",
+            TRMErrorCode.UNREACHABLE_CODE: "Reached code path that should be unreachable",
+            TRMErrorCode.NOT_IMPLEMENTED: "Feature or method not yet implemented",
+            TRMErrorCode.INTERNAL_STATE_CORRUPTED: "Internal data structure in an inconsistent state",
+            TRMErrorCode.EVENT_BUS_DISPATCH_FAILED: "Failed to dispatch event to registered listeners",
+        }
+        return messages.get(self.code, f"Unknown error: {self.code}")
 
 
 
@@ -322,6 +609,55 @@ class Action(str, Enum):
     DENY = "deny"
 
 
+class SecurityMode(str, Enum):
+    """安全等级模式 — Agent 可按职责选择自己需要的安全级别。
+
+    从打到严：
+        regex    — 纯正则，零 LLM 调用，最低成本（可信任务/工具）
+        balanced — 正则 + LLM 灰色地带分析 + 结果缓存（默认）
+        sandbox  — 全量 LLM 审查 + 文件信任检查 + 资源限制（高危 Agent）
+    """
+
+    REGEX = "regex"
+    BALANCED = "balanced"
+    SANDBOX = "sandbox"
+
+
+class FileTrustLevel(int, Enum):
+    """文件信任等级 — 按文件首次出现时间衰减。
+
+    数字越大越可信。
+    """
+
+    ISOLATED = 0    # <1h：最高管控（仅 sandbox 模式用到此级）
+    HIGH = 1        # 1h~24h：高管控
+    MEDIUM = 2      # 1d~7d：中管控
+    LOW = 3         # 7d~30d：低管控
+    TRUSTED = 4     # >30d：完全信任，不调 LLM
+
+
+class LLMDecision(BaseModel):
+    """LLM 生成的决策结果，带缓存。"""
+
+    command_hash: str = Field(description="命令的 SHA256 前缀 8 位")
+    risk: RiskLevel
+    action: Action
+    reason: str
+    confidence: float = Field(ge=0.0, le=1.0, default=0.5)
+    expires_at: float = Field(description="Unix timestamp 过期时间")
+
+
+class AgentSecurityConfig(BaseModel):
+    """Agent 安全配置 — 从 agent.json5 的 security 字段加载。"""
+
+    mode: SecurityMode = SecurityMode.BALANCED
+    llm_threshold: str = "suspicious"  # never | suspicious | always
+    file_trust_enabled: bool = True
+    cache_ttl_seconds: int = 300
+    cache_max_entries: int = 1000
+    resource_limits: dict[str, int] = Field(default_factory=dict)
+
+
 class ToolType(str, Enum):
     """Supported tool types."""
 
@@ -500,16 +836,27 @@ class ToolDefinition(BaseModel):
 
 
 class AgentManifest(BaseModel):
-    """Agent type manifest loaded from agent.json."""
+    """Agent type manifest loaded from agent.json/agent.json5.
+
+    Supports both the legacy nested ``permissions``/``events``/``entry``
+    schema and the flat preset-agent schema used by Ubuntu preset agents
+    (``exec_allow``/``exec_deny``/``read``/``write``).
+    """
 
     name: str
     version: str
     description: str = ""
+    display_name: str = ""
+    author: str = ""
     capabilities: list[str]
     depends_on: list[str] = []  # 依赖的 CLI/MCP 工具列表
-    permissions: AgentPermissions
-    events: AgentEvents
-    entry: str
+    exec_allow: list[str] = []
+    exec_deny: list[str] = []
+    read: list[str] = []
+    write: list[str] = []
+    permissions: AgentPermissions = Field(default_factory=AgentPermissions)
+    events: AgentEvents = Field(default_factory=AgentEvents)
+    entry: str = "./main.py"
     risk_level: RiskLevel = RiskLevel.MEDIUM
     # 长期提示词文件路径（类 AGENTS.md），减少每次调用注入的 tokens
     system_prompt_path: str = ""
@@ -517,8 +864,27 @@ class AgentManifest(BaseModel):
     # 工作目录限制（cwd jail）
     work_dir: str = ""  # 允许访问的工作目录根路径，空=不限制
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise_preset_permissions(cls, values: Any) -> Any:
+        """Map the flat preset-agent schema into the legacy permissions model."""
+        if not isinstance(values, dict):
+            return values
 
-# ── Agent 任务通信模型 ──────────────────────────────────
+        data = dict(values)
+        if "permissions" not in data:
+            data["permissions"] = {
+                "read": data.get("read", []),
+                "write": data.get("write", []),
+                "exec": data.get("exec_allow", []),
+                "deny_exec": data.get("exec_deny", []),
+            }
+        if "events" not in data:
+            data["events"] = {}
+        if "entry" not in data:
+            data["entry"] = "./main.py"
+        return data
+
 
 class AgentTask(BaseModel):
     """Workflow Engine → Agent 的任务对象（通过 Event Bus 传递）。
@@ -671,3 +1037,43 @@ class AuditRecord(BaseModel):
     error: str = ""
     duration: float = 0.0
     token_estimate: int = 0  # 本次任务消耗的 token 估算
+
+
+class WorkflowDriverCommand(BaseModel):
+    """Engine -> Driver command."""
+
+    cmd: str = ""  # start_agent / cancel_agent / cancel_workflow / health
+    wf_id: str = ""
+    node_id: str = ""
+    agent_type: str = ""
+    input_data: dict[str, Any] = Field(default_factory=dict)
+    subscribe_topics: list[str] = Field(default_factory=list)
+    confirm_required: bool = False
+    confirm_prompt: str = ""
+    timeout_seconds: float = 120.0
+
+
+class WorkflowDriverCallback(BaseModel):
+    """Driver -> Engine callback."""
+
+    method: str = ""  # node_completed / node_blocked / workflow_progress / error
+    wf_id: str = ""
+    node_id: str = ""
+    status: str = ""  # completed / failed / timeout
+    result: Any = None
+    output_data: dict[str, Any] = Field(default_factory=dict)
+    error: str = ""
+    pct: float = 0.0
+    message: str = ""
+
+
+class ConfirmRequest(BaseModel):
+    """Confirmation request waiting for user approval."""
+
+    confirm_id: str = ""
+    wf_id: str = ""
+    node_id: str = ""
+    prompt: str = ""
+    created_at: float = 0.0
+    expires_at: float = 0.0
+    status: str = "pending"  # pending / accepted / rejected / timeout

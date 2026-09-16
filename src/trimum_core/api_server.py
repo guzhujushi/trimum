@@ -47,6 +47,7 @@ async def trimum_error_handler(request: Request, exc: TrimumError) -> JSONRespon
     )
 from .logger import setup_logging, get_logger
 from .ipc_handler import IpcHandler
+from .workflow_event_driver import WorkflowEventDriver
 
 logger = get_logger("api_server")
 
@@ -57,7 +58,24 @@ class AppState:
     def __init__(self, config: Config):
         self.config = config
         self.policy = PolicyEngine(Path(config.policy_path))
-        self.tool_gateway = ToolGateway(self.policy)
+        from .llm_policy import LlmPolicyEngine
+        from .security_config import SecurityConfig
+        from .file_trust import FileTrustTracker
+
+        # LLM 增强策略（#11）：复用 policy 引擎 + 安全配置
+        sec_cfg = SecurityConfig()
+        sec_cfg.load()
+        self.llm_policy = LlmPolicyEngine(
+            policy_engine=self.policy,
+            security_config=sec_cfg,
+        )
+        self.file_trust = FileTrustTracker(db_path=":memory:")
+
+        self.tool_gateway = ToolGateway(
+            self.policy,
+            llm_policy=self.llm_policy,
+            file_trust_tracker=self.file_trust,
+        )
         self.event_bus = EventBus()
         self.agent_manager = AgentManager(
             max_agents=config.max_agents,
@@ -66,6 +84,7 @@ class AppState:
         self.context: Optional[ContextManager] = None
         self.socket_server: Optional[stdlib_socket.socket] = None
         self.ipc: Optional[IpcHandler] = None
+        self.driver: Optional[WorkflowEventDriver] = None
 
 
 def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
@@ -265,7 +284,7 @@ def create_app(config: Config) -> FastAPI:
     @app.on_event("startup")
     async def startup():
         """Initialize services on startup."""
-        import asyncio as _asyncio
+        import asyncio
 
         # Ensure directories exist
         ensure_dirs(config)
@@ -290,7 +309,26 @@ def create_app(config: Config) -> FastAPI:
         state.ipc = ipc
         asyncio.create_task(ipc.start())
 
-        logger.info("trimum_core_started", host=config.host, port=config.port)
+        # Start WorkflowEventDriver (bridge between Engine and Agent)
+        state.driver = WorkflowEventDriver(
+            bus=state.event_bus,
+            agent_manager=state.agent_manager,
+            driver_host=config.host,
+            driver_port=getattr(config, "driver_port", 0) or 0,
+            confirm_timeout=getattr(config, "confirm_timeout", 300.0) or 300.0,
+        )
+        # Start WorkflowEventDriver in background (don't block startup)
+        async def _delay_start():
+            try:
+                await asyncio.wait_for(state.driver.start(), timeout=10.0)
+                logger.info("workflow_event_driver_started")
+            except asyncio.TimeoutError:
+                logger.warning("workflow_event_driver_startup_timeout")
+            except Exception as e:
+                logger.warning("workflow_event_driver_startup_failed", error=str(e))
+        asyncio.create_task(_delay_start())
+
+        logger.info("trinum_core_started", host=config.host, port=config.port)
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -298,6 +336,8 @@ def create_app(config: Config) -> FastAPI:
         if state.context:
             await state.context.close()
         await state.agent_manager.stop_health_check()
+        if state.driver:
+            await state.driver.stop()
         if state.ipc:
             await state.ipc.stop()
         if state.socket_server:

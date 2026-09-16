@@ -1,0 +1,66 @@
+# Trimum Ubuntu Desktop — Starship prompt configuration
+
+format = """
+[](fg:#6e6e6e)\
+$os\
+$username\
+[](fg:#6e6e6e)\
+$directory\
+$git_branch\
+$git_status\
+$python\
+$node\
+$rust\
+$golang\
+$cmd_duration\
+[](fg:#6e6e6e)\
+$line_break\
+$character\
+"""
+
+[os]
+disabled = false
+style = "bg:#6e6e6e fg:#ffffff"
+format = "[ $symbol]($style)"
+[os.symbols]
+Ubuntu = " "
+
+[username]
+show_always = true
+style_user = "bg:#6e6e6e fg:#a6e3a1"
+style_root = "bg:#6e6e6e fg:#f38ba8"
+format = "[ $user ]($style)"
+
+[directory]
+style = "bg:#6e6e6e fg:#cdd6f4"
+format = "[ $path ]($style)"
+truncation_length = 3
+truncation_symbol = "…/"
+
+[git_branch]
+symbol = " "
+style = "bg:#6e6e6e fg:#f9e2af"
+format = '[ $symbol$branch ]($style)'
+
+[git_status]
+style = "bg:#6e6e6e fg:#cdd6f4"
+format = '[$all_status$ahead_behind ]($style)'
+
+[python]
+symbol = " "
+style = "bg:#6e6e6e fg:#89b4fa"
+format = '[ $symbol$version ]($style)'
+
+[node]
+symbol = " "
+style = "bg:#6e6e6e fg:#89b4fa"
+format = '[ $symbol$version ]($style)'
+
+[cmd_duration]
+min_time = 2000
+style = "bg:#6e6e6e fg:#a6adc8"
+format = '[ $duration ]($style)'
+
+[character]
+success_symbol = "[>](bold fg:#a6e3a1)"
+error_symbol = "[>](bold fg:#f38ba8)"

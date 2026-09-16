@@ -1,29 +1,26 @@
 """trimum Core — main entry point.
 
 Usage:
-    trmd                  # Run with default config
-    trmd --config /path/to/config.yaml
+    trmd                  # Run with default config (host 127.0.0.1:8321)
+    trmd --config /etc/trimum/config.yaml
+    trmd --host 0.0.0.0 --port 8321
+    trmd --version        # Show version and exit
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-
-from .config import Config
-from .policy_engine import PolicyEngine
-
+from .install_fn import install
 
 
 def run() -> None:
     """CLI entry point for trimum Core daemon."""
-    import asyncio
     parser = argparse.ArgumentParser(
         description="trimum Core Daemon - system-level AI agent runtime",
     )
     parser.add_argument(
-        "--config",
-        "-c",
+        "--config", "-c",
         type=str,
         default=None,
         help="Path to config YAML file",
@@ -32,13 +29,13 @@ def run() -> None:
         "--host",
         type=str,
         default=None,
-        help="Override host (default: 127.0.0.1)",
+        help="Override host (default from config: 127.0.0.1)",
     )
     parser.add_argument(
         "--port",
         type=int,
         default=None,
-        help="Override port (default: 8321)",
+        help="Override port (default from config: 8321)",
     )
     parser.add_argument(
         "--version",
@@ -54,22 +51,26 @@ def run() -> None:
         sys.exit(0)
 
     from .config import Config
-    from .api_server import run_core
+    from .api_server import create_app
     from .event_bus import EventBus
     from .sec_monitor import SecMonitor, ThreatMatcher, OpContextClassifier
     from .sec_executor import SecExecutor, SecAudit, SecNotif
+    from .tool_gateway import ToolGateway
+    from .logger import setup_logging, get_logger
+    from pathlib import Path
+    import asyncio
+    import uvicorn
 
     config = Config()
     if args.config:
-        from pathlib import Path
         config = Config(Path(args.config))
     if args.host:
         config._raw["core"]["host"] = args.host
     if args.port:
         config._raw["core"]["port"] = args.port
 
-    # 初始化安全组件
-    async def _init_security(event_bus, tool_gateway):
+    # ── 初始化安全组件 ─────────────────────────────────────────
+    async def init_security(tool_gateway: ToolGateway, event_bus: EventBus) -> SecMonitor:
         sec_audit = SecAudit()
         sec_notif = SecNotif(event_bus)
         sec_executor = SecExecutor(event_bus, sec_audit, sec_notif)
@@ -83,40 +84,61 @@ def run() -> None:
         tool_gateway.op_context = op_context
         return sec_monitor
 
-    run_core(config)
+    # ── 启动 ───────────────────────────────────────────────────
+    # 先初始化安全组件（同步包装）
+    import asyncio
+
+    async def _init():
+        setup_logging(config)
+        logger = get_logger("main")
+        app = create_app(config)
+        state = app.state.trimum
+        logger.info("initializing_security_components")
+        sec_monitor = await init_security(state.tool_gateway, state.event_bus)
+        state.sec_monitor = sec_monitor
+        logger.info("security_components_ready", monitor=type(sec_monitor).__name__)
+        logger.info("starting_http_server", host=config.host, port=config.port)
+        return app, config
+
+    app, config = asyncio.run(_init())
+
+    # 使用 uvicorn.run() 替代手动 Server.serve()
+    # uvicorn 0.52.4 中 Server.startup() 在手动调用 config.load()
+    # 之前不创建 lifespan 属性；server.serve() 也可能因 create_server
+    # 卡住。uvicorn.run() 是官方推荐入口，自带完整生命周期管理。
+    uvicorn.run(
+        app,
+        host=config.host,
+        port=config.port,
+        log_level=config.log_level.lower(),
+        reload=False,
+    )
 
 
-
+# ── 快速健康检查 CLI（无 daemon 模式） ─────────────────────────
 
 def health() -> None:
-    """trm health — quick system health check.
-
-    Verifies:
-    - Config file loads
-    - All core modules import
-    - Policy engine initializes with default rules
-    - Agent registry directory exists
-    Returns exit code 0 if all pass, 1 on failures.
-    """
+    """Quick health check — runs synchronously, no daemon start."""
+    from .config import Config
+    from .policy_engine import PolicyEngine
+    from .agent_registry import AgentRegistry
     from pathlib import Path
-    import os
-    import json
 
     config = Config()
     results = {
-        "config": {"status": "ok", "path": str(config.config_path) if hasattr(config, 'config_path') else "default"},
+        "config": {"status": "ok", "path": str(config.config_path)},
         "imports": {"status": "ok", "modules": []},
     }
 
-    failures = []
-
-    # 检查模块导入
+    # 尝试导入每个核心模块
     core_modules = [
         "trimum_core.models",
         "trimum_core.event_bus",
         "trimum_core.tool_gateway",
         "trimum_core.policy_engine",
         "trimum_core.security_rule",
+        "trimum_core.sec_monitor",
+        "trimum_core.sec_executor",
         "trimum_core.behavior_monitor",
         "trimum_core.system_monitor",
         "trimum_core.context_manager",
@@ -137,16 +159,16 @@ def health() -> None:
         "trimum_core.ipc_handler",
         "trimum_core.memory_bridge",
     ]
+    # Deduplicate
+    seen = set()
+    unique_modules = []
+    for m in core_modules:
+        if m not in seen:
+            seen.add(m)
+            unique_modules.append(m)
 
-    # 引入 sec_monitor/sec_executor（在非 Windows 平台可能不可用）
-    try:
-        from trimum_core import sec_monitor, sec_executor
-        core_modules.append("trimum_core.sec_monitor")
-        core_modules.append("trimum_core.sec_executor")
-    except ImportError:
-        pass
-
-    for mod_name in core_modules:
+    failures = []
+    for mod_name in unique_modules:
         try:
             __import__(mod_name)
             results["imports"]["modules"].append(f"{mod_name}: ok")
@@ -154,7 +176,7 @@ def health() -> None:
             failures.append(f"{mod_name}: {e}")
             results["imports"]["modules"].append(f"{mod_name}: FAIL ({e})")
 
-    # 检查 policy 加载
+    # 检查 policy 加载（通过 evaluate 一个无害命令来验证规则工作）
     try:
         policy = PolicyEngine(Path(config.policy_path))
         risk, action, reason = policy.evaluate("ls -la")
@@ -164,6 +186,7 @@ def health() -> None:
         failures.append(f"policy: {e}")
 
     # 检查 Agent Registry 目录
+    import os
     agent_dir = os.path.expanduser("~/.trimum/agents")
     if os.path.isdir(agent_dir):
         results["agents"] = {"status": "ok", "path": agent_dir, "count": len(os.listdir(agent_dir))}
@@ -178,6 +201,7 @@ def health() -> None:
     else:
         results["tools"] = {"status": "warn", "path": tools_dir, "msg": "directory does not exist yet"}
 
+    import json
     print(json.dumps(results, indent=2, ensure_ascii=False))
     if failures:
         print(f"\n[!] {len(failures)} failure(s):")
@@ -189,6 +213,8 @@ def health() -> None:
         sys.exit(0)
 
 
+
+
 def cli_dispatch() -> None:
     """CLI dispatch entry point (``trm`` command).
 
@@ -196,6 +222,9 @@ def cli_dispatch() -> None:
 
         trm              -> runs daemon (same as ``trmd``)
         trm health       -> quick health check
+        trm install      -> interactive first-time setup guide
+        trm exec <cmd>   -> AI Agent 执行自然语言指令（流式）
+        trm version      -> show version
 
     This is registered as the ``trm`` console_scripts entry in ``pyproject.toml``.
     """
@@ -204,8 +233,45 @@ def cli_dispatch() -> None:
         if sub == "health":
             health()
             return
+        elif sub == "install":
+            install()
+            return
+        elif sub == "exec":
+            # 解析 --interactive / -i 标志
+            args = sys.argv[2:]
+            interactive = "--interactive" in args or "-i" in args
+            args = [a for a in args if a not in ("--interactive", "-i")]
+            prompt = " ".join(args)
+            _exec_command(prompt, interactive=interactive)
+            return
+        elif sub == "version":
+            from . import __version__
+            print(f"trimum v{__version__}")
+            return
     # Default: run daemon
     run()
+
+
+def _exec_command(prompt: str, interactive: bool = False) -> None:
+    """trm exec 入口 — 交互式 AI Agent 执行。
+
+    interactive=True 时进入多步循环模式。
+    """
+    if not prompt:
+        print("用法: trm exec [--interactive|-i] \"<自然语言指令>\"")
+        print("例:   trm exec \"查看 /tmp 下有哪些大文件\"")
+        print("      trm exec -i \"写个脚本统计日志文件大小\"")
+        sys.exit(1)
+
+    import asyncio
+    from .agent_loop import AgentLoop
+
+    loop = AgentLoop(agent_name="trm-exec")
+    if interactive:
+        asyncio.run(loop.run_interactive(prompt))
+    else:
+        asyncio.run(loop.run(prompt))
+
 
 if __name__ == "__main__":
     cli_dispatch()

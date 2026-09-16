@@ -1,0 +1,22 @@
+# trimum AI Runtime Daemon
+# Installed by scripts/install.sh to /etc/systemd/system/trmd.service
+
+[Unit]
+Description=trimum AI Runtime Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=trimum
+Group=trimum
+ExecStart=/opt/trimum/bin/trmd --config /opt/trimum/config/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=/opt/trimum
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
