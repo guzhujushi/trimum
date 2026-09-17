@@ -1,6 +1,8 @@
-"""FastAPI API Server for trimum Core."""
+﻿"""FastAPI API Server for trimum Core."""
 
 from __future__ import annotations
+
+import time
 
 import json
 import os
@@ -309,7 +311,57 @@ def create_app(config: Config) -> FastAPI:
                 logger.warning("workflow_event_driver_startup_failed", error=str(e))
         asyncio.create_task(_delay_start())
 
-        logger.info("trinum_core_started", host=config.host, port=config.port)
+        logger.info("trimum_core_started", host=config.host, port=config.port)
+
+
+    @app.post("/api/security/allow_once")
+    async def security_allow_once(req: dict):
+        """签发一次性授权令牌（JIT）。
+
+        Body:
+            agent_id: 目标 agent
+            tool: 工具名（如 shell / file_io）
+            command: 允许执行的命令
+            ttl: 有效期秒数（默认 300）
+        """
+        agent_id = req.get("agent_id", "")
+        tool_str = req.get("tool", "")
+        command = req.get("command", "")
+        ttl = float(req.get("ttl", 300))
+
+        if not agent_id or not tool_str:
+            raise HTTPException(status_code=400, detail="agent_id and tool are required")
+
+        try:
+            from .models import ToolType
+            tool = ToolType(tool_str)
+        except ValueError:
+            tool = ToolType.SHELL
+
+        token = state.tool_gateway.issue_jit_token(
+            agent_id=agent_id,
+            tool=tool,
+            command=command,
+            ttl=ttl,
+        )
+        return {"success": True, "data": token.model_dump(), "message": "JIT token issued"}
+
+    @app.get("/api/security/tokens")
+    async def security_tokens(agent_id: str = ""):
+        """列出有效的 JIT 令牌（可选按 agent 过滤）。"""
+        tokens = getattr(state.tool_gateway, "_jit_tokens", {})
+        result = []
+        now = time.time()
+        for tok_str, tok in tokens.items():
+            if tok.expires_at > 0 and now > tok.expires_at:
+                continue
+            if agent_id and tok.agent_id != agent_id:
+                continue
+            d = tok.model_dump()
+            d["token"] = tok.token[:8] + "..."
+            result.append(d)
+        return {"success": True, "data": result}
+
 
     @app.on_event("shutdown")
     async def shutdown():

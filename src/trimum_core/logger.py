@@ -1,12 +1,36 @@
-"""Structured logging for trimum Core using structlog."""
+"""Structured logging for trimum Core using structlog.
+
+包括全局凭据脱敏：所有日志输出前自动过滤 API key / secret / token / password
+等敏感信息。
+"""
 
 from __future__ import annotations
+
+import logging
+import sys
+from pathlib import Path
 
 import structlog
 from structlog.dev import ConsoleRenderer
 from structlog.processors import JSONRenderer
 
 from .config import Config
+from .secrets_redactor import SecretsRedactor
+
+# 全局脱敏器实例
+_secrets_redactor = SecretsRedactor()
+
+
+def _redact_event(_logger: object, _method_name: str, event_dict: dict) -> dict:
+    """structlog processor：递归脱敏 event_dict 中的所有字符串值。"""
+    for key, value in list(event_dict.items()):
+        if isinstance(value, str):
+            event_dict[key] = _secrets_redactor.redact(value)
+        elif isinstance(value, dict):
+            event_dict[key] = _secrets_redactor.redact_dict(value)
+        elif isinstance(value, list):
+            event_dict[key] = [_secrets_redactor.redact_value(item) for item in value]
+    return event_dict
 
 
 def setup_logging(config: Config) -> None:
@@ -23,11 +47,18 @@ def setup_logging(config: Config) -> None:
     processors = [
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        _redact_event,  # ← 全局凭据脱敏
         renderer,
     ]
+
+    # 时间戳放在最前面方便阅读
+    if log_format != "json":
+        processors = [
+            structlog.processors.TimeStamper(fmt="iso", utc=False),
+            *processors,
+        ]
 
     structlog.configure(
         processors=processors,
@@ -43,3 +74,6 @@ def setup_logging(config: Config) -> None:
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     """Get a structlog logger instance."""
     return structlog.get_logger(name or "trimum_core")
+
+
+__all__ = ["setup_logging", "get_logger"]

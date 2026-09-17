@@ -566,6 +566,13 @@ class ToolGateway:
                 )
                 self._record_audit("jit_auth", request, resp)
                 return resp
+            # JIT 一次性授权通过：已预先授权，降级为 AUTO 免弹窗
+            action = Action.AUTO
+            logger.info(
+                "gateway.jit_authorized",
+                command=cmd_str,
+                token=(request.jit_token[:8] + "...") if request.jit_token else "none",
+            )
 
         status = "allowed" if action == Action.AUTO else "confirmed"
 
@@ -812,7 +819,84 @@ class ToolGateway:
             if getattr(tool_def, 'requires_jit', False) and not request.jit_token:
                 return "Tool requires JIT authorization"
 
+        # 验证 token 的有效性（如果提供了 token）
+        if request.jit_token:
+            verify_result = self._verify_jit_token(
+                token_str=request.jit_token,
+                agent_id=request.agent_id,
+                tool_name=request.tool.value if hasattr(request.tool, 'value') else str(request.tool),
+                command=cmd_str,
+            )
+            if verify_result is not None:
+                return verify_result
+            # JIT 一次性授权通过：已预先授权，免弹窗
+            action = Action.AUTO
+
         return None  # 不需要 JIT
+
+    def _verify_jit_token(
+        self,
+        token_str: str,
+        agent_id: Optional[str],
+        tool_name: str,
+        command: str,
+    ) -> Optional[str]:
+        """验证 JIT 令牌的有效性：
+
+        1. 令牌必须存在于令牌表中
+        2. 未过期
+        3. 未被使用过（一次性）
+        4. 与 agent_id / tool / command 匹配
+
+        验证通过后会将该令牌标记为已使用（消费），
+        确保同一令牌不能再次使用。
+
+        Returns:
+            None 表示验证通过；否则返回失败原因。
+        """
+        # 确保令牌表存在
+        if not hasattr(self, '_jit_tokens'):
+            self._jit_tokens: dict[str, JITToken] = {}
+
+        token = self._jit_tokens.get(token_str)
+        if token is None:
+            return "JIT token not found or already consumed"
+
+        # 过期检查
+        if token.expires_at > 0 and time.time() > token.expires_at:
+            # 清理过期令牌
+            del self._jit_tokens[token_str]
+            return "JIT token has expired"
+
+        # 已使用检查（一次性）
+        if token.used:
+            return "JIT token has already been used"
+
+        # agent 匹配检查
+        if token.agent_id and agent_id and token.agent_id != agent_id:
+            return f"JIT token is bound to agent '{token.agent_id}', not '{agent_id}'"
+
+        # tool 匹配检查
+        if token.tool and token.tool != tool_name:
+            return f"JIT token is bound to tool '{token.tool}', not '{tool_name}'"
+
+        # command 匹配检查（如果绑定到具体命令）
+        if token.command and command:
+            if not re.search(token.command, command, re.IGNORECASE):
+                return f"JIT token command pattern mismatch"
+
+        # ── 消费令牌（一次性）：标记为已使用 ──
+        token.used = True
+
+        logger.info(
+            "gateway.jit_consumed",
+            agent_id=agent_id,
+            tool=tool_name,
+            token=token_str[:8] + "...",
+            granted_by=token.granted_by,
+        )
+
+        return None  # 验证通过
 
     # ------------------------------------------------------------------
     # 终端交互确认

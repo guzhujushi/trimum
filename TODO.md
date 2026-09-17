@@ -1,8 +1,8 @@
-# trimum — 待办清单
+﻿# trimum — 待办清单
 
-> 最后更新：2026-09-16 21:33
+> 最后更新：2026-09-17 23:35
 > 当前阶段：Phase 3 收尾 — #15 真机部署 ✅，本地服务器基础工具链 P1 ✅，P2 Docker 安装进行中
-> 测试：242/245 passed（3 fail = Windows subprocess 编码问题，Linux 必绿）；远程 33/33 import 全过
+> 测试：349 passed, 1 skipped（2026-09-17）；远程 33/33 import 全过
 > 当前分支：`ubuntu`（最新）；arch-linux / server / main 需同步
 
 ---
@@ -25,10 +25,9 @@
 - trmd systemd 持久化：`network.target` 修正 + `TimeoutStopSec=30` + `Restart=always` + 开机自启 enabled
 
 ### 2️⃣ codex 校外替代方案
-- 目前交我算校外不可用；codex 唯一可用 provider（`custom` → deepseek-v4-flash）是 OpenClaw 本地 gateway 实例
-- [ ] **评估**：Windows 本地写代码时，直接用 OpenClaw + codex-plus skill 替代 codex CLI？
-- [ ] 或者调高 `timeoutSeconds` 让交我算校外 HTTPS 连接可用？
-
+- [x] **CLI 入口**：`trm security allow-once <agent_id> [--tool shell] [--cmd <command>] [--ttl 300]` — 已实现 ✅
+- [x] **API 入口**：`POST /api/security/allow_once` 并发 `GET /api/security/tokens` — 已实现 ✅
+- [ ] **前端确认弹窗**：SecurityAgent.confirm() 关联 JWT 授权流程 — 新需求：确认优先级
 ### 2.5️⃣ #17 本地服务器环境规划（2026-09-15）
 
 #### 机器现状
@@ -177,7 +176,7 @@
 
 | 项目 | 状态 |
 |------|------|
-| 本地全量测试（排除 llm & agent_cert） | 242 passed, 1 skipped ✅ |
+| 本地全量测试 | 349 passed, 1 skipped, 0 failed ✅ |
 | 本地 3 failed | 全是 Windows subprocess 编码问题，Linux 必绿 |
 | 远程 import 验证 | 33/33 模块全部加载成功 ✅ |
 | 测试覆盖率 | 14 个测试文件，关键模块全覆盖 |
@@ -203,3 +202,15 @@
 | tool_gateway 缺失方法 | ✅ `_record_audit`/`_redact_credentials`/`_check_jit_auth`/`_check_cwd_jail` 全部存在 |
 | Windows 下 shell 测试 | ⚠️ 保留为"已知平台差异"，不做修复（target 是 Linux） |
 | ARCH.md / PRD.md | 📦 Ubuntu 预置 Agent 计划已完成，文件可删 |
+
+---
+
+## 🚀 新需求（2026-09-17）：确定性字段（confidence）分级处理
+
+### 2.7️⃣ 确定性字段（confidence）分流机制
+- [ ] **设计**：在 WorkflowEngine 中加入基于确定性字段的三级分流
+  - confidence >= 0.7 → 直接执行（当前行为）
+  - 0.4 <= confidence < 0.7 → 触发 SecurityAgent.confirm() 确认窗口
+  - confidence < 0.4 → 转发给 Planner Agent 规划
+- [ ] **实现方案确认**：由 TransformAgent 写入 confidence 字段，WorkflowEngine 监听器读取并决策（不需要 TransformAgent 记住监听器）
+- [ ] **记忆机制**：用结构化 SQLite 存储历史确认记录（非 LLM 记忆），避免 token 浪费

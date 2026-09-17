@@ -244,6 +244,9 @@ def cli_dispatch() -> None:
             prompt = " ".join(args)
             _exec_command(prompt, interactive=interactive)
             return
+        elif sub == "security":
+            security()
+            return
         elif sub == "version":
             from . import __version__
             print(f"trimum v{__version__}")
@@ -275,3 +278,78 @@ def _exec_command(prompt: str, interactive: bool = False) -> None:
 
 if __name__ == "__main__":
     cli_dispatch()
+
+
+
+def _security_allow_once(agent_id: str, tool: str, command: str, ttl: float) -> None:
+    """签发改一次性代理授权令牌并输出到 stdout。"""
+    from .tool_gateway import ToolGateway
+    from .policy_engine import PolicyEngine
+    from .config import Config
+    from pathlib import Path
+    from .models import ToolType
+
+    config = Config(Path(config.config_path) if hasattr(config, "config_path") else Path("~/.trimum/config.yaml").expanduser())
+    # 简化流程：直接初始化 ToolGateway 并签发
+    gateway = ToolGateway(
+        PolicyEngine(Path(config.policy_path)),
+    )
+    try:
+        tool_enum = ToolType(tool)
+    except ValueError:
+        tool_enum = ToolType.SHELL
+
+    tok = gateway.issue_jit_token(
+        agent_id=agent_id,
+        tool=tool_enum,
+        command=command,
+        ttl=ttl,
+    )
+    print(f"JIT_TOKEN={tok.token}")
+    print(f"AGENT={tok.agent_id}")
+    print(f"TOOL={tok.tool}")
+    print(f"EXPIRES_AT={tok.expires_at}")
+    print(f"TTL={ttl}s")
+    print(f"Command: {command if command else '<any>'}")
+
+
+def security() -> None:
+    """trm security 子命令组。"""
+    if len(sys.argv) < 3:
+        print("用法: trm security allow-once <agent_id> [--tool shell] [--cmd <command>] [--ttl 300]")
+        sys.exit(0)
+
+    sub = sys.argv[2]
+    if sub == "allow-once":
+        args = sys.argv[3:]
+        agent_id = ""
+        tool = "shell"
+        command = ""
+        ttl = 300.0
+
+        if args and not args[0].startswith("-"):
+            agent_id = args[0]
+            args = args[1:]
+
+        i = 0
+        while i < len(args):
+            if args[i] == "--tool" and i + 1 < len(args):
+                tool = args[i + 1]; i += 2
+            elif args[i] == "--cmd" and i + 1 < len(args):
+                command = args[i + 1]; i += 2
+            elif args[i] == "--ttl" and i + 1 < len(args):
+                ttl = float(args[i + 1]); i += 2
+            else:
+                i += 1
+
+        if not agent_id:
+            print("[!] 需要 agent_id 参数")
+            print("用法: trm security allow-once <agent_id> [--tool shell] [--cmd <command>] [--ttl 300]")
+            sys.exit(1)
+
+        _security_allow_once(agent_id, tool, command, ttl)
+    else:
+        print(f"未知 security 子命令: {sub}")
+        print("可用: allow-once")
+        sys.exit(1)
+
