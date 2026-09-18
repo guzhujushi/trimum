@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from .event_bus import EventBus
 from .context_manager import ContextManager
+from .memory_classifier import MemoryClassifier
 
 log = logging.getLogger("trimum_core.memory_bridge")
 
@@ -37,9 +38,12 @@ class MemoryBridge:
         self,
         event_bus: EventBus,
         context_manager: ContextManager,
+        *,
+        classifier: MemoryClassifier | None = None,
     ) -> None:
         self._bus = event_bus
         self._cm = context_manager
+        self._classifier = classifier
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -61,7 +65,9 @@ class MemoryBridge:
         self._bus.subscribe(f"{prefix}.global.list", self._on_global_list)
         self._bus.subscribe(f"{prefix}.global.delete", self._on_global_delete)
         self._bus.subscribe(f"{prefix}.search", self._on_search)
-        log.info("MemoryBridge started")
+        # ── 分类事件（可选的 MemoryClassifier 集成）──
+        self._bus.subscribe(f"{prefix}.classify", self._on_classify)
+        log.info("MemoryBridge started", classifier=bool(self._classifier))
 
     async def stop(self) -> None:
         """取消所有订阅。"""
@@ -203,6 +209,45 @@ class MemoryBridge:
         limit = p.get("limit", 20)
         results = await self._cm.search(query, limit=limit)
         await self._reply(event, results)
+
+    # ------------------------------------------------------------------
+    # 分类事件处理（MemoryClassifier 集成）
+    # ------------------------------------------------------------------
+
+    async def _on_classify(self, event) -> None:
+        """处理 memory.classify 事件，为 memory 条目打分类标签。
+
+        需要传入 MemoryClassifier 实例才生效（否则静默忽略）。
+        """
+        if self._classifier is None:
+            return
+
+        p = event.payload or {}
+        memory_key = p.get("memory_key", "")
+        domain = p.get("domain", "")
+        category = p.get("category", "")
+        agent_id = p.get("agent_id")
+
+        if not memory_key or not domain or not category:
+            log.warning(
+                "memory_bridge.classify_invalid_payload",
+                memory_key=memory_key, domain=domain, category=category,
+            )
+            return
+
+        index_id = await self._classifier.index_memory(
+            memory_key=memory_key,
+            domain=domain,
+            category=category,
+            agent_id=agent_id,
+        )
+        await self._reply(event, {"status": "ok", "index_id": index_id})
+
+    def set_classifier(self, classifier) -> None:
+        """运行时注入 MemoryClassifier 实例。"""
+        self._classifier = classifier
+        log.info("memory_bridge.classifier_set")
+
 
 
 __all__ = ["MemoryBridge"]

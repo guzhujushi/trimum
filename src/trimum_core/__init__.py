@@ -33,6 +33,9 @@ from trimum_core.workflow_engine import (
     WorkflowResult,
     WorkflowStatus,
 )
+from trimum_core.memory_classifier import MemoryClassifier
+from trimum_core.event_index import EventIndex
+
 
 __version__ = "0.3.0"
 
@@ -66,4 +69,6 @@ __all__ = [
     "WorkflowEngine",
     "WorkflowResult",
     "WorkflowStatus",
+    "MemoryClassifier",
+    "EventIndex",
 ]
