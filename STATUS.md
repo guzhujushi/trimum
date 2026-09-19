@@ -1,8 +1,8 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-19（Phase C Agent 交互与可观测性接线）
+> 最后更新：2026-09-19（Phase C 完成 + Phase 3 收尾差距审计）
 >
-> 当前阶段：Phase C — AgentLoop/EventBus/WorkflowEngine 交互体验 + token/cgroup 接线
+> 当前阶段：Phase 3 收尾 — 交互体验已接线，安全/可观测性仍有 P0/P1 缺口
 
 ---
 
@@ -285,3 +285,40 @@
 - [ ] 子 Agent 进程真实 spawn 后，把 `apply_cgroup(pid)` 接到真实 PID（当前仍为 Phase 3 stub）
 - [ ] `trm ask` 的 SSE 流式在 `--json/--quiet` 下自动关闭（已实现，需真机 TTY 验证）
 - [ ] `trm security revoke` 等 Phase C 后续命令
+
+
+---
+
+## 2026-09-19 Phase 3 收尾差距审计（对照 docs 与现有实现）
+
+> 基准：`docs/PHASE3-4-PLAN.md`、`docs/REFERENCE-AUDIT.md`、`docs/PYDANTIC-AI-COMPARISON.md`
+
+### 已闭环（docs 已过期，实测代码已实现）
+
+| 项目 | 现状 |
+|---|---|
+| Agent SDK | `src/agent-sdk/trimum_agent.py` 已实现，`planner_agent.py` 可选集成 |
+| cwd Jail | `tool_gateway._check_cwd_jail()` + `ExecuteRequest.skip_cwd_check` |
+| 凭据脱敏 | `tool_gateway._redact_credentials()` + `logger` 全局脱敏 |
+| JIT 一次性授权 | `tool_gateway.issue_jit_token()` + `/api/security/allow_once` + `trm security` |
+| AI/人类流量模型 | `SourceType.HUMAN/AI/UNKNOWN` + PolicyEngine source-aware |
+| 资源配额 | `CgroupV2Controller` + `AgentManager` set/apply limits |
+| Token 追踪 | `TokenUsageTracker` + `AgentLoop` 实记录 |
+| 流式 CLI | `AgentLoop._chat_completion()` SSE 流式输出 |
+| Workflow TARL | `WorkflowEngine.register_tarl_workflow/match_workflow_by_tarl` |
+| Security Agent TARL | `SecurityRule.can_execute_tarl()` |
+| Transform Agent 测试 | `tests/test_transform_agent.py` 覆盖 confidence |
+
+### Phase 3 收尾阻断项
+
+| 优先级 | 缺口 | 依据 / 现状 | 建议动作 |
+|---|---|---|---|
+| **P0** | **SecurityRule/SecurityAgent 未接入 ToolGateway** | `tool_gateway.py` 仅持有 `self.security_rule`，`execute()` 未调用 `can_execute()` | 在 Layer 2 与 Layer 3 之间插入 `SecurityRule.can_execute()`，失败走 `security_blocked` 审计 |
+| **P0** | **上下文窗口管理/Compaction 缺失** | `agent_loop` 仅截断最近 5 步 / 3000 字符，无 Tool Output Limits / 压缩 | 增加 tool 输出截断 + 滑窗 + compaction，复用 `context_manager` 最小上下文 |
+| **P1** | **审计日志未上 EventBus / 不可查询** | `_record_audit` 仅 structlog + 内存环 | `AuditEvent` 发 `task.audit.*`，`trm log audit` 走结构化查询 |
+| **P1** | **子 Agent 真实 spawn + cgroup PID** | `AgentManager.spawn` / `AgentRuntime.start_agent` 仍是 stub | Phase 3 补 `main.py` 启动并 `apply_cgroup(pid)` |
+| **P1** | **AI/人类流量标记未统一** | `AgentLoop` 已设 `SourceType.AI`，`trm exec` 仍用 `UNKNOWN` | `trm exec` 默认 `SourceType.HUMAN` |
+| **P1** | **Policy 学习模式未接线** | `learning_engine.py` 已实现但 ToolGateway 未集成 | 接 `LearningEngine` 到 BehaviorMonitor 反馈环 |
+| **P2** | **确认 UI 只有 CLI，无桌面/WebSocket 通道** | `LiveConsole.confirm` 可用，`SecurityAgent.confirm` 无桌面交付 | WebSocket 通知 / 桌面弹窗 |
+| **P2** | **Agent SDK 无端到端测试与打包验证** | `src/agent-sdk` 已写代码但 `tests/` 无覆盖 | 补 SDK 测试 + `pyproject` 打包验证 |
+| **P2** | **SonarQube 重扫 / 真机 Arch Linux 验证** | docs P3-19/P3-20，仓库内无结果 | 收尾执行一次重扫 + 真机 smoke |
