@@ -94,11 +94,15 @@ class AgentLoop:
         llm_policy: Optional[LlmPolicyEngine] = None,
         config: Optional[Config] = None,
         agent_name: str = "trm-exec",
+        stream_output: bool = False,
+        context_manager: Optional[Any] = None,
     ):
         self.gateway = gateway or ToolGateway(interactive=False)
         self.event_bus = event_bus or EventBus()
         self.console = console or LiveConsole(self.event_bus)
         self.agent_name = agent_name
+        self.stream_output = bool(stream_output)
+        self.context_manager = context_manager
 
         # 安全组件
         sec_config = SecurityConfig()
@@ -124,6 +128,137 @@ class AgentLoop:
         self.resource_controller = PsutilController()
         self._token_panel = TokenStatusPanel()
 
+    def get_token_usage(self) -> TokenUsage:
+        """Return the tracked token usage for this agent loop."""
+        return self.token_tracker.get_usage(self.agent_name)
+
+    def _print_token_usage(self) -> None:
+        """Print a compact token-usage line when tracking produced data."""
+        usage = self.get_token_usage()
+        if usage.calls <= 0 and usage.total_tokens <= 0:
+            return
+        self.console.print(
+            f"📊  Token — {usage.total_tokens} total "
+            f"({usage.prompt_tokens} prompt + {usage.completion_tokens} completion) "
+            f"| 调用: {usage.calls} 次"
+        )
+
+    def _record_token_usage(self, usage: TokenUsage) -> None:
+        if (
+            usage.calls <= 0
+            and usage.total_tokens <= 0
+            and usage.prompt_tokens <= 0
+            and usage.completion_tokens <= 0
+        ):
+            return
+        if usage.calls <= 0:
+            usage.calls = 1
+        self.token_tracker.record(self.agent_name, usage)
+
+    def _write_stream(self, text: str) -> None:
+        """Incrementally print a streamed LLM delta."""
+        if self.stream_output and text:
+            self.console.print(text, end="")
+
+    @staticmethod
+    def _parse_sse_line(line: str) -> Optional[dict]:
+        """Parse one OpenAI-compatible SSE ``data:`` line."""
+        if not line or not line.startswith("data:"):
+            return None
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            return None
+        try:
+            return json.loads(data)
+        except json.JSONDecodeError:
+            return None
+
+    @staticmethod
+    def _token_usage_from_payload(payload: dict) -> TokenUsage:
+        """Extract ``TokenUsage`` from a chat-completion response payload."""
+        usage = payload.get("usage") or {}
+
+        def _int(key: str) -> int:
+            try:
+                return int(usage.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        prompt = _int("prompt_tokens")
+        completion = _int("completion_tokens")
+        total = _int("total_tokens") or (prompt + completion)
+        return TokenUsage(
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_tokens=total,
+            calls=1,
+        )
+
+    async def _chat_completion(
+        self,
+        *,
+        model: str,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        timeout: float,
+        stream: bool = False,
+    ) -> tuple[str, TokenUsage]:
+        """Call the configured chat-completion endpoint and return (text, usage)."""
+        import os
+
+        import httpx
+
+        llm_cfg = self.sec_config.get_llm_config()
+        base_url = llm_cfg.get("base_url", "https://api.deepseek.com/v1")
+        api_key = llm_cfg.get("api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
+
+        if not api_key:
+            return "", TokenUsage()
+
+        url = f"{base_url.rstrip('/')}/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        timeout_cfg = httpx.Timeout(timeout)
+
+        async with httpx.AsyncClient(timeout=timeout_cfg) as client:
+            if not (stream and self.stream_output):
+                resp = await client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                return content, self._token_usage_from_payload(data)
+
+            async with client.stream("POST", url, headers=headers, json=payload) as resp:
+                resp.raise_for_status()
+                parts: list[str] = []
+                usage = TokenUsage(calls=1)
+                async for line in resp.aiter_lines():
+                    chunk = self._parse_sse_line(line)
+                    if chunk is None:
+                        continue
+                    delta = (chunk.get("choices") or [{}])[0].get("delta", {}).get("content", "")
+                    if delta:
+                        parts.append(delta)
+                        self._write_stream(delta)
+                    if chunk.get("usage"):
+                        usage = self._token_usage_from_payload({"usage": chunk["usage"]})
+
+                content = "".join(parts)
+                if content and not usage.total_tokens:
+                    usage = TokenUsage(
+                        prompt_tokens=0,
+                        completion_tokens=max(1, len(content) // 4),
+                        total_tokens=max(1, len(content) // 4),
+                        calls=1,
+                    )
+                return content, usage
+
     # ── 主入口 ──
 
     async def run(self, prompt: str) -> list[dict]:
@@ -144,8 +279,8 @@ class AgentLoop:
         self.console.show_plan(plan.get("title", "执行计划"), plan["steps"])
         self.console.divider()
 
-        # 3. 订阅 Event Bus
-        await self.console.subscribe_events("agent")
+        # 3. 订阅 Event Bus（task.* 任务事件）
+        await self.console.subscribe_events("task")
 
         # 4. 逐步执行
         results = []
@@ -163,24 +298,17 @@ class AgentLoop:
         if summary:
             self.console.info(summary, emoji="📋")
 
+        self._print_token_usage()
+
         return results
 
     # ── LLM 计划 ──
 
     async def _plan(self, prompt: str) -> Optional[dict]:
         """调用 LLM 将自然语言转换为执行计划。"""
-        import httpx
-        import os
-
         llm_cfg = self.sec_config.get_llm_config()
-        base_url = llm_cfg.get("base_url", "https://api.deepseek.com/v1")
         model = llm_cfg.get("model", "deepseek-chat")
-        api_key = llm_cfg.get("api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
         timeout_s = llm_cfg.get("timeout_seconds", 15)
-
-        if not api_key:
-            self.console.warning("未配置 API key，使用正则模式（不支持自然语言）")
-            return self._fallback_plan(prompt)
 
         system_prompt = """你是一个安全的 Shell 助手。你需要将用户自然语言指令拆解为可执行的步骤。
 
@@ -205,34 +333,32 @@ class AgentLoop:
 - 如果任务复杂，拆成多个小步骤"""
 
         try:
-            async with httpx.AsyncClient(timeout=timeout_s) as client:
-                resp = await client.post(
-                    f"{base_url.rstrip('/')}/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "temperature": 0.1,
-                        "max_tokens": 1024,
-                    },
-                )
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"]
+            content, usage = await self._chat_completion(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+                max_tokens=1024,
+                timeout=timeout_s,
+            )
+            self._record_token_usage(usage)
 
-                # 提取 JSON
-                if content.startswith("```"):
-                    content = content.split("\n", 1)[1]
-                    content = content.rsplit("```", 1)[0]
-                content = content.strip()
+            if not content:
+                return self._fallback_plan(prompt)
 
-                plan = json.loads(content)
-                if "steps" not in plan or not isinstance(plan["steps"], list):
-                    raise ValueError("invalid plan format")
+            # 提取 JSON
+            if content.startswith("```"):
+                content = content.split("\n", 1)[1]
+                content = content.rsplit("```", 1)[0]
+            content = content.strip()
 
-                return plan
+            plan = json.loads(content)
+            if "steps" not in plan or not isinstance(plan["steps"], list):
+                raise ValueError("invalid plan format")
+
+            return plan
 
         except Exception as e:
             log.warning("LLM plan failed: %s", e)
@@ -273,6 +399,16 @@ class AgentLoop:
         self.console.info(f"🎯 任务: {task}")
         self.console.info(f"交互模式: {config.interactive_mode} | Operator模式: {'开' if config.operator_mode else '关'}")
         self.console.divider()
+
+        if self.context_manager is not None:
+            try:
+                await self.context_manager.register_session(
+                    self.agent_name,
+                    "interactive",
+                    metadata={"task": task},
+                )
+            except Exception:
+                pass
 
         # 第一步：LLM 分析任务生成首个计划
         first_step = await self._plan_single_step(task, context=None)
@@ -363,6 +499,19 @@ class AgentLoop:
         self.console.divider()
         tok = self.token_tracker.get_usage(self.agent_name)
         self.console.print(f"📊  资源消耗 — Token: {tok.total_tokens} ({tok.prompt_tokens} prompt + {tok.completion_tokens} completion) | 调用: {tok.calls} 次")
+        if self.context_manager is not None:
+            try:
+                await self.context_manager.update_session(
+                    self.agent_name,
+                    {
+                        "last_task": task,
+                        "result_count": len(results),
+                        "total_tokens": tok.total_tokens,
+                        "calls": tok.calls,
+                    },
+                )
+            except Exception:
+                pass
         self.console.show_summary(results)
         summary = await self._summarize(task, results)
         if summary:
@@ -382,18 +531,9 @@ class AgentLoop:
 
     async def _plan_single_step(self, task: str, context: Optional[list[dict]]) -> Optional[dict]:
         """调用 LLM 生成单步计划。返回 step dict 或 None。"""
-        import httpx
-        import os
-
         llm_cfg = self.sec_config.get_llm_config()
-        base_url = llm_cfg.get("base_url", "https://api.deepseek.com/v1")
         model = llm_cfg.get("model", "deepseek-chat")
-        api_key = llm_cfg.get("api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
         timeout_s = llm_cfg.get("timeout_seconds", 15)
-
-        if not api_key:
-            self.console.warning("未配置 API key，使用正则模式")
-            return self._fallback_single_step(task)
 
         sys_prompt = """你是安全的 Shell 助手。结合上下文决定下一步执行什么。
 
@@ -423,32 +563,30 @@ class AgentLoop:
             messages.append({"role": "user", "content": f"执行历史:\n{context_text[:3000]}\n\n下一步?"})
 
         try:
-            async with httpx.AsyncClient(timeout=timeout_s) as client:
-                resp = await client.post(
-                    f"{base_url.rstrip('/')}/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": model,
-                        "messages": messages,
-                        "temperature": 0.1,
-                        "max_tokens": 512,
-                    },
-                )
-                resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"]
+            content, usage = await self._chat_completion(
+                model=model,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=512,
+                timeout=timeout_s,
+            )
+            self._record_token_usage(usage)
 
-                # 提取 JSON
-                if content.startswith("```"):
-                    content = content.split("\n", 1)[1]
-                    content = content.rsplit("```", 1)[0]
-                content = content.strip()
+            if not content:
+                return self._fallback_single_step(task)
 
-                step = json.loads(content)
-                if "command" in step and step.get("command"):
-                    return step
-                if step.get("done"):
-                    return {"name": "done", "command": "", "risk": "low", "done": True, "reason": step.get("reason", "")}
-                return None
+            # 提取 JSON
+            if content.startswith("```"):
+                content = content.split("\n", 1)[1]
+                content = content.rsplit("```", 1)[0]
+            content = content.strip()
+
+            step = json.loads(content)
+            if "command" in step and step.get("command"):
+                return step
+            if step.get("done"):
+                return {"name": "done", "command": "", "risk": "low", "done": True, "reason": step.get("reason", "")}
+            return None
 
         except Exception as e:
             log.warning("LLM 单步计划失败: %s", e)
@@ -586,16 +724,8 @@ class AgentLoop:
 
     async def _summarize(self, prompt: str, results: list[dict]) -> str:
         """用 LLM 总结执行结果。"""
-        import httpx
-        import os
-
         llm_cfg = self.sec_config.get_llm_config()
-        base_url = llm_cfg.get("base_url", "https://api.deepseek.com/v1")
         model = llm_cfg.get("model", "deepseek-chat")
-        api_key = llm_cfg.get("api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
-
-        if not api_key:
-            return ""
 
         summary_prompt = f"""用户要求: {prompt}
 执行结果:
@@ -605,22 +735,21 @@ class AgentLoop:
 """
 
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(
-                    f"{base_url.rstrip('/')}/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": model,
-                        "messages": [
-                            {"role": "system", "content": "简洁总结执行结果，不超过3行。"},
-                            {"role": "user", "content": summary_prompt},
-                        ],
-                        "temperature": 0.0,
-                        "max_tokens": 200,
-                    },
-                )
-                resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
+            content, usage = await self._chat_completion(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "简洁总结执行结果，不超过3行。"},
+                    {"role": "user", "content": summary_prompt},
+                ],
+                temperature=0.0,
+                max_tokens=200,
+                timeout=10,
+                stream=True,
+            )
+            self._record_token_usage(usage)
+            if self.stream_output:
+                self.console.print("")
+            return content
         except Exception:
             return ""
 
@@ -628,7 +757,12 @@ class AgentLoop:
 
     async def _publish(self, event_type: str, **kwargs):
         try:
-            await self.event_bus.publish_sync("agent." + event_type, kwargs)
+            # ``emit_task`` prepends the ``task.`` namespace, so strip a
+            # caller-supplied prefix to avoid ``task.task.started``.
+            task_type = event_type
+            if task_type.startswith("task."):
+                task_type = task_type[len("task."):]
+            await self.event_bus.emit_task(task_type, kwargs, source=self.agent_name)
         except Exception:
             pass
 
