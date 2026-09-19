@@ -3,7 +3,7 @@
 > 最后更新：2026-09-19 15:45
 > 当前阶段：Phase 3.5 收尾 — trimum CLI 规划
 > 测试：355 passed（2026-09-19）；远程 33/33 import 全过
-> 当前分支：`ubuntu`（最新）
+> 当前工作分支：`server`；Phase A 已同步到 `main/ubuntu/arch-linux/server`
 
 ---
 
@@ -70,14 +70,14 @@ trm config set <key> <value>       # 设置配置项
 ### 🗂️ 实施步骤（建议顺序）
 
 #### Phase A：CLI 框架重构（P0）
-- [ ] **A1. 引入 argparse 子命令结构** refactor `cli_dispatch()`
+- [x] **A1. 引入 argparse 子命令结构** refactor `cli_dispatch()`
   - 从 `sys.argv` 手动判断改为规范的 `argparse` 子解析器
   - 建立 `trm` 顶层命令 → 子命令 → 子子命令的三层结构
   - 实现 `--help` 输出 README 中所列命令的完整帮助信息
-- [ ] **A2. 创建 `src/trimum_core/cli/` 模块包**
+- [x] **A2. 创建 `src/trimum_core/cli/` 模块包**
   - 按功能拆分为独立模块：`cli/commands/*.py`
   - 减少 `main.py` 的臃肿，`main.py` 仅保留入口转发
-- [ ] **A3. 统一输出格式化**
+- [x] **A3. 统一输出格式化**
   - 普通输出 / `--json` 模式（机器可读）
   - 颜色高亮（有 TTY 时）
   - 支持 `--quiet` 静默模式
@@ -179,6 +179,15 @@ trm config set <key> <value>       # 设置配置项
 
 ---
 
+## 🧭 收尾流程（长期）
+
+- 分支同步：先 `git diff --name-status <target>..<source>`，再 cherry-pick，禁止无脑 merge。
+- GitHub push：走 `http://127.0.0.1:7993`，使用 `.env` 的 `GITHUB_TOKEN`。
+- 真机同步：`guzhujushi@100.115.86.48`；源码同步 `/home/guzhujushi/trimum` 和 `/opt/trimum`。
+- sudo 操作：写成脚本 scp 到真机 `/tmp/`，例如 `scripts/sync_opt_tests.sh`，并告知用户执行位置。
+- 临时文件：根目录 `tmp_*` 一律移入 `tmp/`；`.env` 永不提交。
+- 详细流程：见 `docs/OPERATIONS.md`；项目级 Codex 指令见 `AGENTS.md`。
+
 ## 🧪 测试状态
 
 | 项目 | 状态 |
@@ -191,7 +200,7 @@ trm config set <key> <value>       # 设置配置项
 
 | 分支 | 状态 | 备注 |
 |------|------|------|
-| `ubuntu` | ⭐ 最新 | 当前开发分支，已 push |
-| `main` | ⏳ 需同步 | Phase 3 + CLI 后跟进 |
-| `server` | ⏳ 需同步 | 同上 |
-| `arch-linux` | ⏳ 需同步 | 同上；ipc_handler.py 需手动 cherry-pick |
+| `server` | ✅ 已同步 | 当前工作分支，Phase A 已 push |
+| `main` | ✅ 已同步 | Phase A 已 push |
+| `ubuntu` | ✅ 已同步 | Phase A 已 push |
+| `arch-linux` | ✅ 已同步 | Phase A 已 push |
