@@ -20,6 +20,9 @@ class TestBuildParser:
         help_actions = {action.dest for action in parser._actions}
         assert "help" in help_actions
         assert "json" in help_actions
+        assert "config" in help_actions
+        assert "quiet" in help_actions
+        assert "verbose" in help_actions
 
     @pytest.mark.parametrize(
         "argv",
@@ -104,3 +107,40 @@ class TestConfigHelpers:
             assert loaded.port == 9123
         finally:
             path.unlink(missing_ok=True)
+
+
+class TestGlobalFlags:
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["--config", "custom.yaml", "version"],
+            ["version", "--config", "custom.yaml"],
+            ["--quiet", "version"],
+            ["version", "--quiet"],
+            ["--verbose", "health"],
+            ["health", "--verbose"],
+        ],
+    )
+    def test_global_flags_before_and_after_subcommand(self, argv):
+        args = build_parser().parse_args(argv)
+        if "custom.yaml" in argv:
+            assert args.config == "custom.yaml"
+        if "--quiet" in argv:
+            assert args.quiet is True
+        if "--verbose" in argv:
+            assert args.verbose is True
+
+    def test_quiet_version_suppresses_output(self, capsys):
+        assert main(["--quiet", "version"]) == 0
+        assert capsys.readouterr().out == ""
+
+    def test_json_quiet_version_suppresses_output(self, capsys):
+        assert main(["--json", "--quiet", "version"]) == 0
+        assert capsys.readouterr().out == ""
+
+
+class TestParserFailures:
+    def test_invalid_subcommand_uses_argparse_exit_code(self):
+        with pytest.raises(SystemExit) as exc_info:
+            build_parser().parse_args(["definitely-not-a-command"])
+        assert exc_info.value.code == 2
