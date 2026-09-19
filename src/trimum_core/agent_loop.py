@@ -39,9 +39,17 @@ from .llm_policy import LlmPolicyEngine
 from .file_trust import FileTrustTracker
 from .live_console import LiveConsole, TokenStatusPanel
 from .config import Config
+from .context_compactor import CompactionPolicy, ContextCompactor
+from .audit_store import AuditStore
 from .resource_controller import TokenUsageTracker, TokenUsage, PsutilController
 
 log = logging.getLogger("trimum_core.agent_loop")
+
+# 网关认为「执行成功」的状态：allowed / confirmed / success。
+# 网关此前用 "ok" 做判定，但 ToolGateway 与 Dispatcher 从不返回 "ok"，
+# 导致交互式循环里成功的步骤被当成失败（Phase 3 收尾 P1）。
+STEP_OK_STATUSES = frozenset({"allowed", "confirmed", "success"})
+STEP_ERROR_STATUSES = frozenset({"denied", "error", "timeout", "jit_required"})
 
 
 @dataclass
@@ -96,13 +104,22 @@ class AgentLoop:
         agent_name: str = "trm-exec",
         stream_output: bool = False,
         context_manager: Optional[Any] = None,
+        compactor: Optional[ContextCompactor] = None,
+        compaction_policy: Optional[CompactionPolicy] = None,
     ):
-        self.gateway = gateway or ToolGateway(interactive=False)
         self.event_bus = event_bus or EventBus()
+        # 审计落盘 + 广播：与 daemon 一致，方便 `trm log audit` 统一查询
+        self.gateway = gateway or ToolGateway(
+            interactive=False,
+            event_bus=self.event_bus,
+            audit_store=AuditStore(),
+        )
         self.console = console or LiveConsole(self.event_bus)
         self.agent_name = agent_name
         self.stream_output = bool(stream_output)
         self.context_manager = context_manager
+        # 上下文窗口管理（P0）：工具输出限长 + 滑窗 + 早期步骤摘要
+        self.compactor = compactor or ContextCompactor(compaction_policy)
 
         # 安全组件
         sec_config = SecurityConfig()
@@ -558,9 +575,9 @@ class AgentLoop:
         ]
 
         if context:
-            # 附加上下文历史（限制长度）
-            context_text = json.dumps(context[-5:], ensure_ascii=False, default=str)
-            messages.append({"role": "user", "content": f"执行历史:\n{context_text[:3000]}\n\n下一步?"})
+            # 附加上下文历史（限长 + 滑窗 + 摘要，见 ContextCompactor）
+            context_text = self.compactor.build(context)
+            messages.append({"role": "user", "content": f"执行历史:\n{context_text}\n\n下一步?"})
 
         try:
             content, usage = await self._chat_completion(
@@ -692,7 +709,8 @@ class AgentLoop:
 
             elapsed = int((time.time() - start_ts) * 1000)
 
-            if resp.status == "ok":
+            step_ok = resp.status in STEP_OK_STATUSES
+            if step_ok:
                 output_text = resp.output or ""
                 self.console.step_output(output_text)
                 self.console.step_done(name)
@@ -705,7 +723,8 @@ class AgentLoop:
 
             return {
                 "name": name,
-                "status": resp.status,
+                "status": "ok" if step_ok else "error",
+                "gateway_status": resp.status,
                 "output": resp.output or resp.error or "",
                 "elapsed_ms": elapsed,
                 "command": command,

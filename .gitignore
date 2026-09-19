@@ -112,3 +112,8 @@ chroma-data/
 
 # temp server files
 ._*
+
+# ---- 本地草稿 / 任务产物（不入库） ----
+codex-tasks/
+*.bak_*
+HANDOFF.md

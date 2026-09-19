@@ -2,10 +2,14 @@
 
 Architecture:
 1. ToolRegistry holds known tool definitions (name → ToolDefinition)
-2. ToolGateway.execute() does a **two-layer permission check**:
+2. ToolGateway.execute() runs a layered permission check:
+   - Layer 0: cwd Jail (work directory whitelist)
    - Layer 1: Global Policy (command-level regex rules from policy.yaml)
    - Layer 2: Agent Permission (agent.json declared exec/deny_exec/read/write)
-3. Only when both layers pass is the command executed
+   - Layer 2.5: SecurityRule (弹性沙箱决策：allow / confirm / deny)
+   - Layer 4: SecMonitor threat scan
+   - Layer 3: JIT authorization for high-risk commands
+3. Only when all layers pass is the command executed
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import types
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from .models import (
     DefenseAction,
@@ -35,17 +39,25 @@ from .models import (
     AgentManifest,
     AuditEvent,
     JITToken,
+    TrimumError,
+    TRMErrorCode,
+    EventSeverity,
 )
 from .policy_engine import PolicyEngine
 from .llm_policy import LlmPolicyEngine
 from .security_config import SecurityConfig
 from .file_trust import FileTrustTracker
 from .security_rule import SecurityRule, DecisionResult
+from .audit_store import AuditStore
 from .tool_dispatchers import DispatcherRegistry
 from .tool_file_loader import scan_tools
 from .sec_monitor import OpContextClassifier, SecMonitor
 from .sec_executor import SecExecutor
 from .logger import get_logger
+
+if TYPE_CHECKING:
+    from .behavior_monitor import BehaviorMonitor
+    from .event_bus import EventBus
 
 logger = get_logger("tool_gateway")
 
@@ -56,6 +68,23 @@ _DEFAULT_WORK_DIR = os.path.expanduser("~/.trimum/workdir")
 _SENSITIVE_ENV_PATTERNS = re.compile(
     r"(?i)(api_key|secret|password|token|auth|credential|private_key|access_key)"
 )
+
+
+_RISK_RANK = {
+    RiskLevel.LOW: 0,
+    RiskLevel.MEDIUM: 1,
+    RiskLevel.HIGH: 2,
+    RiskLevel.CRITICAL: 3,
+}
+
+
+def _risk_from_decision(decision: DecisionResult) -> RiskLevel:
+    """把 DecisionResult.risk_level 字符串映射回 RiskLevel。"""
+    try:
+        return RiskLevel(decision.risk_level)
+    except ValueError:
+        return RiskLevel.MEDIUM
+
 
 # 敏感输出模式（用于日志脱敏）
 _SENSITIVE_OUTPUT_PATTERNS = [
@@ -102,10 +131,16 @@ class ToolRegistry:
         tools_path = Path(self._tools_path or Path.home() / ".trimum" / "tools")
         if tools_path.is_dir():
             for child in sorted(tools_path.iterdir()):
-                if child.is_dir():
-                    main_py = child / "main.py"
-                    if main_py.is_file():
-                        self._load_tool_module(child.name, main_py)
+                if not child.is_dir():
+                    continue
+                # 弃用的工具会把 tool.json5 改名为 *.disabled：没有启用 manifest
+                # 的目录一律跳过，避免每次启动都去 import 已废弃工具的 main.py。
+                if not (child / "tool.json5").is_file():
+                    logger.debug("tool_file_loader.skipped_disabled", tool=child.name)
+                    continue
+                main_py = child / "main.py"
+                if main_py.is_file():
+                    self._load_tool_module(child.name, main_py)
 
         # 3. Built-in fallbacks for tools not registered via file
         self._register_defaults()
@@ -318,6 +353,11 @@ class ToolGateway:
         security_rule: Optional[SecurityRule] = None,
         sec_monitor: Optional[SecMonitor] = None,
         sec_executor: Optional[SecExecutor] = None,
+        behavior_monitor: Optional[BehaviorMonitor] = None,
+        enable_security_rule: bool = True,
+        event_bus: Optional[EventBus] = None,
+        audit_store: Optional[AuditStore] = None,
+        learning_engine: Optional[Any] = None,
         op_context: Optional[OpContextClassifier] = None,
         work_dir: Optional[str] = None,
         enable_cwd_jail: bool = True,
@@ -336,7 +376,20 @@ class ToolGateway:
         self.tools = tool_registry or ToolRegistry()
         self.dispatchers = dispatcher_registry or DispatcherRegistry()
         self.work_dir = work_dir or _DEFAULT_WORK_DIR
-        self.security_rule = security_rule
+        self.behavior_monitor = behavior_monitor
+        # Layer 2.5 决策中心：未显式注入时按需构造。
+        # 网关是「单条命令」粒度的决策点，拿不到 Agent cgroup 上下文，因此关闭
+        # SecurityRule 内部的资源阈值检查（配额由 AgentManager / cgroup 层负责）。
+        if security_rule is not None:
+            self.security_rule = security_rule
+        elif enable_security_rule:
+            self.security_rule = SecurityRule(
+                policy_engine=self.policy,
+                behavior_monitor=behavior_monitor,
+                enforce_resource_limits=False,
+            )
+        else:
+            self.security_rule = None
         self.sec_monitor = sec_monitor
         self.sec_executor = sec_executor
         self.op_context = op_context or OpContextClassifier()
@@ -347,15 +400,29 @@ class ToolGateway:
         self.interactive = interactive
         # JIT 令牌表: agent_id -> list[JITToken]
         self._jit_tokens: dict[str, list[JITToken]] = {}
-        # 审计日志（内存环缓冲区）
+        # 审计：内存环 + 可选 JSONL 落盘 + 可选 EventBus 广播
         self._audit_log: list[AuditEvent] = []
         self._audit_max = 1000
+        self.event_bus = event_bus
+        self.audit_store = audit_store
+        self.learning_engine = learning_engine
+        self._audit_tasks: set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     # ── Only need for cmd_str-based permission check helper ──
+    @staticmethod
+    def _sandbox_of(request: ExecuteRequest) -> str:
+        """当前请求的沙箱标识（Layer 2.5 / Layer 4 / 行为记录共用）。"""
+        source_type = getattr(request, "source_type", None)
+        return (
+            source_type.value
+            if hasattr(source_type, "value")
+            else str(source_type or "unknown")
+        )
+
     @staticmethod
     def _build_cmd_str(request: ExecuteRequest) -> str:
         """Build a human-readable command string from the request for policy checks."""
@@ -369,6 +436,9 @@ class ToolGateway:
         Layer 0: cwd Jail — 验证工作目录在允许范围内.
         Layer 1: Global PolicyEngine check (regex rules from policy.yaml).
         Layer 2: Agent permissions check (from AgentManifest if available).
+        Layer 2.5: SecurityRule 决策（deny 走 security_blocked 审计，confirm 升级为
+                   Action.CONFIRM；interactive=True 时弹窗）.
+        Layer 4: SecMonitor 威胁扫描.
         Layer 3: JIT 授权检查（高风险操作需令牌）.
         Execution: Dispatched via DispatcherRegistry.
         Post-execution: 凭据脱敏 + 审计事件记录.
@@ -514,6 +584,55 @@ class ToolGateway:
             self._record_audit("policy_denied", request, resp)
             return resp
 
+        # ------------------------------------------------------------------
+        # Layer 2.5: SecurityRule 决策（弹性沙箱）
+        # ------------------------------------------------------------------
+        decision = await self._check_security_rule(request, cmd_str)
+        if decision is not None and decision.action == "deny":
+            logger.warning(
+                "gateway.layer2_5_denied",
+                command=cmd_str,
+                reason=decision.reason,
+                risk=decision.risk_level,
+            )
+            resp = ExecuteResponse(
+                execution_id=execution_id,
+                status="denied",
+                error=f"Security rule denied: {decision.reason}",
+                exit_code=1,
+                risk=_risk_from_decision(decision),
+                action=Action.DENY,
+                reason=decision.reason,
+            )
+            self._record_audit("security_blocked", request, resp)
+            return resp
+
+        if decision is not None and decision.action == "confirm":
+            action = Action.CONFIRM
+            reason = f"SecurityRule: {decision.reason}"
+            if self.interactive:
+                confirmed = await self._prompt_confirm(
+                    cmd_str,
+                    _risk_from_decision(decision),
+                    reason,
+                    request.agent_id or "terminal",
+                )
+                if not confirmed:
+                    resp = ExecuteResponse(
+                        execution_id=execution_id,
+                        status="denied",
+                        error="User cancelled",
+                        exit_code=1,
+                        risk=_risk_from_decision(decision),
+                        action=Action.DENY,
+                        reason="User declined confirmation prompt",
+                    )
+                    self._record_audit("user_cancelled", request, resp)
+                    return resp
+                # 用户已确认：降级放行
+                action = Action.AUTO
+                reason = f"User confirmed: {reason}"
+
         # ===== LAYER 4: Security Monitor =====
         if self.sec_monitor:
             threats = await self.sec_monitor.scan_command(
@@ -586,10 +705,9 @@ class ToolGateway:
                     result_dict = await file_executor(request.model_dump())
                     result = ExecuteResponse(**result_dict)
                     result.execution_id = result.execution_id or execution_id
-                    result.status = result.status or status
-                    result.risk = result.risk or risk
-                    result.action = result.action or action
-                    result.reason = result.reason or reason
+                    result = self._merge_decision(
+                        result, status=status, risk=risk, action=action, reason=reason
+                    )
                     if self.enable_credential_redact:
                         result = self._redact_credentials(result)
                     self._record_audit("tool_executed", request, result)
@@ -620,11 +738,9 @@ class ToolGateway:
 
         # Merge policy decisions into the dispatcher's response
         result.execution_id = result.execution_id or execution_id
-        if result.status in ("", "allowed"):
-            result.status = status
-        result.risk = result.risk or risk
-        result.action = result.action or action
-        result.reason = result.reason or reason
+        result = self._merge_decision(
+            result, status=status, risk=risk, action=action, reason=reason
+        )
 
         # ------------------------------------------------------------------
         # Post-execution: 凭据脱敏
@@ -638,6 +754,156 @@ class ToolGateway:
         self._record_audit("tool_executed", request, result)
 
         return result
+
+    # ------------------------------------------------------------------
+    # 学习反馈环（BehaviorMonitor / LearningEngine）
+    # ------------------------------------------------------------------
+
+    _DENY_AUDIT_EVENTS = frozenset(
+        {"policy_denied", "security_blocked", "cwd_jail", "user_cancelled"}
+    )
+
+    def _observe_behavior(
+        self,
+        event_type: str,
+        request: ExecuteRequest,
+        response: ExecuteResponse,
+    ) -> None:
+        """把一次执行结果喂给行为基线与学习引擎。
+
+        此前没有任何代码调用 ``BehaviorMonitor.record``，导致：
+        - 异常检测永远得到 "normal"
+        - LearningEngine.analyze() 永远看到空统计
+
+        这里是唯一的喂数入口（所有终态都会经过 ``_record_audit``）。
+        """
+        agent_id = request.agent_id or "unknown"
+        cmd_str = self._build_cmd_str(request)
+
+        if self.behavior_monitor is not None and cmd_str:
+            try:
+                self.behavior_monitor.record_command(
+                    agent_id, cmd_str, sandbox=self._sandbox_of(request)
+                )
+            except Exception as e:  # 学习数据缺失只降级，不影响执行
+                logger.debug("gateway.behavior_record_failed", error=str(e))
+
+        if self.learning_engine is not None and event_type in self._DENY_AUDIT_EVENTS:
+            try:
+                self.learning_engine.record_deny(agent_id)
+            except Exception as e:
+                logger.debug("gateway.learning_record_failed", error=str(e))
+
+    # ------------------------------------------------------------------
+    # 审计广播
+    # ------------------------------------------------------------------
+
+    _AUDIT_WARN_EVENTS = frozenset({"policy_denied", "security_blocked", "cwd_jail", "jit_auth"})
+
+    def _publish_audit(self, event: AuditEvent) -> None:
+        """把审计事件广播到 EventBus（``task.audit.<event_type>``）。
+
+        ``_record_audit`` 是同步方法，这里用 ``create_task`` 异步派发；
+        没有运行中的事件循环时静默跳过（例如 CLI 的一次性调用）。
+        """
+        if self.event_bus is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        severity = (
+            EventSeverity.WARNING
+            if event.event_type in self._AUDIT_WARN_EVENTS
+            else EventSeverity.INFO
+        )
+        coro = self.event_bus.emit_task(
+            f"audit.{event.event_type}",
+            payload=event.model_dump(),
+            source="tool_gateway",
+            severity=severity.value,
+        )
+        try:
+            task = loop.create_task(coro)
+        except RuntimeError:
+            coro.close()
+            return
+        # 持有引用，避免任务被 GC 提前回收
+        self._audit_tasks.add(task)
+        task.add_done_callback(self._audit_tasks.discard)
+
+    # ------------------------------------------------------------------
+    # SecurityRule Check (Layer 2.5)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _merge_decision(
+        result: ExecuteResponse,
+        *,
+        status: str,
+        risk: RiskLevel,
+        action: Action,
+        reason: str,
+    ) -> ExecuteResponse:
+        """把网关的策略决策合并进工具返回的 ExecuteResponse。
+
+        工具的 ``status`` / ``action`` 描述「工具自己执行得怎么样」，默认是
+        ``allowed`` + ``AUTO``；网关的决策描述「策略是否放行」。工具没有给出
+        终态（error / denied / timeout）时以网关决策为准，否则
+        ``result.action or action`` 会因为 AUTO 是真值而吞掉 confirm 决策
+        （文件工具的默认值就是这样把 Layer 1 / Layer 2.5 的决策吃掉的）。
+        """
+        if result.status in ("", "allowed"):
+            result.status = status
+        if action in (Action.DENY, Action.CONFIRM):
+            result.action = action
+        else:
+            result.action = result.action or action
+        if _RISK_RANK.get(result.risk, 0) < _RISK_RANK.get(risk, 0):
+            result.risk = risk
+        result.reason = result.reason or reason
+        return result
+
+    async def _check_security_rule(
+        self,
+        request: ExecuteRequest,
+        cmd_str: str,
+    ) -> Optional[DecisionResult]:
+        """Layer 2.5：调用 SecurityRule 做弹性沙箱决策。
+
+        返回 ``None`` 表示放行；否则返回 allow / confirm / deny 决策。
+        资源超限（TrimumError）转成 deny，其余内部异常记日志后放行，
+        避免安全组件故障把整个网关拖死。
+        """
+        if self.security_rule is None:
+            return None
+
+        sandbox = self._sandbox_of(request)
+        try:
+            return await self.security_rule.can_execute(
+                agent_id=request.agent_id or "unknown",
+                command=cmd_str,
+                sandbox=sandbox,
+                source_type=getattr(request, "source_type", None),
+            )
+        except Exception as e:
+            if (
+                isinstance(e, TrimumError)
+                and e.code == TRMErrorCode.RESOURCE_LIMIT_EXCEEDED
+            ):
+                logger.warning(
+                    "gateway.security_rule_resource_denied",
+                    command=cmd_str[:200],
+                    error=e.message,
+                )
+                return DecisionResult("deny", e.message, risk_level="high")
+            logger.warning(
+                "gateway.security_rule_failed",
+                command=cmd_str[:200],
+                error=str(e),
+            )
+            return None
 
     # ------------------------------------------------------------------
     # Agent Permission Check
@@ -1044,7 +1310,12 @@ class ToolGateway:
 
         如果未启用审计（enable_audit=False），直接返回。
         记录到 logger（INFO 级别）和可选的 audit_store。
+
+        无论审计开关如何，都先把这次结果喂给行为基线 / 学习引擎
+        （学习反馈环不能依赖审计开关）。
         """
+        self._observe_behavior(event_type, request, response)
+
         if not self.enable_audit:
             return
 
@@ -1083,7 +1354,15 @@ class ToolGateway:
             execution_id=event.event_id,
         )
 
-        # 可选：写入 audit store（Phase 5 实现）
-        # if self.audit_store:
-        #     self.audit_store.append(event)
+        # 内存环缓冲区（进程内可查询）
+        self._audit_log.append(event)
+        if len(self._audit_log) > self._audit_max:
+            del self._audit_log[: len(self._audit_log) - self._audit_max]
+
+        # 结构化落盘（JSONL），供 `trm log audit` 查询
+        if self.audit_store is not None:
+            self.audit_store.append(event)
+
+        # EventBus 广播：task.audit.<event_type>
+        self._publish_audit(event)
 

@@ -69,11 +69,16 @@ class SecurityRule:
         behavior_monitor: Optional["BehaviorMonitor"] = None,
         enable_blocking: bool = True,
         sandbox_id: str = "default",
+        enforce_resource_limits: bool = True,
     ) -> None:
         self._policy = policy_engine or PolicyEngine()
         self._monitor = behavior_monitor
         self._blocking = enable_blocking
         self._sandbox_id = sandbox_id
+        # 网关按单条命令决策时拿不到 Agent 的 cgroup 上下文（PsutilController
+        # 的默认阈值量的是当前进程），因此网关会关掉这一项，配额交给
+        # AgentManager / cgroup 层。
+        self._enforce_resource_limits = enforce_resource_limits
 
         # 跨 Agent 白名单（同一工作流内的 Agent 默认允许通信）
         self._workflow_peers: dict[str, set[str]] = {}
@@ -162,11 +167,12 @@ class SecurityRule:
         command: str,
         sandbox: str = "default",
         resource_ctx: dict[str, Any] | None = None,
+        source_type: Any = None,
     ) -> DecisionResult:
         """判断 Agent 能否执行某个命令.
 
         Pipeline:
-        1. PolicyEngine 规则匹配（现有规则）
+        1. PolicyEngine 规则匹配（现有规则，带 source_type 过滤）
         2. BehaviorMonitor 行为异常检测（如果有）
         3. 资源阈值检查
         4. 合并决策
@@ -174,7 +180,9 @@ class SecurityRule:
         resource_ctx = resource_ctx or {}
 
         # Step 1: PolicyEngine 规则匹配
-        risk, action, reason = self._policy.evaluate(command)
+        # source_type 必须透传，否则带 source 过滤的规则（如「AI 的 rm 拒绝、
+        # 人类的 rm 只确认」）在 SecurityRule 里会被整条跳过，与 Layer 1 结论冲突。
+        risk, action, reason = self._policy.evaluate(command, source_type=source_type)
 
         # Step 2: BehaviorMonitor 异常检测
         monitor_verdict: str | None = None
@@ -183,8 +191,12 @@ class SecurityRule:
                 agent_id, command, sandbox=sandbox
             )
 
-        # Step 3: 资源阈值检查
-        resource_ok = await self._check_resource_limits(agent_id, resource_ctx)
+        # Step 3: 资源阈值检查（网关场景下可能被关闭，见 __init__）
+        resource_ok = (
+            await self._check_resource_limits(agent_id, resource_ctx)
+            if self._enforce_resource_limits
+            else True
+        )
 
         # Step 4: 合并决策
         if risk == RiskLevel.CRITICAL:

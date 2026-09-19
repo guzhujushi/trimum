@@ -27,12 +27,27 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     tokens_parser = nested.add_parser("tokens", help="list valid JIT tokens")
     tokens_parser.set_defaults(handler=handler)
 
+    learning_parser = nested.add_parser(
+        "learning", help="show policy learning status (profiles + learned rules)"
+    )
+    learning_parser.set_defaults(handler=handler)
+
+    learn_parser = nested.add_parser(
+        "learn", help="run one policy-learning analysis via the daemon"
+    )
+    learn_parser.add_argument(
+        "--inject",
+        action="store_true",
+        help="inject the learned ruleset into the running PolicyEngine",
+    )
+    learn_parser.set_defaults(handler=handler)
+
     parser.set_defaults(handler=_show_help)
 
 
 def _show_help(args: argparse.Namespace) -> int:
     del args
-    print("usage: trm security {status,allow-once,tokens} ...")
+    print("usage: trm security {status,allow-once,tokens,learning,learn} ...")
     return 0
 
 
@@ -93,6 +108,33 @@ def _tokens_data() -> dict:
     return {"tokens": gateway_data or []}
 
 
+def _learning_data() -> dict:
+    from trimum_core.config import Config
+
+    config = Config()
+    status = get_daemon_status(config)
+    if status["running"]:
+        payload = http_json(config, "GET", "/api/security/learning")
+        if payload:
+            return payload.get("data", {})
+    return {"daemon_running": False, "hint": "run `trmd` to collect learning data"}
+
+
+def _learn_data(inject: bool) -> dict:
+    from trimum_core.config import Config
+
+    config = Config()
+    status = get_daemon_status(config)
+    if not status["running"]:
+        raise RuntimeError("daemon is not running — learning needs live behavior data")
+    payload = http_json(
+        config, "POST", "/api/security/learn", json_data={"inject": bool(inject)}
+    )
+    if not payload:
+        raise RuntimeError("daemon did not return a learning result")
+    return payload.get("data", {})
+
+
 def handler(args: argparse.Namespace) -> int:
     """Execute the requested security subcommand."""
     command = getattr(args, "security_command", None)
@@ -107,6 +149,13 @@ def handler(args: argparse.Namespace) -> int:
             return fail(f"failed to issue token: {exc}")
     elif command == "tokens":
         data = _tokens_data()
+    elif command == "learning":
+        data = _learning_data()
+    elif command == "learn":
+        try:
+            data = _learn_data(bool(getattr(args, "inject", False)))
+        except Exception as exc:
+            return fail(f"learning analysis failed: {exc}")
     else:
         return _show_help(args)
 

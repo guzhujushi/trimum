@@ -1,8 +1,8 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-19（Phase C 完成 + Phase 3 收尾差距审计）
+> 最后更新：2026-09-19（P0 + P1 收尾）
 >
-> 当前阶段：Phase 3 收尾 — 交互体验已接线，安全/可观测性仍有 P0/P1 缺口
+> 当前阶段：Phase 3 收尾 — **P0/P1 阻断项已全部清零**，仅余 P2（桌面确认通道 / SDK 测试 / SonarQube 重扫）
 
 ---
 
@@ -322,3 +322,89 @@
 | **P2** | **确认 UI 只有 CLI，无桌面/WebSocket 通道** | `LiveConsole.confirm` 可用，`SecurityAgent.confirm` 无桌面交付 | WebSocket 通知 / 桌面弹窗 |
 | **P2** | **Agent SDK 无端到端测试与打包验证** | `src/agent-sdk` 已写代码但 `tests/` 无覆盖 | 补 SDK 测试 + `pyproject` 打包验证 |
 | **P2** | **SonarQube 重扫 / 真机 Arch Linux 验证** | docs P3-19/P3-20，仓库内无结果 | 收尾执行一次重扫 + 真机 smoke |
+
+---
+
+## 2026-09-19 P0 收尾 — SecurityRule 接入 + 上下文压缩
+
+### 任务清单
+- [x] `ToolGateway` 新增 Layer 2.5：Layer 2 与 Layer 3 之间调用 `SecurityRule.can_execute()`
+- [x] deny → `status=denied` + `security_blocked` 审计；confirm → 升级 `Action.CONFIRM`（interactive 时弹窗确认）
+- [x] `ResourceLimitExceeded`（TrimumError）转 deny，其余异常 fail-open 并记 `gateway.security_rule_failed`
+- [x] 未显式注入时由网关按需构造 `SecurityRule`（`enable_security_rule=False` 可整体关闭）
+- [x] `SecurityRule` 新增 `enforce_resource_limits`（默认 True 保持原语义）；网关用 False，配额仍归 cgroup 层
+- [x] 新增 `_merge_decision()`：工具自报的默认 `action=AUTO` / `status=allowed` 不再吞掉网关决策（Layer 1 confirm 一并修复）
+- [x] `_record_audit` 补上内存环写入（`_audit_log` 此前只声明、从未写入，环缓冲形同虚设）
+- [x] `api_server` 注入 `BehaviorMonitor`，行为异常走 confirm
+- [x] 新增 `src/trimum_core/context_compactor.py`：工具输出限长 + 最近 5 步滑窗 + 早期步骤摘要 + 总预算
+- [x] `AgentLoop._plan_single_step()` 改用 `ContextCompactor.build()`（原为 `context[-5:]` + 硬截 3000 字符）
+- [x] `ToolRegistry.load_all()` 只加载有 `tool.json5` 的目录，opencli 弃用后不再报 `module_failed`
+- [x] `.gitignore` 增加 `codex-tasks/`、`*.bak_*`、`HANDOFF.md`；根目录 `check_req.py` / `TODO.md.bak_previous` 移入 `tmp/`
+- [x] 新增 `tests/test_tool_gateway_security_rule.py`（11）、`tests/test_context_compactor.py`（13）
+
+### 验证结果
+- `pytest tests/test_tool_gateway_security_rule.py -q`：11 passed
+- `pytest tests/test_context_compactor.py -q`：13 passed
+- 本地全量 `pytest tests -q`：**407 passed**，8 failed / 22 errors 与纯净副本（`git archive HEAD`）一致，均为既有 Windows 权限与 LLM 断网问题
+- smoke：`trm exec "echo p0-smoke"` exit=0；`trm tool list` 不再出现 opencli 加载告警
+
+### 待办
+- 上述 P0 遗留的 Layer 1 `Action.CONFIRM` 被吞问题已在 `_merge_decision()` 中一并修复。
+- 4 项 P1 见下一节「2026-09-19 P1 收尾」，已全部完成。
+
+---
+
+## 2026-09-19 P1 收尾 — 审计/学习/子 Agent 进程化
+
+### 任务清单
+- [x] 新增 `src/trimum_core/audit_store.py`：`AuditStore`（JSONL 追加 / 5MB 轮转保留 `.1` / 坏行跳过 / 写入失败不抛）
+- [x] `ToolGateway` 接入 `event_bus` + `audit_store`，每条审计额外广播 `task.audit.<event_type>`（deny 类事件 WARNING 级别）
+- [x] `trm log audit` 改为结构化查询，新增 `--event-type` / `--agent` / `--risk` / `--since`；文件缺失时回退旧主日志文本过滤
+- [x] `trm exec` 来源标记 `SourceType.HUMAN`；`SecurityRule.can_execute()` 透传 `source_type` 给 `PolicyEngine`
+- [x] 学习反馈环：`BehaviorMonitor.classify_command()` / `record_command()` 单一数据源 + `pattern_for_action_type()` 反查命令正则
+- [x] `LearningEngine` 规则 pattern 由「操作类型名」改为真实命令正则（原先 `"file_read"` 永不匹配真实命令，学习恒为空转）
+- [x] 修正置信度归一化（`raw/0.8`）：原上限 0.78 低于默认阈值 0.85，学习规则永远注入不进策略
+- [x] `inject_to_policy` 按 learned 来源去重；`get_profiles()` 暴露学习画像
+- [x] `AgentLoop` 步骤状态判定修正：网关返回 `allowed/confirmed/success` 记为 `ok`（原先按 `== "ok"` 判定，成功步骤全被当成失败）
+- [x] 子 Agent 真实 spawn：新增 `agent_launcher.py`（`create_subprocess_exec` + 真实 PID + `apply_cgroup(agent_id, pid, limits)`），`AgentManager.spawn()` / `AgentRuntime.start_agent()` 接入
+- [x] 新增可部署模板 `scripts/agent-template/main.py`（启动 → 经 AgentSocket 报 started → 等 SIGTERM 退出）
+- [x] 子进程输出落 `agent-logs/<agent_id>.log`（真机 smoke 暴露：PIPE 无人读有阻塞风险，CLI 退出时还会抛 asyncio "Event loop is closed"）
+- [x] `api_server` 注入 `LearningEngine(monitor=behavior_monitor)`，startup 起 60s 周期学习协程（仅 auto 模式自动注入）；新增 `POST /api/security/learn` / `GET /api/security/learning`
+- [x] `trm security learning` / `trm security learn [--inject]` 子命令
+- [x] 新增测试：`test_audit_store.py`(15) / `test_source_type_flow.py`(6) / `test_learning_feedback.py`(11) / `test_agent_spawn.py`(12)
+
+### 验证结果（本地）
+- 本地全量 `pytest tests -q --basetemp tmp/pytest-tmp`：**475 passed**，8 failed / 1 skipped
+- 8 failed 与纯净副本（`git archive HEAD` @ 407f2f4）逐条一致：Windows `~/.trimum` chmod/写权限 + LLM 断网，非本轮回归
+- smoke：`trm exec "echo p0-smoke"` exit=0；`trm tool list` 无 opencli 加载告警；`trm security learning` 无 daemon 时优雅提示
+- smoke 抓到并修掉两个真 bug：
+  - `_check_security_rule()` 引用已删除的局部变量 `source_type` → Layer 2.5 静默 fail-open（改用 `getattr(request, "source_type", None)`）
+  - 相对脚本路径 + `cwd=script.parent` → 子 Agent 入口找不到（统一 `resolve()` 绝对路径）
+
+### 验证结果（真机 Ubuntu，2026-09-19）
+- 环境：`guzhujushi@100.115.86.48`（Ubuntu / Linux 6.8.0-41 / Python 3.12.3），源码同步到 `/home/guzhujushi/trimum` 与 `/opt/trimum`
+- 全量测试：**483 passed / 11 failed**；`/tmp/trimum_baseline`（`git archive HEAD` 纯净副本）同机对照为 **403 passed / 同样的 11 failed** → **无回归**（+80 为本轮新增/修复用例）
+- 11 项失败均为宿主环境缺失，与本轮改动无关：缺 `~/.trimum/tools/{mcp,browser,...}`、缺 `~/.trimum/skills`、LLM 断网、`test_env_list_sorted` 依赖宿主 env
+- smoke 全部通过：
+  - `trm tool list` → 宿主 opencli manifest 改名 `tool.json5.disabled` 后输出 `skipped_disabled`，不再 `module_failed`
+  - `trm exec 'echo p1-smoke'` → exit=0，审计 `source_type=human`
+  - `trm log audit --json` → 结构化条目（落盘 `~/.local/share/trimum/audit.jsonl`）
+  - `trm agent spawn demo` → **真实子进程** `python .../agents/demo/main.py demo-84794655`（pid 20244），日志入 `agent-logs/demo-84794655.log`
+- 真机暴露并修掉的问题（4 个真 bug + 1 个环境依赖测试）：
+  - 宿主机上**常驻 daemon 仍在跑旧代码**（`agent_manager.spawn` 返回 stub 消息）→ 重启 daemon 后恢复真实 spawn（部署流程需把「重启 daemon」写进步骤）
+  - 子进程 PIPE 导致 CLI 退出时报 asyncio `Event loop is closed` → 改为输出落 `agent-logs/<agent_id>.log`
+  - **`api_server` 启动即崩**：`_learning_loop` 定义在 `startup()` 内部、却在定义前被 `create_task` 引用 → `UnboundLocalError` + `Application startup failed. Exiting.`（daemon 完全起不来）→ 提到模块级并补 `tests/test_api_server_startup.py`
+  - **IPC 监听 socket 未设非阻塞**：`loop.sock_accept()` 直接阻塞事件循环 → Linux 上 daemon 假死、测试挂住（Windows 不走该分支所以没暴露）→ `sock.setblocking(False)` + `tests/test_ipc_listener.py`
+  - **`trm security learn` 调用错误**：`http_json()` 的 body 是 keyword-only，却按位置传参 → 改 `json_data=` + CLI 回归测试
+  - `tests/test_agent_manager.py::test_spawn_sets_resource_limits` 依赖真实用户 agents 目录（真机装了 `demo` 脚本后翻车）→ 改用 `tmp_path` 作 `agents_root`，并补「有脚本时绑真实 PID」用例
+- 修完后的真机复跑：**483 passed / 11 failed**（11 项与同机 HEAD 基线逐条一致），全程 24s 无挂起
+
+### 待办
+- [x] 真机验证通过后同步分支（`main` / `ubuntu` / `arch-linux` / `server`）并 push（走代理 `127.0.0.1:7993`）
+- [ ] `/opt/trimum/tests` 与 `/opt/trimum/scripts` 属 root，需按 `scripts/sync_opt_tests.sh` 用 sudo 补齐
+- [ ] cgroup PID 绑定需 root 才能写 `/sys/fs/cgroup/trimum`，真机以普通用户跑时 `apply_cgroup` 会降级告警（P2：装 `trmd.service` 以 root 运行，或加 sudo 授权）
+- [ ] `/opt/trimum/config.yaml` 指向 `/run/trimum/trimum.sock`、`/var/log/trimum/`、`/var/lib/trimum/` 等 root 路径；以普通用户手工起 daemon 时 IPC 绑定失败、`trm` 退回 HTTP（P2：统一「systemd 服务 + root」或「用户态路径」二选一）
+- [ ] **P0（下一阶段）：CLI-Anything 接入** —— opencli 已弃用（Node 依赖不符合轻量化初衷），改用 CLI-Anything（Python、生态完善），落地 `browser` / `browser-cdp` / `clibrowser` 工具（见 `docs/INTEGRATION-PLAN-BROWSER.md`）
+- [ ] P2：桌面/WebSocket 确认通道、`src/agent-sdk` 端到端测试与打包验证、SonarQube 重扫
+
+> 本轮改动**暂未提交**（用户要求：先不 commit/push，真机测过再统一同步）。

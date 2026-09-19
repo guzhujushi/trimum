@@ -152,6 +152,9 @@ class IpcHandler:
             sock = stdlib_socket.socket(
                 stdlib_socket.AF_UNIX, stdlib_socket.SOCK_STREAM
             )
+            # loop.sock_accept() 只在 debug 模式下校验非阻塞标志：阻塞 socket
+            # 会让 accept() 直接卡在事件循环线程里（daemon 整体假死）。
+            sock.setblocking(False)
             sock.bind(path)
             sock.listen(self.max_conn)
             os.chmod(path, 0o700)
@@ -180,6 +183,7 @@ class IpcHandler:
                 stdlib_socket.AF_INET, stdlib_socket.SOCK_STREAM
             )
             sock.setsockopt(stdlib_socket.SOL_SOCKET, stdlib_socket.SO_REUSEADDR, 1)
+            sock.setblocking(False)
             sock.bind(("127.0.0.1", port))
             sock.listen(self.max_conn)
             self._tcp_server = sock
