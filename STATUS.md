@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-19（Phase A CLI 框架重构收口）
+> 最后更新：2026-09-19（Phase B CLI 核心命令增强）
 >
 > 当前阶段：Phase 3 收尾 + Ubuntu 真机常见网络场景工具化 + 红蓝对抗安全加固 (SafeMind 模式)
 
@@ -240,3 +240,21 @@
 - [ ] Phase B：`status/health/doctor/memory` 命令增强
 - [ ] 真机 venv 尚未安装 pytest；如需远端跑 pytest 需先安装
 - [ ] `/opt/trimum/tests` 当前为 root:root 755，如需同步测试文件需要 sudo
+
+
+---
+
+## 2026-09-19 Phase B — CLI 核心命令增强
+
+### 任务清单
+- [x] `trm status`：增加 host/port/socket、PID、进程 uptime/内存/CPU、主机资源快照
+- [x] `trm health`：增加 API key 存在性检查（只报告是否配置，不泄露）
+- [x] `trm doctor`：补齐 API key 检查、目录项明细、依赖/磁盘/网络诊断输出
+- [x] `trm memory`：`list --domain/--category/--entries/--limit`、`search --limit`、`get` found 状态、人类可读输出
+- [x] `_utils.check_env_keys()`：共用环境变量 presence-only 检查
+- [x] 新增 `tests/test_cli_commands.py`，覆盖 status/health/doctor/memory
+
+### 验证结果
+- `pytest tests/test_cli.py tests/test_cli_commands.py -q`：37 passed
+- 本地 smoke：`status` JSON、`health` JSON、`doctor` 人类输出正常
+- 待办：`trm security revoke` 仍在 Phase C/后续，未纳入本轮

@@ -69,6 +69,19 @@ def supports_color(stream=None) -> bool:
     return bool(getattr(stream, "isatty", lambda: False)())
 
 
+def check_env_keys(names) -> list[dict[str, Any]]:
+    """Return presence-only status for environment variables."""
+    result: list[dict[str, Any]] = []
+    for name in names:
+        value = os.environ.get(name)
+        result.append({
+            "name": name,
+            "present": bool(value),
+            "status": "ok" if value else "missing",
+        })
+    return result
+
+
 def style(text: str, color: str) -> str:
     """Wrap *text* in an ANSI colour code when connected to a TTY."""
     if not supports_color():

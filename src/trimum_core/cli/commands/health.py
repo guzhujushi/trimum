@@ -8,7 +8,7 @@ import platform
 import sys
 from pathlib import Path
 
-from .._utils import emit
+from .._utils import check_env_keys, emit
 
 
 _CORE_MODULES = (
@@ -21,6 +21,14 @@ _CORE_MODULES = (
     "trimum_core.ipc_handler",
     "trimum_core.context_manager",
     "trimum_core.workflow_engine",
+)
+
+_ENV_KEYS = (
+    "DEEPSEEK_API_KEY",
+    "JIAOWOISAN_API_KEY",
+    "GROQ_API_KEY",
+    "KIMI_2.7_code_API_KEY",
+    "API_KEY",
 )
 
 
@@ -65,6 +73,8 @@ def handler(args: argparse.Namespace) -> int:
     python_ok = sys.version_info >= (3, 12)
     imports = _check_imports()
     config = _check_config()
+    api_keys = check_env_keys(_ENV_KEYS)
+    missing_keys = [item["name"] for item in api_keys if not item["present"]]
 
     ok = python_ok and imports["ok"]
     data = {
@@ -76,6 +86,8 @@ def handler(args: argparse.Namespace) -> int:
         },
         "config": config,
         "imports": imports,
+        "api_keys": api_keys,
+        "missing_api_keys": missing_keys,
     }
 
     def human(_: dict) -> None:
@@ -85,6 +97,9 @@ def handler(args: argparse.Namespace) -> int:
             marker = "OK" if item["status"] == "ok" else "FAIL"
             error = f" - {item.get('error', '')}" if item.get("error") else ""
             print(f"[{marker}] {item['name']}{error}")
+        for item in api_keys:
+            marker = "OK" if item["present"] else "MISSING"
+            print(f"[{marker}] env {item['name']}")
         print(f"[{'OK' if ok else 'FAIL'}] trimum health")
 
     emit(args, data, human)
