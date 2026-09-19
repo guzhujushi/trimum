@@ -83,17 +83,17 @@ trm config set <key> <value>       # 设置配置项
   - 支持 `--quiet` 静默模式
 
 #### Phase B：核心命令完善（P1）
-- [ ] **B1. `trm status` / `trm health` 增强**
+- [x] **B1. `trm status` / `trm health` 增强**
   - 显示 daemon 运行状态 PID、端口、uptime
   - 显示资源占用（内存/CPU，可复用 ResourceController 数据）
   - 检查各核心模块加载状态（每项 ✓/✗）
-- [ ] **B2. `trm doctor` 环境检查**
+- [x] **B2. `trm doctor` 环境检查**
   - Python 版本要求检查（>= 3.12）
   - 依赖包完整性检查（requests, httpx, rich 等）
   - `~/.trimum/` 目录结构检查（agents/ tools/ memory/ logs/ config.yaml）
   - API Key 配置检查（DEEPSEEK_API_KEY 等，只报告存在与否，不泄露）
   - 网络连接测试（到 API 端点的连通性）
-- [ ] **B3. `trm memory` 命令组**
+- [x] **B3. `trm memory` 命令组**
   - 对接现有 `MemoryClassifier` + SQLite 存储
   - `list`：按 domain/category 分类展示
   - `get <key>`：取单条

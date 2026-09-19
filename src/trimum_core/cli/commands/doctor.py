@@ -9,7 +9,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from .._utils import emit
+from .._utils import check_env_keys, emit
 
 
 _PACKAGES = (
@@ -22,6 +22,14 @@ _PACKAGES = (
     "psutil",
     "httpx",
     "json5",
+)
+
+_ENV_KEYS = (
+    "DEEPSEEK_API_KEY",
+    "JIAOWOISAN_API_KEY",
+    "GROQ_API_KEY",
+    "KIMI_2.7_code_API_KEY",
+    "API_KEY",
 )
 
 
@@ -103,6 +111,8 @@ def handler(args: argparse.Namespace) -> int:
     directories = _check_directories()
     disk = _check_disk()
     network = _check_network()
+    api_keys = check_env_keys(_ENV_KEYS)
+    missing_api_keys = [item["name"] for item in api_keys if not item["present"]]
 
     critical_ok = python["status"] == "ok" and packages["status"] == "ok"
     data = {
@@ -112,6 +122,8 @@ def handler(args: argparse.Namespace) -> int:
         "directories": directories,
         "disk": disk,
         "network": network,
+        "api_keys": api_keys,
+        "missing_api_keys": missing_api_keys,
     }
 
     def human(d: dict) -> None:
@@ -119,8 +131,15 @@ def handler(args: argparse.Namespace) -> int:
         for item in d["packages"]["packages"]:
             print(f"[{item['status'].upper()}] package {item['name']}")
         print(f"[{d['directories']['status'].upper()}] ~/.trimum directory structure")
-        print(f"[{d['disk']['status'].upper()}] disk free {d['disk'].get('free_gb', '?')} GB")
-        print(f"[{d['network']['status'].upper()}] LLM API connectivity: {d['network'].get('url', d['network'].get('error', ''))}")
+        for entry in d["directories"]["entries"]:
+            print(f"  [{'OK' if entry['exists'] else 'MISSING'}] {entry['name']}")
+        disk = d["disk"]
+        print(f"[{disk['status'].upper()}] disk free {disk.get('free_gb', '?')} GB")
+        network = d["network"]
+        print(f"[{network['status'].upper()}] LLM API connectivity: {network.get('url', network.get('error', ''))}")
+        for item in d["api_keys"]:
+            marker = "OK" if item["present"] else "MISSING"
+            print(f"[{marker}] env {item['name']}")
         print(f"[{d['status'].upper()}] trimum doctor")
 
     emit(args, data, human)
