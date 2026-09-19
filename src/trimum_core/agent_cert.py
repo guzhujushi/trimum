@@ -99,11 +99,12 @@ def _get_machine_id() -> str:
             ["cmd", "/c", "vol", "C:"],
             capture_output=True, text=True, timeout=5,
         )
-        for line in result.stdout.splitlines():
+        stdout = result.stdout or ""
+        for line in stdout.splitlines():
             if "Serial Number" in line or "序列号" in line:
                 _MACHINE_ID_CACHE = line.split()[-1].strip()
                 return _MACHINE_ID_CACHE
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
         pass
 
     # 兜底：生成一次并缓存

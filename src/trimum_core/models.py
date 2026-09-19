@@ -408,6 +408,7 @@ class ToolType(str, Enum):
     MCP_TOOLS_CALL = "mcp.tools.call"
     ENV_GET = "env.get"
     ENV_LIST = "env.list"
+    BROWSER = "browser"      # Browser automation via file-based tool
     CUSTOM = "custom"
 
 

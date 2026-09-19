@@ -37,7 +37,7 @@ from trimum_core.memory_classifier import MemoryClassifier
 from trimum_core.event_index import EventIndex
 
 
-__version__ = "0.3.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "Action",

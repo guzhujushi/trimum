@@ -183,3 +183,39 @@
 - [x] scripts/trmd.service — trimum AI Runtime Daemon 的 systemd unit
 - [x] scripts/trm — trm CLI wrapper，已标记 100755 可执行
 - [x] .gitattributes — 增加 *.service text eol=lf、scripts/trm text eol=lf
+
+---
+
+## 2026-09-19 browser tool 路由修复
+
+### 任务清单
+- [x] `models.ToolType` 增加 `BROWSER = "browser"`
+- [x] `tool_file_loader.TOOL_KINDS` 增加 `browser` 映射
+- [x] `tool_gateway._check_cwd_jail` 将 `BROWSER` 加入免 cwd 校验集合
+- [x] browser `main.py` / `_cdp.py` CDP URL 改为可配置（已提供 patched 副本）
+- [x] 编写 `codex-tasks/browser-tool-debug/verify.py` 并验证通过
+- [x] 编写 `codex-tasks/browser-tool-debug/FINDINGS.md`
+
+### 验证结果
+- `verify.py`：7 项检查全部 PASS
+- `tests/test_tool_file_loading.py tests/test_other_dispatchers.py tests/test_jit_auth.py`：74 passed
+- `tests/test_integration.py -k "not context_manager"`：31 passed
+
+---
+
+## 2026-09-19 `trm` CLI 实现
+
+### 任务清单
+- [x] 读取 `tmp/spec_cli_implementation.md`，按 argparse 子命令方案拆分命令
+- [x] 新增 `src/trimum_core/cli/parser.py`、`cli/_utils.py`、`cli/__main__.py`
+- [x] 新增 `cli/commands/` 下 version/health/status/ask/exec/install/memory/security/daemon/log/tool/agent/config/workflow/doctor
+- [x] 实现 `commands.register_all()` 动态注册，并递归注入全局 `--json`
+- [x] `pyproject.toml` 的 `trm` 入口和 `scripts/trm` 对齐到 `trimum_core.cli`
+- [x] `trimum_core/__init__.py` 版本对齐 pyproject：`0.5.0`
+- [x] `config.Config` 补充 `set()` / `save()`，支撑 `trm config set`
+- [x] 新增 `tests/test_cli.py`
+
+### 验证结果
+- `python -m trimum_core.cli --help`：正常列出 15 个命令
+- `python -m trimum_core.cli version`：输出 `trimum v0.5.0`
+- `python -m pytest tests/test_cli.py -q`：23 passed

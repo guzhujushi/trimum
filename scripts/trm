@@ -5,4 +5,4 @@
 # It assumes that trimum-core is installed for the active python3 runtime.
 set -euo pipefail
 
-exec python3 -m trimum_core.main "$@"
+exec python3 -m trimum_core.cli "$@"

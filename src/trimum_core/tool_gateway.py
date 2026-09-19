@@ -746,7 +746,7 @@ class ToolGateway:
             ToolType.KNOWLEDGE_SEARCH, ToolType.KNOWLEDGE_STORE,
             ToolType.NOTIFICATION, ToolType.NOTIFICATION_SEND,
             ToolType.MCP_TOOLS_LIST, ToolType.MCP_TOOLS_CALL,
-            ToolType.CUSTOM, ToolType.SHELL,
+            ToolType.CUSTOM, ToolType.SHELL, ToolType.BROWSER,
         }
 
         if request.tool in skip_tools:
@@ -1086,5 +1086,4 @@ class ToolGateway:
         # 可选：写入 audit store（Phase 5 实现）
         # if self.audit_store:
         #     self.audit_store.append(event)
-
 

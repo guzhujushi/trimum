@@ -145,6 +145,33 @@ class Config:
                 return default
         return value
 
+    def set(self, key_path: str, value: Any) -> None:
+        """Set a nested config value by dot-separated key path.
+
+        Intermediate dictionaries are created as needed.  The change is
+        kept in memory until :meth:`save` is called.
+        """
+        keys = key_path.split(".")
+        node = self._raw
+        for key in keys[:-1]:
+            child = node.get(key)
+            if not isinstance(child, dict):
+                child = {}
+                node[key] = child
+            node = child
+        node[keys[-1]] = value
+
+    def save(self, path: Optional[Path] = None) -> None:
+        """Persist the current configuration to YAML.
+
+        If *path* is omitted, the current ``config_path`` is used.
+        """
+        target = Path(path or self.config_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            yaml.safe_dump(self._raw, f, allow_unicode=True, sort_keys=False)
+        self.config_path = target
+
 
 class PolicyLoader:
     """Load and cache policy rules from YAML."""

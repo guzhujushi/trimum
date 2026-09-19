@@ -58,6 +58,7 @@ TOOL_KINDS: dict[str, ToolType] = {
     "mcp_tools_call": ToolType.MCP_TOOLS_CALL,
     "env_get": ToolType.ENV_GET,
     "env_list": ToolType.ENV_LIST,
+    "browser": ToolType.BROWSER,
     "custom": ToolType.CUSTOM,
 }
 
