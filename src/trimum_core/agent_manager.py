@@ -17,6 +17,11 @@ import psutil
 
 from .logger import get_logger
 from .models import AgentInfo, AgentStatus, SpawnRequest, SpawnResponse
+from .resource_controller import (
+    ResourceController,
+    create_resource_controller,
+    resource_limits_from_config,
+)
 
 log = get_logger("trimum_core.agent_manager")
 
@@ -36,9 +41,15 @@ class AgentManager:
     ``_agents`` dict.
     """
 
-    def __init__(self, max_agents: int = 10, health_check_interval: int = 30) -> None:
+    def __init__(
+        self,
+        max_agents: int = 10,
+        health_check_interval: int = 30,
+        resource_controller: Optional[ResourceController] = None,
+    ) -> None:
         self._max_agents = max_agents
         self._health_check_interval = health_check_interval
+        self._resource_controller = resource_controller or create_resource_controller()
         self._agents: Dict[str, "_AgentRecord"] = {}
         self._lock = asyncio.Lock()
         self._health_task: Optional[asyncio.Task[None]] = None
@@ -135,6 +146,18 @@ class AgentManager:
             else:
                 info.status = AgentStatus.INITIALIZED
                 message = f"Agent '{agent_id}' registered (stub — no child spawned)"
+
+            limits = resource_limits_from_config(request.config)
+            try:
+                await self._resource_controller.set_limits(agent_id, limits)
+                if pid is not None:
+                    await self._resource_controller.apply_cgroup(agent_id, pid, limits)
+            except Exception:
+                log.warning(
+                    "agent_manager.spawn.resource_limits_failed",
+                    agent_id=agent_id,
+                    exc_info=True,
+                )
 
             record = self._AgentRecord(info=info, process=process)
             self._agents[agent_id] = record

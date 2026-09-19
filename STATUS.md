@@ -1,8 +1,8 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-19（Phase B CLI 核心命令增强）
+> 最后更新：2026-09-19（Phase C Agent 交互与可观测性接线）
 >
-> 当前阶段：Phase 3 收尾 + Ubuntu 真机常见网络场景工具化 + 红蓝对抗安全加固 (SafeMind 模式)
+> 当前阶段：Phase C — AgentLoop/EventBus/WorkflowEngine 交互体验 + token/cgroup 接线
 
 ---
 
@@ -258,3 +258,30 @@
 - `pytest tests/test_cli.py tests/test_cli_commands.py -q`：37 passed
 - 本地 smoke：`status` JSON、`health` JSON、`doctor` 人类输出正常
 - 待办：`trm security revoke` 仍在 Phase C/后续，未纳入本轮
+
+
+---
+
+## 2026-09-19 Phase C — Agent 交互体验与可观测性接线
+
+### 任务清单
+- [x] `AgentLoop` LLM 调用成功解析 `usage` 并 `token_tracker.record(...)`
+- [x] `AgentLoop._chat_completion()` 统一 LLM 调用，支持 SSE 流式输出
+- [x] `AgentLoop` 事件发布改用 `EventBus.emit_task`，兼容 `WorkflowEngine` 的 `task.*` 约定
+- [x] `LiveConsole.subscribe_events/unsubscribe` 修复订阅句柄，正确退订
+- [x] `trm ask -i` 挂载 `ContextManager` session 记忆（register/update）
+- [x] `trm ask` JSON 输出增加 `token_usage`，人类模式显示 token 统计
+- [x] `trm ask --json/--quiet` 使用静默 console，避免污染机器可读输出
+- [x] `AgentManager.spawn` 注入 `ResourceController`，依平台选择 cgroup v2 / psutil，并 set/apply limits
+- [x] `resource_controller` 新增 `resource_limits_from_config()` / `create_resource_controller()`
+- [x] 新增 `tests/test_agent_loop.py`、`tests/test_agent_manager.py`，扩展 `tests/test_resource_controller.py`
+
+### 验证结果
+- `pytest tests/test_resource_controller.py tests/test_agent_loop.py tests/test_agent_manager.py tests/test_cli.py tests/test_cli_commands.py -q`：70 passed
+- `pytest tests/test_workflow_files.py -q`：14 passed
+- `pytest tests/test_integration.py -q -k "event_bus or unsubscribe or workflow"`：10 passed / 1 已知失败（Windows `~/.trimum` cert 权限，非本轮改动）
+
+### 待办
+- [ ] 子 Agent 进程真实 spawn 后，把 `apply_cgroup(pid)` 接到真实 PID（当前仍为 Phase 3 stub）
+- [ ] `trm ask` 的 SSE 流式在 `--json/--quiet` 下自动关闭（已实现，需真机 TTY 验证）
+- [ ] `trm security revoke` 等 Phase C 后续命令

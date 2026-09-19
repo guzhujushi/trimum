@@ -12,11 +12,13 @@ It also includes :class:`TokenUsageTracker` for LLM token accounting.
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 try:
     import psutil
@@ -593,6 +595,63 @@ class TokenUsageTracker:
             self._timestamps.pop(agent_id, None)
 
 
+def resource_limits_from_config(config: dict[str, Any] | None) -> ResourceLimits:
+    """Build :class:`ResourceLimits` from a ``resource_limits`` mapping.
+
+    Accepted keys mirror :class:`ResourceLimits` fields.  Unknown keys are
+    ignored and missing keys fall back to the dataclass defaults.
+    """
+
+    mapping: dict[str, Any] = {}
+    if config:
+        nested = config.get("resource_limits")
+        if isinstance(nested, dict):
+            mapping.update(nested)
+        # Top-level keys are also accepted so callers can pass ``SpawnRequest.config``
+        # directly without wrapping them in a nested ``resource_limits`` dict.
+        for key in (
+            "max_cpu_percent",
+            "max_memory_mb",
+            "max_file_writes_per_minute",
+            "max_network_requests_per_minute",
+        ):
+            if key in config:
+                mapping[key] = config[key]
+
+    def _number(value: Any, default: float | int) -> float | int:
+        if value is None or isinstance(value, bool):
+            return default
+        try:
+            return type(default)(value)
+        except (TypeError, ValueError):
+            return default
+
+    return ResourceLimits(
+        max_cpu_percent=_number(mapping.get("max_cpu_percent"), ResourceLimits().max_cpu_percent),
+        max_memory_mb=_number(mapping.get("max_memory_mb"), ResourceLimits().max_memory_mb),
+        max_file_writes_per_minute=_number(
+            mapping.get("max_file_writes_per_minute"),
+            ResourceLimits().max_file_writes_per_minute,
+        ),
+        max_network_requests_per_minute=_number(
+            mapping.get("max_network_requests_per_minute"),
+            ResourceLimits().max_network_requests_per_minute,
+        ),
+    )
+
+
+def create_resource_controller() -> ResourceController:
+    """Return the best available resource controller for this platform.
+
+    Linux uses cgroup v2 integration; other platforms degrade to the
+    cross-platform :class:`PsutilController`.
+    """
+
+    if sys.platform.startswith("linux"):
+        return CgroupV2Controller()
+    return PsutilController()
+
+
 __all__ = [
     "CgroupV2Controller",
     "PsutilController",
@@ -603,4 +662,6 @@ __all__ = [
     "TokenUsage",
     "TokenUsageTracker",
     "Violation",
+    "create_resource_controller",
+    "resource_limits_from_config",
 ]

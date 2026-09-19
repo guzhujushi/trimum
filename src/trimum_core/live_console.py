@@ -57,7 +57,8 @@ class LiveConsole:
         self.event_bus = event_bus
         self._progress: Optional[Progress] = None
         self._live: Optional[Live] = None
-        self._subscription_id: Optional[str] = None
+        self._subscription_pattern: Optional[str] = None
+        self._subscription_callback: Optional[Any] = None
 
     # ── 基本输出 ──
 
@@ -171,15 +172,16 @@ class LiveConsole:
                 detail = payload.get("detail", "")
                 self.warning(f"安全告警: {detail}")
 
-        self._subscription_id = self.event_bus.subscribe(
-            f"{namespace}.*", _handler
-        )
+        self._subscription_pattern = f"{namespace}.*"
+        self._subscription_callback = _handler
+        self.event_bus.subscribe(self._subscription_pattern, _handler)
 
     def unsubscribe(self):
         """取消事件订阅。"""
-        if self._subscription_id and self.event_bus:
-            self.event_bus.unsubscribe(self._subscription_id)
-            self._subscription_id = None
+        if self._subscription_pattern and self._subscription_callback and self.event_bus:
+            self.event_bus.unsubscribe(self._subscription_pattern, self._subscription_callback)
+        self._subscription_pattern = None
+        self._subscription_callback = None
 
     # ── 进度条 ──
 

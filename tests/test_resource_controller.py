@@ -26,6 +26,8 @@ from trimum_core.resource_controller import (
     Violation,
     ResourceCheckResult,
     ResourceController,
+    create_resource_controller,
+    resource_limits_from_config,
 )
 from trimum_core.live_console import TokenStatusPanel
 from trimum_core.security_rule import SecurityRule
@@ -162,6 +164,55 @@ class TestTokenUsageTracker:
         usage = tracker.get_usage("agent_z")
         assert usage.total_tokens == 0
         assert usage.calls == 0
+
+
+class TestResourceLimitHelpers:
+    """resource_limits_from_config / create_resource_controller 测试。"""
+
+    def test_limits_from_nested_mapping(self):
+        limits = resource_limits_from_config({
+            "resource_limits": {
+                "max_cpu_percent": 50,
+                "max_memory_mb": 256,
+            },
+        })
+        assert limits.max_cpu_percent == 50.0
+        assert limits.max_memory_mb == 256.0
+        assert limits.max_file_writes_per_minute == 60
+        assert limits.max_network_requests_per_minute == 30
+
+    def test_limits_from_top_level_keys(self):
+        limits = resource_limits_from_config({
+            "max_cpu_percent": 25,
+            "max_file_writes_per_minute": 10,
+        })
+        assert limits.max_cpu_percent == 25.0
+        assert limits.max_file_writes_per_minute == 10
+
+    def test_limits_none_returns_defaults(self):
+        limits = resource_limits_from_config(None)
+        assert limits.max_cpu_percent == 80.0
+        assert limits.max_memory_mb == 512.0
+
+    def test_limits_invalid_values_fall_back(self):
+        limits = resource_limits_from_config({
+            "resource_limits": {
+                "max_memory_mb": "not-a-number",
+                "max_cpu_percent": True,
+            },
+        })
+        assert limits.max_memory_mb == 512.0
+        assert limits.max_cpu_percent == 80.0
+
+    def test_create_controller_linux(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        ctrl = create_resource_controller()
+        assert isinstance(ctrl, CgroupV2Controller)
+
+    def test_create_controller_fallback(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        ctrl = create_resource_controller()
+        assert isinstance(ctrl, PsutilController)
 
 
 class TestTokenStatusPanel:
