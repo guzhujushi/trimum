@@ -39,9 +39,35 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 
+from ._utils import fail, is_quiet, print_json, wants_json
 from .parser import build_parser
+
+
+def _normalize_global_flags(args: argparse.Namespace) -> None:
+    """Fill global flag values that argparse may leave as ``SUPPRESS``."""
+    args.json = bool(getattr(args, "json", False))
+    args.quiet = bool(getattr(args, "quiet", False))
+    args.verbose = bool(getattr(args, "verbose", False))
+    if not hasattr(args, "config"):
+        args.config = None
+
+
+def _print_default_status(args: argparse.Namespace) -> None:
+    """Print daemon status after help for the no-command invocation."""
+    try:
+        from .commands.status import get_status_data
+
+        status = get_status_data()
+        if wants_json(args):
+            print_json(status)
+        elif not is_quiet(args):
+            state = "running" if status.get("running") else "offline"
+            print(f"\nDaemon status: {state}")
+    except Exception:
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,20 +77,17 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
+    _normalize_global_flags(args)
 
     if not hasattr(args, "handler"):
         parser.print_help()
-        try:
-            from .commands.status import get_status_data
-
-            status = get_status_data()
-            state = "running" if status.get("running") else "offline"
-            print(f"\nDaemon status: {state}")
-        except Exception:
-            pass
+        _print_default_status(args)
         return 0
 
-    return args.handler(args)
+    try:
+        return int(args.handler(args) or 0)
+    except Exception as exc:
+        return fail(f"command failed: {exc}")
 
 
 __all__ = ["main", "build_parser"]

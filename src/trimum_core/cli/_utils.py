@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import importlib.metadata
 import json
+import os
 import pprint
 import sys
 from pathlib import Path
@@ -37,6 +38,47 @@ def wants_json(args: argparse.Namespace) -> bool:
     return bool(getattr(args, "json", False))
 
 
+def is_quiet(args: argparse.Namespace) -> bool:
+    """Return whether quiet mode was requested."""
+    return bool(getattr(args, "quiet", False))
+
+
+def load_config(args: argparse.Namespace):
+    """Load a project ``Config`` using ``--config`` when supplied."""
+    from trimum_core.config import Config
+
+    config_path = getattr(args, "config", None)
+    if config_path:
+        return Config(Path(config_path))
+    return Config()
+
+
+_COLORS = {
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "blue": "34",
+    "cyan": "36",
+    "bold": "1",
+}
+
+
+def supports_color(stream=None) -> bool:
+    """Return whether ANSI colour should be emitted on *stream*."""
+    stream = stream or sys.stdout
+    return bool(getattr(stream, "isatty", lambda: False)())
+
+
+def style(text: str, color: str) -> str:
+    """Wrap *text* in an ANSI colour code when connected to a TTY."""
+    if not supports_color():
+        return text
+    code = _COLORS.get(color)
+    if not code:
+        return text
+    return f"\x1b[{code}m{text}\x1b[0m"
+
+
 def print_json(data: Any) -> None:
     """Write *data* to stdout as pretty JSON."""
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
@@ -48,6 +90,8 @@ def emit(
     human_printer: Callable[[Any], None] | None = None,
 ) -> None:
     """Emit a command result as JSON or via the optional human printer."""
+    if is_quiet(args):
+        return
     if wants_json(args):
         print_json(data)
     elif human_printer is not None:
