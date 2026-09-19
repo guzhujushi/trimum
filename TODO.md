@@ -107,14 +107,14 @@ trm config set <key> <value>       # 设置配置项
   - 新增 `revoke <token_id>`（撤销 token）
 
 #### Phase C：Agent 交互命令（P2）
-- [ ] **C1. `trm ask` 体验优化**
-  - 单次提问模式：`trm ask "..."` → 流式输出 → 显示 token 统计
-  - `--interactive` 模式：使用 `rich` / `prompt_toolkit` 实现 REPL
-  - Ctrl+C 中断处理
-  - 会话记忆挂载（复用已有三重记忆架构）
-- [ ] **C2. `trm agent` 命令组**
-  - `list`：列出所有注册 agent（从 Agent Registry 读取）
-  - `info <id>`：显示 agent 详情（权限、工具集、状态）
+- [x] **C1. `trm ask` 体验优化**
+  - 单次提问模式：`trm ask "..."` → SSE 流式输出 → 显示 token 统计
+  - `--interactive` 模式：Rich prompt 多轮循环（未引入 prompt_toolkit）
+  - [ ] Ctrl+C 中断处理
+  - 会话记忆挂载（`ContextManager.register_session/update_session`）
+- [x] **C2. `trm agent` 命令组**
+  - `list`：列出所有注册 agent
+  - `info <id>`：显示 agent 详情
   - `spawn <id>`：启动新 agent 实例
   - `kill <id>`：停止 agent 实例
 
