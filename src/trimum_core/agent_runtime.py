@@ -21,6 +21,7 @@ from .agent_socket import (
     MSG_STOP,
     MSG_STATUS,
 )
+from .agent_launcher import launch_agent, terminate_process
 from .event_bus import EventBus, AGENT_STATUS_CHANGED
 from .models import EventSeverity, TRMErrorCode, TrimumError
 
@@ -43,11 +44,14 @@ class AgentRuntime:
         event_bus: EventBus,
         context_manager: Optional[Any] = None,
         max_agents: int = 10,
+        agents_root: Optional[str] = None,
     ) -> None:
         self._socket_server = AgentSocketServer(socket_path)
         self._event_bus = event_bus
         self._context_manager = context_manager
         self._max_agents = max_agents
+        self._socket_path = socket_path
+        self._agents_root = agents_root
         self._agents: dict[str, asyncio.subprocess.Process] = {}
         self._stopped = False
         self._event_task: Optional[asyncio.Task] = None
@@ -112,16 +116,19 @@ class AgentRuntime:
                 message=f"Agent {agent_id} already running",
             )
 
-        # Stub: sub-agent script will be implemented in Phase 3 Agent SDK
-        # script = Path.home() / ".local/share/trimum/agents" / agent_type / "main.py"
-        # process = await asyncio.create_subprocess_exec(
-        #     sys.executable, str(script),
-        #     stdout=asyncio.subprocess.PIPE,
-        #     stderr=asyncio.subprocess.PIPE,
-        # )
-
-        # For now: record without actually spawning (Phase 3 stub)
-        self._agents[agent_id] = None  # placeholder for Process ref
+        # 真实 spawn：脚本存在才起进程，并把 PID 绑到 Socket 通道
+        launch = await launch_agent(
+            agent_id,
+            agent_type,
+            base=self._agents_root,
+            socket_path=self._socket_path,
+        )
+        if launch.error is not None:
+            raise TrimumError(
+                TRMErrorCode.RUNTIME_INIT_FAILED,
+                message=launch.error,
+            )
+        self._agents[agent_id] = launch.process  # None = 未安装脚本，仅登记
 
         # Register session in ContextManager (if available)
         if self._context_manager is not None:
@@ -158,7 +165,10 @@ class AgentRuntime:
                 message=f"Agent {agent_id} not found",
             )
 
-        # TODO Phase 3: send stop via Socket, wait for shutdown
+        # 先给 Socket 机会优雅退出，再兜底终止进程
+        process = self._agents.get(agent_id)
+        await terminate_process(process)
+
         del self._agents[agent_id]
 
         # Publish status to Event Bus
