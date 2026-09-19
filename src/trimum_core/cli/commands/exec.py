@@ -53,6 +53,7 @@ def handler(args: argparse.Namespace) -> int:
     if not command:
         return fail('usage: trm exec "<command>"')
 
+    from trimum_core.audit_store import AuditStore
     from trimum_core.models import ExecuteRequest, SourceType, ToolType
     from trimum_core.tool_gateway import ToolGateway
 
@@ -61,11 +62,12 @@ def handler(args: argparse.Namespace) -> int:
         args=_split_command(command),
         agent_id=args.agent,
         timeout_seconds=args.timeout,
-        source_type=SourceType.UNKNOWN,
+        # 人工在终端敲的命令 → HUMAN，AI 发起的走 AgentLoop(SourceType.AI)
+        source_type=SourceType.HUMAN,
         skip_cwd_check=True,
     )
 
-    gateway = ToolGateway(interactive=False)
+    gateway = ToolGateway(interactive=False, audit_store=AuditStore())
     response = asyncio.run(gateway.execute(request))
     data = response.model_dump()
     if wants_json(args):

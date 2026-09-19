@@ -7,6 +7,8 @@ import json
 import time
 from pathlib import Path
 
+from trimum_core.audit_store import AuditStore, default_audit_path
+
 from .._utils import fail, parse_duration, print_json, wants_json
 
 
@@ -47,11 +49,26 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     _add_log_flags(tail_parser, suppress_defaults=True)
     tail_parser.set_defaults(handler=handler)
 
-    audit_parser = nested.add_parser("audit", help="show audit log lines")
+    audit_parser = nested.add_parser("audit", help="query the structured audit log")
     audit_parser.add_argument(
         "--since",
         default=argparse.SUPPRESS,
         help="only show entries newer than a duration",
+    )
+    audit_parser.add_argument(
+        "--event-type",
+        default=argparse.SUPPRESS,
+        help="filter by event type (tool_executed, policy_denied, security_blocked, ...)",
+    )
+    audit_parser.add_argument(
+        "--agent",
+        default=argparse.SUPPRESS,
+        help="filter by agent id",
+    )
+    audit_parser.add_argument(
+        "--risk",
+        default=argparse.SUPPRESS,
+        help="filter by risk level (low/medium/high/critical)",
     )
     audit_parser.set_defaults(handler=handler)
 
@@ -111,6 +128,55 @@ def _audit_lines(lines: list[str]) -> list[str]:
     return [line for line in lines if "audit" in line.lower()]
 
 
+def _format_audit_event(event: dict) -> str:
+    """把一条结构化审计事件渲染成一行人类可读文本。"""
+    ts = event.get("timestamp")
+    try:
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(ts)))
+    except (TypeError, ValueError):
+        stamp = "unknown-time"
+    return (
+        f"{stamp}  {event.get('event_type', '?'):16} "
+        f"agent={event.get('agent_id', '?')}  "
+        f"risk={event.get('risk', '?'):8} "
+        f"action={event.get('action', '?'):9} "
+        f"{event.get('command', '')}"
+    )
+
+
+def _handle_audit(args: argparse.Namespace, *, line_count: int, since: str | None) -> int:
+    """优先查结构化审计文件；没有该文件时退回主日志文本过滤。"""
+    duration = parse_duration(since)
+    cutoff = time.time() - duration if duration > 0 else None
+
+    store = AuditStore()
+    events = store.query(
+        since=cutoff,
+        event_type=getattr(args, "event_type", None),
+        agent_id=getattr(args, "agent", None),
+        risk=getattr(args, "risk", None),
+        limit=line_count,
+    )
+
+    if store.path.exists():
+        if wants_json(args):
+            print_json(events)
+        elif events:
+            for event in events:
+                print(_format_audit_event(event))
+        else:
+            print(f"no audit events matched ({store.path})")
+        return 0
+
+    # 兼容旧部署：没有 audit.jsonl 时退回主日志里含 audit 的行
+    path = _log_path()
+    if not path.exists():
+        return fail(f"audit log not found: {store.path}")
+    lines = _audit_lines(_filter_since(_read_lines(path), since, path))
+    _emit_lines(args, lines[-line_count:] if line_count > 0 else [])
+    return 0
+
+
 def _emit_lines(args: argparse.Namespace, lines: list[str]) -> None:
     if wants_json(args):
         parsed = []
@@ -135,14 +201,14 @@ def handler(args: argparse.Namespace) -> int:
     since = getattr(args, "since", None)
     line_count = int(getattr(args, "n", 100) or 100)
 
+    if audit:
+        return _handle_audit(args, line_count=line_count, since=since)
+
     if not path.exists():
         return fail(f"log file not found: {path}")
 
     lines = _filter_since(_read_lines(path), since, path)
-    if audit:
-        lines = _audit_lines(lines)
-    else:
-        lines = lines[-line_count:] if line_count > 0 else []
+    lines = lines[-line_count:] if line_count > 0 else []
 
     _emit_lines(args, lines)
 
@@ -156,8 +222,6 @@ def handler(args: argparse.Namespace) -> int:
                     continue
                 last = size
                 new_lines = _read_lines(path)[line_count:]
-                if audit:
-                    new_lines = _audit_lines(new_lines)
                 _emit_lines(args, new_lines)
         except KeyboardInterrupt:
             return 0

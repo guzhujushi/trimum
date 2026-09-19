@@ -15,6 +15,7 @@ from typing import Dict, Optional
 
 import psutil
 
+from .agent_launcher import launch_agent, resolve_agent_script
 from .logger import get_logger
 from .models import AgentInfo, AgentStatus, SpawnRequest, SpawnResponse
 from .resource_controller import (
@@ -46,9 +47,11 @@ class AgentManager:
         max_agents: int = 10,
         health_check_interval: int = 30,
         resource_controller: Optional[ResourceController] = None,
+        agents_root: Optional[str] = None,
     ) -> None:
         self._max_agents = max_agents
         self._health_check_interval = health_check_interval
+        self._agents_root = agents_root
         self._resource_controller = resource_controller or create_resource_controller()
         self._agents: Dict[str, "_AgentRecord"] = {}
         self._lock = asyncio.Lock()
@@ -128,29 +131,34 @@ class AgentManager:
                 config=request.config,
             )
 
-            # --- Stub spawn logic (Phase 3) ---
-            # The real implementation will launch:
-            #   script = Path.home() / ".local/share/trimum/agents/{type}/main.py"
-            #   process = await asyncio.create_subprocess_exec(
-            #       sys.executable, str(script),
-            #       stdout=asyncio.subprocess.PIPE,
-            #       stderr=asyncio.subprocess.PIPE,
-            #   )
-            process: Optional[asyncio.subprocess.Process] = None
-            pid: Optional[int] = None
-            if process is not None:
-                pid = process.pid
+            # 真实 spawn：脚本存在才起进程（未安装脚本 → 仅登记，保持旧语义）
+            launch = await launch_agent(
+                agent_id,
+                request.agent_type,
+                base=self._agents_root,
+            )
+            process = launch.process
+            pid = launch.pid
+            if launch.script is None:
+                info.status = AgentStatus.INITIALIZED
+                message = (
+                    f"Agent '{agent_id}' registered "
+                    f"(no agent script installed for type '{request.agent_type}')"
+                )
+            elif launch.error is not None:
+                info.status = AgentStatus.FAILED
+                info.pid = pid
+                message = launch.error
+            else:
                 info.status = AgentStatus.RUNNING
                 info.pid = pid
                 message = f"Agent '{agent_id}' spawned (pid={pid})"
-            else:
-                info.status = AgentStatus.INITIALIZED
-                message = f"Agent '{agent_id}' registered (stub — no child spawned)"
 
             limits = resource_limits_from_config(request.config)
             try:
                 await self._resource_controller.set_limits(agent_id, limits)
-                if pid is not None:
+                if pid is not None and info.status == AgentStatus.RUNNING:
+                    # 真实 PID 绑定 cgroup v2（Linux）/ PsutilController（其它平台）
                     await self._resource_controller.apply_cgroup(agent_id, pid, limits)
             except Exception:
                 log.warning(
