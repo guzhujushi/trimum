@@ -123,3 +123,59 @@ class TestMemoryCommand:
             assert payload["found"] is False
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+
+class TestSecurityLearningCommand:
+    """`trm security learning` / `learn` 走 daemon HTTP（P1 学习反馈环）。
+
+    回归点：`_learn_data` 曾把请求体按位置传给 `http_json`，而该参数是
+    keyword-only，真机上直接报 `http_json() takes 3 positional arguments but 4 were given`。
+    """
+
+    def test_learning_without_daemon_returns_hint(self, monkeypatch, capsys):
+        from trimum_core.cli.commands import security as security_mod
+
+        monkeypatch.setattr(
+            security_mod,
+            "get_daemon_status",
+            lambda config: {"running": False, "source": None, "health": None},
+        )
+
+        assert main(["--json", "security", "learning"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["daemon_running"] is False
+
+    def test_learn_posts_body_as_keyword(self, monkeypatch, capsys):
+        from trimum_core.cli.commands import security as security_mod
+
+        calls = []
+
+        def fake_http_json(config, method, path, *, json_data=None, timeout=2.0):
+            calls.append((method, path, json_data))
+            return {"data": {"summary": {"profiles_count": 1}, "injected": 2}}
+
+        monkeypatch.setattr(
+            security_mod,
+            "get_daemon_status",
+            lambda config: {"running": True, "source": "http", "health": None},
+        )
+        monkeypatch.setattr(security_mod, "http_json", fake_http_json)
+
+        assert main(["--json", "security", "learn", "--inject"]) == 0
+        out = json.loads(capsys.readouterr().out)
+
+        assert calls == [("POST", "/api/security/learn", {"inject": True})]
+        assert out["injected"] == 2
+
+    def test_learn_without_daemon_fails(self, monkeypatch, capsys):
+        from trimum_core.cli.commands import security as security_mod
+
+        monkeypatch.setattr(
+            security_mod,
+            "get_daemon_status",
+            lambda config: {"running": False, "source": None, "health": None},
+        )
+
+        assert main(["--json", "security", "learn"]) == 1
+        captured = capsys.readouterr()
+        assert "daemon is not running" in captured.err

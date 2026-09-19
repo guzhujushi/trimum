@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import json
@@ -26,6 +27,9 @@ from .models import (
     ContextEntry,
 )
 from .tool_gateway import ToolGateway
+from .behavior_monitor import BehaviorMonitor
+from .audit_store import AuditStore
+from .learning_engine import LearningEngine
 from .policy_engine import PolicyEngine
 from .event_bus import EventBus
 from .context_manager import ContextManager
@@ -36,6 +40,9 @@ from .ipc_handler import IpcHandler
 from .workflow_event_driver import WorkflowEventDriver
 
 logger = get_logger("api_server")
+
+# 策略学习分析间隔（秒）
+LEARNING_INTERVAL_SECONDS = 60
 
 
 class AppState:
@@ -57,12 +64,23 @@ class AppState:
         )
         self.file_trust = FileTrustTracker(db_path=":memory:")
 
+        # Layer 2.5：SecurityRule + BehaviorMonitor（弹性沙箱决策）。
+        # SecurityRule 由 ToolGateway 按需构造，这里只注入行为基线监控。
+        self.behavior_monitor = BehaviorMonitor()
+        self.event_bus = EventBus()
+        # 审计：JSONL 落盘（trm log audit 查询）+ EventBus 广播 task.audit.*
+        self.audit_store = AuditStore()
+        # 学习反馈环：BehaviorMonitor 喂数据 → LearningEngine 出规则
+        self.learning_engine = LearningEngine(monitor=self.behavior_monitor)
         self.tool_gateway = ToolGateway(
             self.policy,
             llm_policy=self.llm_policy,
             file_trust_tracker=self.file_trust,
+            behavior_monitor=self.behavior_monitor,
+            event_bus=self.event_bus,
+            audit_store=self.audit_store,
+            learning_engine=self.learning_engine,
         )
-        self.event_bus = EventBus()
         self.agent_manager = AgentManager(
             max_agents=config.max_agents,
             health_check_interval=config.health_check_interval,
@@ -71,6 +89,28 @@ class AppState:
         self.socket_server: Optional[stdlib_socket.socket] = None
         self.ipc: Optional[IpcHandler] = None
         self.driver: Optional[WorkflowEventDriver] = None
+        self.learning_task: Optional[asyncio.Task] = None
+
+
+async def _learning_loop(state: AppState) -> None:
+    """周期性跑一次 analyze()；auto 模式下自动注入学到的规则。"""
+    while True:
+        try:
+            await asyncio.sleep(LEARNING_INTERVAL_SECONDS)
+            summary = state.learning_engine.analyze()
+            injected = 0
+            if state.learning_engine.get_mode() == "auto":
+                injected = state.learning_engine.inject_to_policy(state.policy)
+            logger.info(
+                "learning_analysis_done",
+                agents=len(summary),
+                injected=injected,
+                mode=state.learning_engine.get_mode(),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("learning_loop_failed", error=str(e))
 
 
 def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
@@ -267,8 +307,6 @@ def create_app(config: Config) -> FastAPI:
     @app.on_event("startup")
     async def startup():
         """Initialize services on startup."""
-        import asyncio
-
         # Ensure directories exist
         ensure_dirs(config)
 
@@ -282,6 +320,9 @@ def create_app(config: Config) -> FastAPI:
 
         # Start health check
         asyncio.create_task(state.agent_manager.start_health_check())
+
+        # 周期性策略学习（BehaviorMonitor → LearningEngine）
+        state.learning_task = asyncio.create_task(_learning_loop(state))
 
         # Start IPC handler (JSON-RPC over Unix Socket)
         ipc = IpcHandler(
@@ -346,6 +387,48 @@ def create_app(config: Config) -> FastAPI:
         )
         return {"success": True, "data": token.model_dump(), "message": "JIT token issued"}
 
+    @app.post("/api/security/learn")
+    async def security_learn(req: dict | None = None):
+        """立即执行一次策略学习分析。
+
+        Body:
+            inject: true 时把学到的规则注入当前 PolicyEngine
+        """
+        payload = req or {}
+        summary = state.learning_engine.analyze()
+        injected = 0
+        if payload.get("inject"):
+            injected = state.learning_engine.inject_to_policy(state.policy)
+        return {
+            "success": True,
+            "data": {
+                "mode": state.learning_engine.get_mode(),
+                "summary": summary,
+                "injected": injected,
+            },
+            "message": "learning analysis complete",
+        }
+
+    @app.get("/api/security/learning")
+    async def security_learning():
+        """查看学习状态：全局摘要 + 各 Agent 画像。"""
+        engine = state.learning_engine
+        profiles = {
+            agent_id: {
+                "total_actions": profile.total_actions,
+                "deny_count": profile.deny_count,
+                "action_types": len(profile.action_counts),
+                "learned_rules": len(profile.learned_rules),
+                "learning_mode": profile.learning_mode,
+            }
+            for agent_id, profile in engine.get_profiles().items()
+        }
+        return {
+            "success": True,
+            "data": {"summary": engine.get_summary(), "profiles": profiles},
+            "message": "ok",
+        }
+
     @app.get("/api/security/tokens")
     async def security_tokens(agent_id: str = ""):
         """列出有效的 JIT 令牌（可选按 agent 过滤）。"""
@@ -369,6 +452,8 @@ def create_app(config: Config) -> FastAPI:
         if state.context:
             await state.context.close()
         await state.agent_manager.stop_health_check()
+        if state.learning_task:
+            state.learning_task.cancel()
         if state.driver:
             await state.driver.stop()
         if state.ipc:

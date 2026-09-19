@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .models import RiskLevel, Action
-from .behavior_monitor import BehaviorMonitor
+from .behavior_monitor import BehaviorMonitor, pattern_for_action_type
 
 log = logging.getLogger("trimum_core.learning_engine")
 
@@ -175,13 +175,20 @@ class LearningEngine:
             if action_type in profile.learned_rules:
                 continue
 
+            # 学到的规则最终要注入 PolicyEngine 按正则匹配命令，因此这里必须
+            # 反查成命令正则（如 ^(cat|head|tail)\b），而不是写操作类型名——
+            # 写 "file_read" 这样的字面量永远匹配不到真实命令。
+            command_pattern = pattern_for_action_type(action_type)
+            if command_pattern is None:
+                continue
+
             # 某个操作类型出现次数越多 → 越可能是常规安全操作
             # 高出现频率 + 未被拒绝过 → 高置信度
             confidence = self._calculate_confidence(action_type, count, profile)
 
             if confidence >= self._confidence_threshold and action_type not in profile.learned_rules:
                 rule = LearnedRule(
-                    pattern=action_type,
+                    pattern=command_pattern,
                     action="auto",
                     risk="low",
                     confidence=confidence,
@@ -193,6 +200,7 @@ class LearningEngine:
                 )
                 self._learned_rules[f"{agent_id}:{action_type}"] = rule
                 profile.learned_rules[action_type] = {
+                    "pattern": command_pattern,
                     "action": "auto",
                     "risk": "low",
                     "confidence": confidence,
@@ -227,7 +235,10 @@ class LearningEngine:
         # 操作类型风险惩罚
         risk_penalty = self._action_risk_penalty(action_type)
 
-        confidence = 0.5 * count_factor + 0.3 * deny_penalty - 0.2 * risk_penalty
+        # 0.5*count + 0.3*deny - 0.2*risk 的理论上限是 0.8（risk_penalty 最低 0.1），
+        # 不归一化的话永远够不到默认阈值 0.85，学习引擎恒不产出规则。
+        raw = 0.5 * count_factor + 0.3 * deny_penalty - 0.2 * risk_penalty
+        confidence = raw / 0.8
         return max(0.0, min(confidence, 1.0))
 
     @staticmethod
@@ -319,11 +330,21 @@ class LearningEngine:
         if not rules:
             return 0
 
+        if not hasattr(policy_engine, "_rules"):
+            return 0
+
+        existing = {
+            r.get("pattern")
+            for r in policy_engine._rules
+            if isinstance(r, dict) and r.get("source") == "learned"
+        }
         count = 0
         for rule in rules:
-            if hasattr(policy_engine, "_rules"):
-                policy_engine._rules.append(rule)
-                count += 1
+            if rule["pattern"] in existing:
+                continue
+            policy_engine._rules.append(rule)
+            existing.add(rule["pattern"])
+            count += 1
 
         return count
 
@@ -416,6 +437,10 @@ class LearningEngine:
 
     def get_profile(self, agent_id: str) -> AgentProfile | None:
         return self._profiles.get(agent_id)
+
+    def get_profiles(self) -> dict[str, AgentProfile]:
+        """返回所有 Agent 画像（副本，供 API/CLI 展示）。"""
+        return dict(self._profiles)
 
     def get_learned_rules(self, agent_id: str | None = None) -> list[LearnedRule]:
         if agent_id is None:

@@ -13,11 +13,48 @@ Phase 4 可以升级为 ML 模型。
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections import defaultdict, deque
 from typing import Any
 
 log = logging.getLogger("trimum_core.behavior_monitor")
+
+
+# 操作类型 ↔ 基础命令映射（单一数据源）：
+# - _classify_command 用它把命令归到操作类型
+# - pattern_for_action_type 反向生成 PolicyEngine 可用的正则
+ACTION_TYPE_COMMANDS: dict[str, tuple[str, ...]] = {
+    "file_read": ("cat", "less", "more", "head", "tail", "read"),
+    "file_write": ("echo", "tee", "write", "touch"),
+    "file_delete": ("rm", "trash", "unlink"),
+    "file_move": ("cp", "mv", "rename"),
+    "file_permission": ("chmod", "chown"),
+    "disk_write": ("dd",),
+    "network_request": ("curl", "wget", "fetch", "http"),
+    "network_remote": ("ssh", "scp", "rsync"),
+    "network_raw": ("nc", "ncat", "socat"),
+    "process_list": ("ps", "top", "htop"),
+    "process_kill": ("kill", "pkill"),
+    "system_mount": ("mount", "unmount"),
+    "container": ("docker", "podman", "nerdctl"),
+    "vcs_operation": ("git", "svn", "hg"),
+    "build_tool": ("make", "cmake", "cargo", "npm", "pip"),
+}
+
+_COMMAND_TO_ACTION_TYPE: dict[str, str] = {
+    command: action_type
+    for action_type, commands in ACTION_TYPE_COMMANDS.items()
+    for command in commands
+}
+
+
+def pattern_for_action_type(action_type: str) -> str | None:
+    """把操作类型反查成 PolicyEngine 可用的命令正则（如 ``^(cat|head|tail)\b``）。"""
+    commands = ACTION_TYPE_COMMANDS.get(action_type)
+    if not commands:
+        return None
+    return "^(" + "|".join(re.escape(cmd) for cmd in commands) + r")\b"
 
 
 class BehaviorRecord:
@@ -143,48 +180,26 @@ class BehaviorMonitor:
         if not cmd_lower:
             return "unknown"
 
-        parts = cmd_lower.split()
-        base = parts[0]
+        return _COMMAND_TO_ACTION_TYPE.get(cmd_lower.split()[0], "other")
 
-        # 文件操作
-        if base in ("cat", "less", "more", "head", "tail", "read"):
-            return "file_read"
-        if base in ("echo", "tee", "write", "touch"):
-            return "file_write"
-        if base in ("rm", "trash", "unlink"):
-            return "file_delete"
-        if base in ("cp", "mv", "rename"):
-            return "file_move"
-        if base in ("chmod", "chown"):
-            return "file_permission"
-        if base == "dd":
-            return "disk_write"
+    def classify_command(self, command: str) -> str:
+        """公开的分类接口（ToolGateway / LearningEngine 使用）。"""
+        return self._classify_command(command)
 
-        # 网络操作
-        if base in ("curl", "wget", "fetch", "http"):
-            return "network_request"
-        if base in ("ssh", "scp", "rsync"):
-            return "network_remote"
-        if base in ("nc", "ncat", "socat"):
-            return "network_raw"
+    def record_command(
+        self,
+        agent_id: str,
+        command: str,
+        sandbox: str = "default",
+    ) -> str:
+        """分类并记录一条命令，返回操作类型。
 
-        # 进程/系统操作
-        if base in ("ps", "top", "htop"):
-            return "process_list"
-        if base in ("kill", "pkill"):
-            return "process_kill"
-        if base in ("mount", "unmount"):
-            return "system_mount"
-        if base in ("docker", "podman", "nerdctl"):
-            return "container"
-
-        # Git/开发
-        if base in ("git", "svn", "hg"):
-            return "vcs_operation"
-        if base in ("make", "cmake", "cargo", "npm", "pip"):
-            return "build_tool"
-
-        return "other"
+        ToolGateway 每处理完一条命令就调用它，行为基线与学习引擎都靠这个
+        数据源（此前没有任何地方调用 ``record``，导致异常检测与学习都是空转）。
+        """
+        action_type = self._classify_command(command)
+        self.record(agent_id, action_type, target=command, sandbox=sandbox)
+        return action_type
 
     def _get_action_rate(
         self,

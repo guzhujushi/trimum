@@ -1,8 +1,8 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-19 23:05（Phase C + Phase 3 收尾差距审计）
-> 当前阶段：Phase 3 收尾 — CLI 交互接线完成，安全/可观测性仍有缺口
-> 测试：Phase C 定向 70 passed；本地全量 367 passed（排除已知 Windows 权限/LLM 网络失败）
+> 最后更新：2026-09-20（真机 Ubuntu 验证通过）
+> 当前阶段：Phase 3 收尾 — **P0/P1 阻断项已清零并通过真机验证**；下一阶段 P0 为 CLI-Anything 接入，剩余 P2（桌面确认通道 / SDK 测试 / SonarQube 重扫）
+> 测试：本地 **482 passed**；真机 Ubuntu **483 passed**（11 failed 与同机 `git archive HEAD` 基线逐条一致，均为宿主环境缺失，无回归）
 > 当前工作分支：`server`；Phase A/B/C 已同步到 `main/ubuntu/arch-linux/server`
 
 ---
@@ -33,22 +33,28 @@
 | Workflow TARL | `WorkflowEngine.register_tarl_workflow/match_workflow_by_tarl` |
 | Security Agent TARL | `SecurityRule.can_execute_tarl()` |
 | Transform Agent 测试 | `tests/test_transform_agent.py` 覆盖 confidence |
+| **SecurityRule → ToolGateway** | `tool_gateway` Layer 2.5 + 默认构造 SecurityRule（P0，2026-09-19 完成） |
+| **上下文窗口管理 / Compaction** | `context_compactor.py`：输出限长 + 滑窗 + 早期步骤摘要（P0，2026-09-19 完成） |
+| **opencli 弃用** | 加载器只加载有 `tool.json5` 的目录，`tool.json5.disabled` 目录不再 import |
 
 ### 🔴 Phase 3 收尾阻断项（按优先级）
 
 | 优先级 | 缺口 | 依据 / 现状 | 建议动作 |
 |---|---|---|---|
-| **P0** | **SecurityRule/SecurityAgent 未接入 ToolGateway** | `tool_gateway.py` 仅持有 `self.security_rule`，`execute()` 未调用 `can_execute()` | 在 Layer 2 与 Layer 3 之间插入 `SecurityRule.can_execute()`，失败走 `security_blocked` 审计 |
-| **P0** | **上下文窗口管理/Compaction 缺失** | `agent_loop` 仅截断最近 5 步 / 3000 字符，无 Tool Output Limits / 压缩 | 增加 tool 输出截断 + 滑窗 + compaction，复用 `context_manager` 最小上下文 |
-| **P1** | **审计日志未上 EventBus / 不可查询** | `_record_audit` 仅 structlog + 内存环 | `AuditEvent` 发 `task.audit.*`，`trm log audit` 走结构化查询 |
-| **P1** | **子 Agent 真实 spawn + cgroup PID** | `AgentManager.spawn` / `AgentRuntime.start_agent` 仍是 stub | Phase 3 补 `main.py` 启动并 `apply_cgroup(pid)` |
-| **P1** | **AI/人类流量标记未统一** | `AgentLoop` 已设 `SourceType.AI`，`trm exec` 仍用 `UNKNOWN` | `trm exec` 默认 `SourceType.HUMAN` |
-| **P1** | **Policy 学习模式未接线** | `learning_engine.py` 已实现但 ToolGateway 未集成 | 接 `LearningEngine` 到 BehaviorMonitor 反馈环 |
+| ~~**P0**~~ ✅ | ~~**SecurityRule/SecurityAgent 未接入 ToolGateway**~~ | 已完成：Layer 2.5 插入 `can_execute()`，deny → `security_blocked` 审计；默认构造 SecurityRule（`enforce_resource_limits=False`，配额仍归 cgroup 层） | 见 `tests/test_tool_gateway_security_rule.py` |
+| ~~**P0**~~ ✅ | ~~**上下文窗口管理/Compaction 缺失**~~ | 已完成：`src/trimum_core/context_compactor.py`（输出限长 2400 字符 + 滑窗 5 步 + 早期步骤摘要 + 总预算 3000 字符） | 见 `tests/test_context_compactor.py` |
+| ~~**P1**~~ ✅ | ~~**审计日志未上 EventBus / 不可查询**~~ | 已完成：`audit_store.py`（JSONL）+ `task.audit.*` 广播 + `trm log audit --event-type/--agent/--risk` 结构化查询 |
+| ~~**P1**~~ ✅ | ~~**子 Agent 真实 spawn + cgroup PID**~~ | 已完成：`agent_launcher.py`（真实 `create_subprocess_exec`）+ 真实 PID `apply_cgroup` + `scripts/agent-template/` |
+| ~~**P1**~~ ✅ | ~~**AI/人类流量标记未统一**~~ | 已完成：`trm exec` → `SourceType.HUMAN`，`SecurityRule.can_execute` 透传 `source_type` |
+| ~~**P1**~~ ✅ | ~~**Policy 学习模式未接线**~~ | 已完成：`BehaviorMonitor.record_command` 喂数 + deny 计数 + 周期 analyze + `PolicyEngine` 注入（含置信度归一化修复） |
+| ~~**P1**~~ ✅ | ~~**Layer 1 confirm 被工具默认值吞掉**~~ | 已完成：`_merge_decision` 让网关决策优先于工具自报的 `allowed/AUTO` |
+| **P0**（下一阶段） | **OpenCLI 弃用 → CLI-Anything 接入** | opencli 引入 Node.js，不符合轻量化初衷，已在宿主改名 `tool.json5.disabled`；CLI-Anything 为 Python 编写、生态完善、可拓展 | 落地 `browser` / `browser-cdp` / `clibrowser` 工具（`docs/INTEGRATION-PLAN-BROWSER.md`），补集成测试 |
+| **P2** | **daemon 部署形态未定** | 普通用户手工起 daemon：IPC 绑定 `/run/trimum/trimum.sock` 失败（退回 HTTP）、`apply_cgroup` 无权限降级 | 用 `trmd.service` 以 root/系统权限运行，或改用户态路径 |
 | **P2** | **确认 UI 只有 CLI，无桌面/WebSocket 通道** | `LiveConsole.confirm` 可用，`SecurityAgent.confirm` 无桌面交付 | WebSocket 通知 / 桌面弹窗 |
 | **P2** | **Agent SDK 无端到端测试与打包验证** | `src/agent-sdk` 已写代码但 `tests/` 无覆盖 | 补 SDK 测试 + `pyproject` 打包验证 |
 | **P2** | **SonarQube 重扫 / 真机 Arch Linux 验证** | docs P3-19/P3-20，仓库内无结果 | 收尾执行一次重扫 + 真机 smoke |
 
-> 说明：以上 P0/P1 是"Phase 3 能真正收尾"的判断标准；P2 可随 Phase 4 启动并行推进。
+> 说明：P0/P1 已全部闭环（2026-09-19），并于 2026-09-20 在真机 Ubuntu 上验证通过；下一阶段 P0 为 CLI-Anything 接入，剩余 P2 可随 Phase 4 启动并行推进。
 
 ---
 
@@ -139,11 +145,11 @@ trm config set <key> <value>       # 设置配置项
   - `set <key> <value>`：写入并自动分类
   - `search <query>`：调用 `memory_search` 语义检索
   - `stats`：显示各分类记忆数量统计
-- [ ] **B4. `trm security` 命令组扩展**
+- [ ] **B4. `trm security` 命令组扩展**（部分完成：`status`/`tokens` 已实现，`revoke` 待做）
   - 现有 `allow-once` 保留
-  - 新增 `status`（策略状态）
-  - 新增 `tokens`（列出有效 token）
-  - 新增 `revoke <token_id>`（撤销 token）
+  - [x] 新增 `status`（策略状态）
+  - [x] 新增 `tokens`（列出有效 token）
+  - [ ] 新增 `revoke <token_id>`（撤销 token）
 
 #### Phase C：Agent 交互命令（P2）
 - [x] **C1. `trm ask` 体验优化**
@@ -158,25 +164,25 @@ trm config set <key> <value>       # 设置配置项
   - `kill <id>`：停止 agent 实例
 
 #### Phase D：Workflow & 工具命令（P3）
-- [ ] **D1. `trm workflow` 命令组**
+- [x] **D1. `trm workflow` 命令组**（2026-09-19 核对：`cli/commands/workflow.py` 已实现 list/run/status/log）
   - `list`：列出所有 workflow 定义
   - `run <name>`：执行 workflow
   - `status <run_id>`：查看运行状态/结果
   - `log <run_id>`：查看运行日志
-- [ ] **D2. `trm tool` 命令组**
+- [x] **D2. `trm tool` 命令组**（已实现：`cli/commands/tool.py` list/info）
   - `list`：列出所有已注册工具（Tool Registry）
   - `info <name>`：查看工具详情（参数、权限等级）
 
 #### Phase E：配置与日志（P4）
-- [ ] **E1. `trm config` 命令组**
+- [x] **E1. `trm config` 命令组**（已实现：`show`/`set`/`path`；`get` 用 `show` + `--json` 代替）
   - `show`：显示当前生效配置
   - `set <key> <value>`：设置配置项
   - `get <key>`：查询单项配置
-- [ ] **E2. `trm log` 命令组**
+- [x] **E2. `trm log` 命令组**（已实现：`tail`/`audit`/`--since`；审计仍是日志文本过滤，结构化查询见 P1）
   - `tail`：实时 tail 日志（支持 `-f`）
   - `--audit`：审计日志过滤
   - `--since <duration>`：时间过滤
-- [ ] **E3. `trm` 默认行为**
+- [x] **E3. `trm` 默认行为**（已实现：`cli/__init__.py` 无参数时 print_help + daemon 状态）
   - 无参数时打印帮助 + 当前 daemon 状态
   - 美化 banner/help 输出
 
@@ -187,7 +193,7 @@ trm config set <key> <value>       # 设置配置项
 - [ ] **F2. 集成测试**
   - 真实起 daemon 后 `trm status` / `trm health` 连通性
   - `trm ask` 端到端流程
-- [ ] **F3. 打包验证**
+- [x] **F3. 打包验证**（`pyproject.toml` 入口 `trm = trimum_core.cli:main` 正确）
   - 确认 `pyproject.toml` 中 `trm` 入口正确
   - 编写 README 完整 CLI 使用文档
 
@@ -202,7 +208,7 @@ trm config set <key> <value>       # 设置配置项
 - [ ] 自动补全脚本（bash/zsh/fish）
 
 ### 其他待办（承接之前）
-- [ ] **#3.8 Browser Tool 后端收尾**：标记 opencli 为 deprecated（已完成修复，待验证）
+- [x] **#3.8 Browser Tool 后端收尾**：opencli 已真正弃用（`tool.json5.disabled` + 加载器只认 manifest，2026-09-19 验证不再报 module_failed）
 - [ ] **Safety**: Landlock / Seccomp 沙箱（Phase 4）
 - [ ] **3.5 确定性字段 confidence 分级**：三级分流（直接执行 / 确认窗口 / 转 Planner）
 - [ ] **API Key Manager**：统一管理所有需要 API Key 的点
@@ -231,7 +237,8 @@ trm config set <key> <value>       # 设置配置项
 
 | 项目 | 状态 |
 |------|------|
-| 本地全量测试 | 355 passed (2026-09-19) |
+| 本地全量测试 | 473 passed (2026-09-19) |
+| 新增覆盖 | `test_tool_gateway_security_rule.py`（11）、`test_context_compactor.py`（13）、`test_audit_store.py`（15）、`test_source_type_flow.py`（6）、`test_learning_feedback.py`（11）、`test_agent_spawn.py`（12） |
 
 ---
 
