@@ -3,7 +3,7 @@
 > 最后更新：2026-09-20（真机 Ubuntu 验证通过）
 > 当前阶段：Phase 3 收尾 — **P0/P1 阻断项已清零并通过真机验证**；下一阶段 P0 为 CLI-Anything 接入，剩余 P2（桌面确认通道 / SDK 测试 / SonarQube 重扫）
 > 测试：本地 **482 passed**；真机 Ubuntu **483 passed**（11 failed 与同机 `git archive HEAD` 基线逐条一致，均为宿主环境缺失，无回归）
-> 当前工作分支：`server`；Phase A/B/C 已同步到 `main/ubuntu/arch-linux/server`
+> 当前工作分支：`server`；Phase 3 P0/P1 提交已推送四分支（server `3af9e07` / main `26d52f5` / ubuntu `4768820` / arch-linux `b540f36`）
 
 ---
 
@@ -209,6 +209,8 @@ trm config set <key> <value>       # 设置配置项
 
 ### 其他待办（承接之前）
 - [x] **#3.8 Browser Tool 后端收尾**：opencli 已真正弃用（`tool.json5.disabled` + 加载器只认 manifest，2026-09-19 验证不再报 module_failed）
+- [ ] **真机 `/opt/trimum/tests` 与 `/opt/trimum/scripts` 仍为旧内容**（root 属主）：有空时在真机执行 `sudo bash /tmp/sync_opt_tests.sh`；不影响已部署的 `/opt/trimum/src` 运行
+- [ ] **daemon 部署形态**（P2）：普通用户手工起 daemon 时 `/run/trimum/trimum.sock` 绑定失败退回 HTTP、`apply_cgroup` 无权限降级；改为 `trmd.service` 以 root 运行，或改用用户态路径
 - [ ] **Safety**: Landlock / Seccomp 沙箱（Phase 4）
 - [ ] **3.5 确定性字段 confidence 分级**：三级分流（直接执行 / 确认窗口 / 转 Planner）
 - [ ] **API Key Manager**：统一管理所有需要 API Key 的点
@@ -221,6 +223,7 @@ trm config set <key> <value>       # 设置配置项
 |---|---|
 | **#3.8 Browser Tool (CLI-Anything) 集成** | ✅ General → Browser 路由问题已修复，355 tests pass |
 | **CLI-Anything 排查（Chrome/CDP/Python）** | ✅ 所有 4 个问题已解决 |
+| **Phase 3 收尾 P0/P1 清零 + 真机 Ubuntu 验证** | ✅ 已提交并推送四分支（server `3af9e07` / main `26d52f5` / ubuntu `4768820` / arch-linux `b540f36`） |
 
 ---
 
@@ -237,8 +240,9 @@ trm config set <key> <value>       # 设置配置项
 
 | 项目 | 状态 |
 |------|------|
-| 本地全量测试 | 473 passed (2026-09-19) |
-| 新增覆盖 | `test_tool_gateway_security_rule.py`（11）、`test_context_compactor.py`（13）、`test_audit_store.py`（15）、`test_source_type_flow.py`（6）、`test_learning_feedback.py`（11）、`test_agent_spawn.py`（12） |
+| 本地全量测试 | 482 passed / 8 failed / 4 skipped (2026-09-20) |
+| 真机 Ubuntu 全量测试 | 483 passed / 11 failed (2026-09-20)，11 项与同机 `git archive HEAD` 基线逐条一致，无回归 |
+| 新增覆盖 | `test_tool_gateway_security_rule.py`（11）、`test_context_compactor.py`（13）、`test_audit_store.py`（15）、`test_source_type_flow.py`（6）、`test_learning_feedback.py`（11）、`test_agent_spawn.py`（12）、`test_api_server_startup.py`（3）、`test_ipc_listener.py`（3）、`test_cli_commands.py::TestSecurityLearningCommand`（3） |
 
 ---
 
@@ -246,7 +250,7 @@ trm config set <key> <value>       # 设置配置项
 
 | 分支 | 状态 | 备注 |
 |------|------|------|
-| `server` | ✅ 已同步 | 当前工作分支，Phase A 已 push |
-| `main` | ✅ 已同步 | Phase A 已 push |
-| `ubuntu` | ✅ 已同步 | Phase A 已 push |
-| `arch-linux` | ✅ 已同步 | Phase A 已 push |
+| `server` | ✅ 已同步 | 当前工作分支，Phase 3 P0/P1 已 push（`3af9e07`） |
+| `main` | ✅ 已同步 | Phase 3 P0/P1 已 push（`26d52f5`） |
+| `ubuntu` | ✅ 已同步 | Phase 3 P0/P1 已 push（`4768820`） |
+| `arch-linux` | ✅ 已同步 | Phase 3 P0/P1 已 push（`b540f36`） |
