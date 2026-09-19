@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-13（v15 — 新增 live_console.TokenStatusPanel 实时资源面板）
+> 最后更新：2026-09-19（Phase A CLI 框架重构收口）
 >
 > 当前阶段：Phase 3 收尾 + Ubuntu 真机常见网络场景工具化 + 红蓝对抗安全加固 (SafeMind 模式)
 
@@ -219,3 +219,24 @@
 - `python -m trimum_core.cli --help`：正常列出 15 个命令
 - `python -m trimum_core.cli version`：输出 `trimum v0.5.0`
 - `python -m pytest tests/test_cli.py -q`：23 passed
+
+
+---
+
+## 2026-09-19 Phase A — CLI 框架重构收口
+
+### 任务清单
+- [x] 真机 SSH 调研：`/opt/trimum` 与 `/home/guzhujushi/trimum` 源码 `.py` 一致，`/opt/trimum` 的 daemon 运行中
+- [x] `parser.py` 全局参数扩展：`--json/--config/--quiet/--verbose` 递归注入
+- [x] `_utils.py` 支持 `quiet/load_config/TTY` 颜色辅助，`emit` 尊重 quiet
+- [x] `cli/__init__.py` 顶层异常兜底 + 无命令时 JSON/quiet 状态输出
+- [x] 删除 `main.py` 旧 `cli_dispatch/health/security` 入口，`python -m trimum_core.main` 直接走 daemon `run()`
+- [x] 扩展 `tests/test_cli.py`：全局参数前后位置、quiet 输出、无效命令退出码 2
+- [x] 本地 `python -m pytest tests/test_cli.py -q`：32 passed
+- [x] 同步源码到 `/home/guzhujushi/trimum` 与 `/opt/trimum`；`tests/test_cli.py` 同步到 home
+- [x] 真机 smoke test：parser-ok / main-quiet-ok / `/opt/trimum/trm version`、`status` 正常
+
+### 待办与说明
+- [ ] Phase B：`status/health/doctor/memory` 命令增强
+- [ ] 真机 venv 尚未安装 pytest；如需远端跑 pytest 需先安装
+- [ ] `/opt/trimum/tests` 当前为 root:root 755，如需同步测试文件需要 sudo
