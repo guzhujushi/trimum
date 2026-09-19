@@ -1,8 +1,8 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-19（P0 + P1 收尾）
+> 最后更新：2026-09-20（P0/P1 收尾 + 真机 Ubuntu 验证通过 + 四分支已同步推送）
 >
-> 当前阶段：Phase 3 收尾 — **P0/P1 阻断项已全部清零**，仅余 P2（桌面确认通道 / SDK 测试 / SonarQube 重扫）
+> 当前阶段：Phase 3 收尾**已完成** — **P0/P1 阻断项全部清零并在真机验证通过**；下一阶段 P0 = CLI-Anything 接入（`browser` / `browser-cdp` / `clibrowser`），仅余 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）
 
 ---
 
@@ -381,7 +381,7 @@
   - `_check_security_rule()` 引用已删除的局部变量 `source_type` → Layer 2.5 静默 fail-open（改用 `getattr(request, "source_type", None)`）
   - 相对脚本路径 + `cwd=script.parent` → 子 Agent 入口找不到（统一 `resolve()` 绝对路径）
 
-### 验证结果（真机 Ubuntu，2026-09-19）
+### 验证结果（真机 Ubuntu，2026-09-19 ~ 09-20）
 - 环境：`guzhujushi@100.115.86.48`（Ubuntu / Linux 6.8.0-41 / Python 3.12.3），源码同步到 `/home/guzhujushi/trimum` 与 `/opt/trimum`
 - 全量测试：**483 passed / 11 failed**；`/tmp/trimum_baseline`（`git archive HEAD` 纯净副本）同机对照为 **403 passed / 同样的 11 failed** → **无回归**（+80 为本轮新增/修复用例）
 - 11 项失败均为宿主环境缺失，与本轮改动无关：缺 `~/.trimum/tools/{mcp,browser,...}`、缺 `~/.trimum/skills`、LLM 断网、`test_env_list_sorted` 依赖宿主 env
@@ -401,10 +401,12 @@
 
 ### 待办
 - [x] 真机验证通过后同步分支（`main` / `ubuntu` / `arch-linux` / `server`）并 push（走代理 `127.0.0.1:7993`）
+- [x] 代码提交已落库并推送四分支：`server` `3af9e07`、`main` `26d52f5`、`ubuntu` `4768820`、`arch-linux` `b540f36`（同一提交 cherry-pick）
+- [x] 文档收尾提交：本次 `STATUS.md` / `TODO.md` 修订随后同批 cherry-pick 到四分支并 push
 - [ ] `/opt/trimum/tests` 与 `/opt/trimum/scripts` 属 root，需按 `scripts/sync_opt_tests.sh` 用 sudo 补齐
 - [ ] cgroup PID 绑定需 root 才能写 `/sys/fs/cgroup/trimum`，真机以普通用户跑时 `apply_cgroup` 会降级告警（P2：装 `trmd.service` 以 root 运行，或加 sudo 授权）
 - [ ] `/opt/trimum/config.yaml` 指向 `/run/trimum/trimum.sock`、`/var/log/trimum/`、`/var/lib/trimum/` 等 root 路径；以普通用户手工起 daemon 时 IPC 绑定失败、`trm` 退回 HTTP（P2：统一「systemd 服务 + root」或「用户态路径」二选一）
 - [ ] **P0（下一阶段）：CLI-Anything 接入** —— opencli 已弃用（Node 依赖不符合轻量化初衷），改用 CLI-Anything（Python、生态完善），落地 `browser` / `browser-cdp` / `clibrowser` 工具（见 `docs/INTEGRATION-PLAN-BROWSER.md`）
 - [ ] P2：桌面/WebSocket 确认通道、`src/agent-sdk` 端到端测试与打包验证、SonarQube 重扫
 
-> 本轮改动**暂未提交**（用户要求：先不 commit/push，真机测过再统一同步）。
+> 本轮改动**已 commit 并 push**：`server` `3af9e07`、`main` `26d52f5`、`ubuntu` `4768820`、`arch-linux` `b540f36`（cherry-pick 同一提交，均已推 origin）。文档收尾（本文件与 `TODO.md`）随后同批同步到四分支。
