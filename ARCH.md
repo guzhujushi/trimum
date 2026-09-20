@@ -451,9 +451,60 @@
 - **CLI 适配器不自动接进 ToolGateway 分发器**：生成的工具走既有 `main.py` 契约，不新增 `ToolType`。
 - **不做 workflow 的远程目录**：`import` 只接受本地路径或 git URL，不做「订阅 / 自动更新」（那是 E5 的事）。
 - **skill 导入不做依赖解析**：只搬文件 + 校验 frontmatter，技能之间的引用留给后续。
-- **`WorkflowDefV2.to_workflow_definition()` 不搬运 `instruction`**：它只把 `agent_type` 变成节点
-  `handler`、`config` 原样带走，所以编译出来的 workflow 在 `trm workflow run` 下不会真的执行命令。
-  本轮不改引擎（E4 的验收是「导入 + 校验 + 能被 `trm workflow list` 列出」）；这条记在 TODO 里。
+- ~~**`WorkflowDefV2.to_workflow_definition()` 不搬运 `instruction`**~~：E4 只在验收「导入 + 校验 +
+  能被 `trm workflow list` 列出」时把这条留给了后续一轮，**W1（2026-09-20）已修**——
+  见下一节「Workflow 执行语义（W1）」。
+
+## Workflow 执行语义（W1，2026-09-20 已实现）
+
+> 计划与语义决策见 `docs/WORKFLOW-EXECUTION-PLAN.md`。E4 遗留的「v2 定义跑不起来」在这一轮闭环：
+> 定义齐全、执行缺席的那条线，现在接上了 Event Bus。
+
+### 模块
+
+| 模块 | 职责 |
+|---|---|
+| `src/trimum_core/workflow_runtime.py`（新） | `WorkflowRuntime`：注册表 + Event Bus 触发器 + 驱动执行 + 运行记录；`agent_type: shell` 处理器走 ToolGateway |
+| `src/trimum_core/workflow_engine.py`（改） | `to_workflow_definition()` 搬运 `instruction` / `input_data` / `trigger_event`；删掉 `return` 之后那段死代码与坏掉的模块级 `start_v2`；agent 节点缺 driver 时给可行动的错误 |
+| `src/trimum_core/threat_workflows.py`（改） | 16 条威胁响应剧本 → `WorkflowDefV2`（`builtin_workflows()`）：命令式步骤 `agent_type: shell`，散文式步骤 `trm-agent` |
+| `src/trimum_core/api_server.py`（改） | daemon 启动时建运行时并 `start()`；`GET /api/workflows`、`GET /api/workflows/runs` |
+| `src/trimum_core/cli/commands/workflow.py`（改） | `list --all` / `run [--event --payload --timeout --dry-run]` / `enable`；`run --event` 只对点名的 workflow 负责 |
+
+### 执行路径
+
+```
+Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
+                                              │ 编译 step → Node/Edge
+                                              ▼
+                                        WorkflowEngine.run()
+                                              │
+                        handler="shell" ──────┴──── handler 带 agent_type
+                                │                          │
+                        ToolGateway.execute()      WorkflowEventDriver
+                    （策略/风险/审计/脱敏/cwd jail）      （子 Agent 进程）
+```
+
+### 红线（写进代码与测试）
+
+| 红线 | 落点 |
+|---|---|
+| 不新增执行通道 | 工作流的 shell 与 `trm exec` 走**同一个** ToolGateway：策略 / 风险分级 / SecurityRule / 审计 / 凭据脱敏 / 行为基线照常；流量标记 `SourceType.WORKFLOW` |
+| 失败不伪装 | 网关拒绝、非零退出、缺 `instruction` → 节点 `FAILED`、workflow `failed`；「跑失败」绝不记成成功 |
+| 命令不拆分 | `instruction` 整条进 `args=[command]`（dispatcher 原样 join 回去）；shlex 拆分再拼会吃掉引号，`ssh host "systemctl restart x"` 会被拆坏 |
+| 触发器不猜 | 空 `trigger.event_type` = 只能手动跑；条件表达式用受限 `eval`（空 `__builtins__`），写错按「不通过」 |
+| 事件环路有熔断 | 事件驱动下同一 workflow 每 `RUN_WINDOW_SECONDS`(10s) 最多自动跑 `MAX_RUNS_PER_WINDOW`(20) 次，超限发 `event.workflow.throttled` 并跳过；手动 `run` 不受限 |
+
+### 语义取舍
+
+| 取舍 | 说明 |
+|---|---|
+| step 之间不串行等待 | 「监听器 → 执行组」的字面语义；要串行就把任务写进同一个 `execute` 组（组内是串行 DAG） |
+| 同一 step 已在跑 → 跳过 | 防止「事件风暴 / 自我触发」滚成死循环；跳过时发 `event.workflow.skipped`（`reason=already_running`）。收尾事件 `workflow.finished` 在运行仍算「在跑」时发出，所以「监听自己的 finished」的 workflow 不会自我续命 |
+| 内置剧本默认 `enabled: false` | 剧本里有 `kill` / `firewall-cmd`，自动触发等于把确认环节删掉；`trm workflow enable <id>` 落盘成用户自己的文件后才常驻触发，手动 `run` 不受限 |
+| 失败节点阻断后继 | 沿用引擎 DAG 语义（后继要求前驱 `completed` / `skipped`）——响应剧本前一步失败时不该继续动手 |
+| 运行记录只在内存 | 环形 200 条，进程重启即丢；`trm workflow status/log` 仍是桩，持久化留给后续一轮 |
+| 事件广播、退出码收窄 | 一次事件会触发**所有**命中的 workflow（运行时按 workflow 各自判定，不做独占）。但 `trm workflow run <id> --event ...` 的退出码只认 `<id>` 自己的运行，其余进 `other_triggered`；点名的那份没被命中而别的被命中 → 退出码 1 并回报实际触发到的 id |
+| 散文式步骤会明确失败 | 内置剧本里「比对上次 hash 基线」这类步骤编译成 `trm-agent`，没有 driver / 没装 Agent 脚本时节点 FAILED 并说明原因，**不假装成功** |
 
 ## 官方分发渠道（规划，2026-09-20）
 

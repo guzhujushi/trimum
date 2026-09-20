@@ -239,9 +239,17 @@ class WorkflowEngine:
         if self._default_handler:
             return self._default_handler
 
+        hint = ""
+        if agent_type and self._driver is None:
+            # v2 编译出来的 ``agent_type`` 节点（含内置剧本里的「要判断的步骤」）
+            # 在一次性 CLI 进程里没有 driver，这条提示比裸的 handler 名有用
+            hint = (
+                f" — agent_type={agent_type!r} needs a WorkflowEventDriver "
+                "(run it from the daemon) or a registered handler"
+            )
         raise TrimumError(
             TRMErrorCode.WORKFLOW_NODE_NOT_FOUND,
-            message=f"No handler for node '{node.id}' (handler={node.handler})",
+            message=f"No handler for node '{node.id}' (handler={node.handler}){hint}",
         )
 
     # ── DAG 校验 ──────────────────────────────────────────
@@ -1082,119 +1090,55 @@ class WorkflowDefV2(BaseModel):
                     break  # 只加载第一个找到的
 
         return result
-        """Convert v2 format to classic Node/Edge WorkflowDefinition.
 
-        Each step becomes a node. Steps execute sequentially.
-        """
-        nodes: list[NodeDefinition] = []
-        edges: list[EdgeDefinition] = []
-        prev_id: str | None = None
-
-        for i, step in enumerate(self.steps):
-            for j, task in enumerate(step.execute):
-                node_id = f"step_{i}_task_{j}"
-                nodes.append(NodeDefinition(
-                    id=node_id,
-                    label=f"{step.trigger.event_type}:{task.agent_type}",
-                    handler=task.agent_type,
-                    config=task.config,
-                    timeout_seconds=task.timeout_seconds,
-                ))
-                if prev_id:
-                    edges.append(EdgeDefinition(
-                        source=prev_id,
-                        target=node_id,
-                    ))
-                prev_id = node_id
-
-        return WorkflowDefinition(
-            id=self.id,
-            name=self.name,
-            description=self.description,
-            nodes=nodes,
-            edges=edges,
-            config=self.config,
-        )
-
-    
     def to_workflow_definition(self) -> "WorkflowDefinition":
-        """Convert v2 format to classic Node/Edge WorkflowDefinition.
-        Each step becomes a node. Steps execute sequentially.
+        """把 v2 定义（监听器 → 执行组）编译成可执行的 Node/Edge 定义。
+
+        每个 ``AgentTask`` 变成一个节点：
+
+        - ``handler`` = ``task.agent_type``（``shell`` → 运行时注册的本地命令
+          处理器；``agent:<type>`` / 其它 → ``WorkflowEventDriver`` 派发子 Agent）
+        - ``instruction`` / ``agent_type`` / ``input_data`` 落进 ``node.config``：
+          引擎靠 ``config["agent_type"]`` 认 agent 节点，处理器靠
+          ``config["instruction"]`` 取要执行的东西。**W1 修复点**：E4 的转换
+          只搬了 ``agent_type``，``instruction`` 掉在地上，导入进来的 workflow
+          因此跑不起来。
+        - ``trigger_event`` 落进 config，供运行时回填运行记录里的来源。
+
+        转换本身不执行任何东西；执行由 ``WorkflowRuntime`` 驱动。
         """
-        from .workflow_engine import WorkflowDefinition, NodeDefinition, EdgeDefinition
         nodes: list[NodeDefinition] = []
         edges: list[EdgeDefinition] = []
         prev_id: str | None = None
+
         for i, step in enumerate(self.steps):
             for j, task in enumerate(step.execute):
                 node_id = f"step_{i}_task_{j}"
+                config: dict[str, Any] = dict(task.config or {})
+                if task.agent_type:
+                    config.setdefault("agent_type", task.agent_type)
+                if task.instruction:
+                    config["instruction"] = task.instruction
+                if task.input_data:
+                    config.setdefault("input_data", dict(task.input_data))
+                if step.trigger.event_type:
+                    config.setdefault("trigger_event", step.trigger.event_type)
+
                 nodes.append(NodeDefinition(
                     id=node_id,
-                    label=f"{step.trigger.event_type}:{task.agent_type}",
+                    label=task.instruction or f"{step.trigger.event_type}:{task.agent_type}",
                     handler=task.agent_type,
-                    config=task.config,
+                    config=config,
+                    input_from=list(task.input_from),
                     timeout_seconds=task.timeout_seconds,
                 ))
                 if prev_id:
                     edges.append(EdgeDefinition(source=prev_id, target=node_id))
                 prev_id = node_id
+
         return WorkflowDefinition(
             id=self.id, name=self.name, description=self.description,
             nodes=nodes, edges=edges, config=self.config,
         )
-async def start_v2(
-        self,
-        engine: "WorkflowEngine",
-        context: dict[str, Any] | None = None,
-    ) -> WorkflowResult:
-        """Start workflow in v2 mode: listen for triggers, dispatch tasks.
 
-        For each step:
-        1. Listen for trigger event on Event Bus
-        2. When trigger fires, evaluate condition
-        3. Execute all AgentTasks in the execute group (via Event Bus)
-        4. Wait for completion before moving to next step
-        """
-        workflow_id = self.id or f"wf-v2-{uuid.uuid4().hex[:12]}"
-        context = context or {}
 
-        for i, step in enumerate(self.steps):
-            # Listen for trigger event
-            trigger_queue: asyncio.Queue = asyncio.Queue()
-
-            async def _trigger_callback(event):
-                if step.trigger.event_type and event.event_type != step.trigger.event_type:
-                    return
-                if step.trigger.condition:
-                    ctx = {"payload": event.payload}
-                    try:
-                        if not eval(step.trigger.condition, {"__builtins__": {}}, ctx):
-                            return
-                    except Exception:
-                        return
-                await trigger_queue.put(event)
-
-            engine._bus.subscribe("*", _trigger_callback)
-
-            # Wait for trigger
-            await trigger_queue.get()
-
-            # Dispatch all tasks in the execute group
-            for task in step.execute:
-                task.workflow_id = workflow_id
-                task.task_id = f"{workflow_id}_step_{i}_{task.agent_type}"
-
-                # Publish task to Event Bus (Agent Runtime listens)
-                await engine._bus.emit_event(
-                    event_type="task.assigned",
-                    source=f"workflow:{workflow_id}",
-                    payload=task.model_dump(),
-                )
-
-            engine._bus.unsubscribe("*", _trigger_callback)
-
-        return WorkflowResult(
-            workflow_id=workflow_id,
-            status=WorkflowStatus.COMPLETED,
-            duration=0.0,
-        )

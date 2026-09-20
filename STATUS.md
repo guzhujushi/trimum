@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-20（M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → **E4 广接入**）
+> 最后更新：2026-09-20（M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → **W1 workflow 执行语义**）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -1195,10 +1195,84 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 
 ### E4 遗留
 
-- **`WorkflowDefV2.to_workflow_definition()` 不搬运 `instruction`**：它只把 `agent_type` 变成节点
-  `handler`、`config` 原样带走，所以编译出来的 workflow 在 `trm workflow run` 下不会真的执行命令。
-  E4 的验收是「导入 + 校验 + 能被 `trm workflow list` 列出」，本轮不动引擎 —— 这条留给 E5 之后的
-  「workflow 执行语义」一轮。
+- ~~**`WorkflowDefV2.to_workflow_definition()` 不搬运 `instruction`**~~：**W1 已修**（2026-09-20），
+  见本文末「W1 Workflow 执行语义」。
 - `tests/test_cli_adapter.py` 的 `parse_help` 用的是抽象帮助文本；可选硬化：把 `git --help` 的真实
   输出做成 fixture。
 - 证书 `capabilities` 与 ToolGateway / `security_rule.py` 的运行时合并仍未接线（`TODO.md` 有记录）。
+
+---
+
+## W1 Workflow 执行语义（已完成，2026-09-20）
+
+> 立项依据：E4 遗留「`WorkflowDefV2.to_workflow_definition()` 不搬运 `instruction`，导入的 workflow
+> 在 `trm workflow run` 下不会真执行」。计划与语义决策：`docs/WORKFLOW-EXECUTION-PLAN.md`。
+> 用户诉求原文：「补全 workflow 的执行能力，使 workflow 能开始监听 Event Bus，可以驱动执行」。
+
+### 动工前的勘察（先看代码得到的结论）
+
+| 事实 | 证据 |
+|---|---|
+| 引擎只有 `run(definition)`，**没有任何触发器** | `workflow_engine.py` 的 `run` / `_execute_dag` / `_execute_single_node` |
+| 曾经想过触发器，但实现是坏的 | 模块级 `async def start_v2(self, engine, ...)`：`self` 无人传入、裸 `eval`、订阅 `"*"` 从不退订、`task.assigned` 全库无消费者 |
+| v2→v1 转换丢执行信息 | 只搬 `agent_type` → `handler`，`instruction` 掉地上 |
+| `load_from_dir()` 尾部有死代码 | `workflow_engine.py:1085-1117`（`return` 之后的重复函数体） |
+| 唯一「预设 workflow」是数据不是能力 | `threat_workflows.THREAT_WORKFLOWS`（16 条威胁响应剧本），全库零调用点 |
+| 工作流目录默认空 | `~/.trimum/workflows/`；仓库内无 workflow YAML 资产（本机另有 2 份手写的 `blog-deploy` / `daily-check`） |
+| `WorkflowListener` 从未被实例化 | `api_server.py` 只起了 `WorkflowEventDriver`；`workflow.trigger` 事件只发不收 |
+
+### 交付
+
+- [x] `workflow_engine.py`：`to_workflow_definition()` 搬运 `instruction` / `agent_type` / `input_data` /
+      `trigger_event`；删掉 `return` 之后的死代码与坏掉的 `start_v2`；agent 节点缺 driver 时给可行动的错误
+- [x] `workflow_runtime.py`（新，866 行）：`WorkflowRuntime` = 注册表 + Event Bus 触发器 + 驱动执行 +
+      运行记录；`agent_type: shell` 处理器走 ToolGateway
+- [x] `threat_workflows.py`：`builtin_workflows()` 把 16 条剧本编译成 `WorkflowDefV2`
+      （命令式步骤 `shell`、散文式步骤 `trm-agent`），登记为 `source=builtin`、默认 `enabled: false`
+- [x] `api_server.py`：daemon startup 建运行时 + `start()`；`GET /api/workflows` 与
+      `GET /api/workflows/runs`（只读，不开放执行端点）
+- [x] `cli/commands/workflow.py`：`list --all` / `run [--input --event --payload --timeout --dry-run]` /
+      `enable`（内置剧本落盘成用户自己的文件）
+- [x] 测试：`tests/test_workflow_runtime.py`（55 例）+ `tests/test_api_server_startup.py`（+2 例）
+- [x] 文档：`ARCH.md`（新章节）、`docs/WORKFLOW-EXECUTION-PLAN.md`、`docs/OPERATIONS.md`、`TODO.md`
+
+### 语义与红线（细节见 ARCH）
+
+- **step 之间不串行等待**：每个 step 各自常驻监听；要串行就把任务放进同一个 `execute` 组。
+- **同一 step 已在跑 → 跳过**（`event.workflow.skipped`，`reason=already_running`）；另有事件环路熔断：
+  同一 workflow 每 10s 最多自动跑 20 次，超限发 `event.workflow.throttled`（`run_now` 不受限）。
+  `workflow.finished` 在运行仍算「在跑」时发出，因此「监听自己 finished」的 workflow 不会自我续命。
+- **空触发器 = 只能手动跑**；触发器匹配：精确 → 去命名空间前缀（`event.` / `task.`）→ `fnmatch` 通配。
+- **一律走 ToolGateway**：策略 / 风险 / SecurityRule / 审计 / 脱敏 / 行为基线照常，流量标记
+  `SourceType.WORKFLOW`；工作流不持有任何执行旁路。
+- **失败不伪装**：拒绝 / 非零退出 / 缺 `instruction` → 节点 FAILED、workflow failed。
+- **内置剧本默认不自动触发**：剧本里有 `kill` / `firewall-cmd`，自动跑等于删掉确认环节。
+- **事件是广播的，但命令只对点名的那份负责**：一次事件可能顺带触发同 root 下别的 workflow；
+  `trm workflow run <id> --event ...` 的退出码只看 `<id>` 自己的运行，其余的进 `other_triggered`
+  如实汇报。若事件来了却唯独没命中点名的那份 → 退出码 1 并说明「触发到的其实是哪些」。
+  （验收时发现：旧实现拿**所有**被触发的运行算退出码，别人的失败会算到本条命令头上。）
+
+### 验证
+
+- 本地全量：**1156 passed / 5 failed / 7 skipped**（W1 前 1099 / 5 / 7；+57 = 本轮新用例，
+  5 项失败与 W1 前同名同数，无回归）。
+- 冒烟（本机 Windows）：
+  - `trm workflow list --all` → 18 条（2 文件 + 16 内置），内置全部 `disabled`；
+  - `trm workflow run demo --root tmp/w1root --dry-run` → 只打印节点，不执行；
+  - `trm workflow run demo --root tmp/w1root` → 两个 shell 节点 `completed`，
+    审计里有 `gateway.audit ... agent_id=trm-workflow tool=shell`；
+  - `trm workflow run demo --root tmp/w1root --event security.monitor_result --payload {...}`
+    → `triggered_by=event`，条件命中并执行；
+  - `--event nope.event --timeout 1` → 退出码 1，提示「no run triggered ... (this workflow listens for: ...)」；
+  - 同一 root 下两份 workflow 听同一事件 → 点名的跑成即退出码 0，另一份进 `other_triggered`；
+    点名的那份没被触发而别的被触发 → 退出码 1 并列出「触发到的其实是哪些」；
+  - `trm workflow run threat-cron-audit --dry-run` → 4 步（2 命令 + 2 散文）。
+
+### W1 遗留
+
+- **`WorkflowListener` 仍未接线**：Transform TARL 三段式那条链没有实例化；它的 `workflow.trigger`
+  事件已能被运行时消费（workflow 写 `trigger.event_type: workflow.trigger` 即可）。
+- 运行记录只在内存（环形 200 条），进程重启即丢；`trm workflow status/log` 仍是桩。
+- 内置剧本的启用开关只有 `trm workflow enable <id>`（落盘法），没有「原地开关」。
+- daemon 只暴露只读端点；`POST /api/workflows/{id}/trigger` 这类执行入口**故意没开**（避免无鉴权执行面）。
+- 散文式步骤需要装了 Agent 脚本的 driver 才能真正跑（`trm-agent`），否则节点明确失败。

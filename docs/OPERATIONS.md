@@ -199,6 +199,9 @@ trm workflow import ./my-workflows --dry-run
 trm workflow import docker-cleanup.yaml --yes   # → ~/.trimum/workflows/<id>/workflow.yaml
 trm workflow list
 
+trm workflow run <id> --dry-run   # W1：只打印编译出的节点，不执行
+trm workflow run <id>             # W1：真跑（详情见上一节「Workflow 执行」）
+
 trm skill import ./skills --dry-run
 trm skill import git@github.com:me/skills.git --yes   # → ~/.trimum/skills/
 trm skill list
@@ -224,6 +227,71 @@ trm skill list
 |---|---|---|
 | `trm tool import-cli <cli>` 永久卡住 | Windows 上 `subprocess.run(capture_output=True)` 超时后会**无超时地**再 `communicate()` 一次，而被探测 CLI 留下的后台孙进程仍持有管道写句柄 → 永不 EOF | 探测输出改走临时文件（`cli_adapter.default_runner`），`stdin=DEVNULL` 防分页器等输入 |
 | 导入成功但 `list` 里没有 | 某个默认根写死了 `Path.home()/".trimum"`，绕开了 `TRIMUM_HOME` | 三处（`tool_file_loader` / `WorkflowDefV2.load_from_dir` / `skill_sync.default_source_roots`）统一走 `paths.trimum_path(...)` |
+
+## Workflow 执行（`trm workflow`，W1）
+
+workflow 的格式是「**触发器 + 执行组**」：`steps[].trigger` 说「听什么事件」，
+`steps[].execute[]` 说「听到之后跑什么」。
+
+```yaml
+# ~/.trimum/workflows/restart-blog/workflow.yaml
+id: restart-blog
+name: 重启博客
+steps:
+  - trigger:
+      event_type: workflow.request                      # 人话写事件类型，带不带 event./task. 前缀都能命中
+      condition: 'payload.get("action") == "restart"'   # 受限 eval：只有 payload / event / true / false
+    execute:
+      - agent_type: shell                               # 本地命令 → 经 ToolGateway
+        instruction: ssh root@server "systemctl restart blog"
+        timeout_seconds: 30
+      - agent_type: trm-agent                           # 需要判断的活 → 子 Agent（要 driver）
+        instruction: 看 health endpoint 是否恢复
+config:
+  enabled: true
+```
+
+```bash
+trm workflow list                 # 看有哪些（文件目录里的）
+trm workflow list --all           # 连内置威胁剧本一起看（内置默认 disabled）
+trm workflow run <id> --dry-run   # 只打印编译出来的节点，不执行
+trm workflow run <id>             # 立刻跑（所有 step 的 execute 组按顺序）
+trm workflow run <id> --event workflow.request --payload '{"action":"restart"}'
+                                   # 发一条事件，等它自己触发（30s 超时，--timeout 调）
+trm workflow enable threat-cron-audit --yes
+                                   # 内置剧本落盘成自己的 workflow（落盘 = 显式启用）
+```
+
+要点（语义细节见 `ARCH.md`「Workflow 执行语义（W1）」）：
+
+- **谁在跑**：daemon 启动时会建一个 `WorkflowRuntime`，订阅 Event Bus 全部事件，按每个 workflow 的
+  `steps[].trigger` 命中后驱动 `WorkflowEngine` 执行。`trm workflow run` 是同一个运行时的一次性用法。
+- **step 之间不互相等待**：每个 step 各自常驻监听；要串行就把任务写进同一个 `execute` 组。
+- **同一个 step 已经在跑时再次触发会被跳过**（`event.workflow.skipped`，`reason=already_running`）——
+  防事件风暴 / 自我触发滚成死循环；另有熔断：事件驱动下同一 workflow 每 10 秒最多自动跑 20 次，
+  超限发 `event.workflow.throttled` 并跳过（手动 `run` 不受限）。
+- **没写 `event_type` 的 step 只能手动跑**。
+- **事件是广播的，但命令只对点名的那份负责**：`run <id> --event ...` 只按 `<id>` 自己的运行算退出码，
+  同一次事件顺带跑掉的别的 workflow 只进 `other_triggered` 并打印一行
+  `(the same event also triggered: ...)`；若事件来了却唯独没命中 `<id>` → 退出码 1 并告诉你
+  「触发到的其实是哪些」。
+- **命令一律经 ToolGateway**：策略 / 风险分级 / SecurityRule / 审计 / 凭据脱敏全都照常，流量标记
+  `SourceType.WORKFLOW`。工作流没有也不能有绕过网关的执行通道。
+- **失败会说实话**：网关拒绝、命令非零退出、节点缺 `instruction` → 节点 `FAILED`，workflow 终态 `failed`，
+  退出码 1。查在跑什么：`GET /api/workflows/runs`（内存，进程重启即丢）。
+- **内置威胁剧本不自动触发**：`threat_workflows.py` 里 16 条响应手册（`threat-cron-audit` 等）登记为
+  `source=builtin` + `enabled: false`；要它常驻触发就先 `trm workflow enable <id>`。剧本里「比对基线」
+  这类散文步骤编译成 `trm-agent`，**没有 driver / 没装 Agent 脚本时会明确失败**，不会假装成功。
+
+排查：
+
+| 现象 | 真因 | 处置 |
+|---|---|---|
+| `trm workflow run <id>` 报 `No handler for node ...` | 节点 `agent_type` 不是 `shell`（要子 Agent），而 CLI 里没有 driver | 在 daemon 里跑，或给该 agent_type 注册 handler / 装 Agent 脚本 |
+| 事件发了但没触发 | `event_type` 不匹配，或 `condition` 求值为假，或该 workflow `enabled: false` | `trm workflow list --all` 看 trigger / enabled；条件写错会按「不通过」处理（日志里 `workflow_runtime.condition_error`） |
+| `run <id> --event ...` 退 1，但 JSON 里点名那份明明 `completed` | 同 root 下另一份 workflow 也被这条事件触发了（事件是广播的） | 看 `other_triggered`；退出码只认点名的那些（W1 验收 D6 踩过） |
+| `--event` 打出去，别的 workflow 被触发了，点名的没有 | 点名的 `event_type` / `condition` 不满足 | 报错信息里已列出「触发到的其实是哪些」，照着比对 trigger |
+| `--json` 输出前面混了警告行 | 宿主 `~/.trimum/tools/*/main.py` 在 import 时往 stdout 打警告（pymupdf 的 `fitz` 就这样） | 取 JSON 时从第一个 `{` 开始（测试里 `json_output` 就是这么做的） |
 
 ## daemon 托管与重启（systemd）
 

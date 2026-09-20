@@ -77,6 +77,37 @@ class TestStartup:
         assert "/api/security/learning" in paths
 
 
+class TestWorkflowRuntimeWiring:
+    """W1：daemon 起来之后 workflow 运行时必须已经在监听 Event Bus。"""
+
+    @pytest.mark.asyncio
+    async def test_startup_starts_the_workflow_runtime(self, tmp_path):
+        app = create_app(build_config(tmp_path))
+        state = app.state.trimum
+        try:
+            await run_startup(app)
+
+            runtime = state.workflow_runtime
+            assert runtime is not None
+            assert runtime.running is True
+
+            ids = {item["id"] for item in runtime.list_workflows()}
+            assert "threat-cron-audit" in ids
+            # 内置剧本登记但不自动触发（`trm workflow enable` 才落盘启用）
+            assert runtime.get("threat-cron-audit").enabled is False
+
+            await runtime.stop()
+            assert runtime.running is False
+        finally:
+            await teardown(app, state)
+
+    def test_workflow_routes_registered(self, tmp_path):
+        app = create_app(build_config(tmp_path))
+        paths = {route.path for route in app.routes}
+        assert "/api/workflows" in paths
+        assert "/api/workflows/runs" in paths
+
+
 class TestHealthVersion:
     """`/health` 的版本号只能有一处口径（`trimum_core.__version__`）。
 

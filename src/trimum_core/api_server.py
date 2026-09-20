@@ -39,6 +39,7 @@ from .config import Config, ensure_dirs
 from .logger import setup_logging, get_logger
 from .ipc_handler import IpcHandler
 from .workflow_event_driver import WorkflowEventDriver
+from .workflow_runtime import WorkflowRuntime
 
 logger = get_logger("api_server")
 
@@ -93,6 +94,8 @@ class AppState:
         self.socket_server: Optional[stdlib_socket.socket] = None
         self.ipc: Optional[IpcHandler] = None
         self.driver: Optional[WorkflowEventDriver] = None
+        # W1：workflow 常驻运行时（监听 Event Bus → 驱动执行）
+        self.workflow_runtime: Optional[WorkflowRuntime] = None
         self.learning_task: Optional[asyncio.Task] = None
         # MCP 连接池（M4）。在 startup() 里构造而不是这里：池子的空闲回收器
         # 和 cgroup 绑定都要在事件循环里跑，构造点必须和运行点重合。
@@ -531,6 +534,26 @@ def create_app(config: Config) -> FastAPI:
                 logger.warning("workflow_event_driver_startup_failed", error=str(e))
         asyncio.create_task(_delay_start())
 
+        # W1：workflow 常驻运行时。文件目录（E4 导入产物）+ 内置威胁剧本一起注册，
+        # 然后开始监听 Event Bus —— 命中的 workflow 由 WorkflowEngine 执行，
+        # shell 任务走上面那个共享的 ToolGateway（策略 / 审计 / 行为基线都在这条线上）。
+        try:
+            runtime = WorkflowRuntime(
+                event_bus=state.event_bus,
+                gateway=state.tool_gateway,
+                driver=state.driver,
+            )
+            counts = runtime.register_all()
+            await runtime.start()
+            state.workflow_runtime = runtime
+            logger.info(
+                "workflow_runtime_started",
+                file=len(counts["file"]),
+                builtin=len(counts["builtin"]),
+            )
+        except Exception as e:
+            logger.warning("workflow_runtime_start_failed", error=str(e))
+
         logger.info("trimum_core_started", host=config.host, port=config.port)
 
 
@@ -625,6 +648,27 @@ def create_app(config: Config) -> FastAPI:
         return {"success": True, "data": result}
 
 
+    @app.get("/api/workflows")
+    async def workflows(include_disabled: bool = True):
+        """列出常驻运行时里的 workflow（文件 + 内置剧本）。"""
+        runtime = state.workflow_runtime
+        if runtime is None:
+            return {"success": False, "data": [], "message": "workflow runtime not started"}
+        items = runtime.list_workflows(include_disabled=include_disabled)
+        return {"success": True, "data": items, "count": len(items)}
+
+    @app.get("/api/workflows/runs")
+    async def workflow_runs(workflow_id: str = "", limit: int = 20):
+        """最近的 workflow 运行记录（内存环形，进程重启即丢）。"""
+        runtime = state.workflow_runtime
+        if runtime is None:
+            return {"success": False, "data": [], "message": "workflow runtime not started"}
+        runs = [
+            record.to_dict()
+            for record in runtime.runs(workflow_id or None, limit=limit)
+        ]
+        return {"success": True, "data": runs, "count": len(runs)}
+
     @app.on_event("shutdown")
     async def shutdown():
         """Clean up on shutdown."""
@@ -636,6 +680,8 @@ def create_app(config: Config) -> FastAPI:
         if state.mcp_pool is not None:
             # 池子先停回收器，再逐个关掉 server 子进程
             await state.mcp_pool.close_all()
+        if state.workflow_runtime:
+            await state.workflow_runtime.stop()
         if state.driver:
             await state.driver.stop()
         if state.ipc:

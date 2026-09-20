@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # ─── 威胁工作流结构 ───────────────────────────────
@@ -227,3 +228,100 @@ def get_workflow_by_name(name: str) -> dict[str, Any] | None:
 def get_workflows_by_trigger(trigger: str) -> list[dict[str, Any]]:
     """按触发事件类型查找工作流列表。"""
     return [wf for wf in THREAT_WORKFLOWS if wf.get("trigger") == trigger]
+
+
+# ─── 剧本 → 可执行 workflow（W1）──────────────────────────────────────────
+#
+# 下面这些剧本此前是「有数据、没接线」的响应手册：谁都没把它们交给引擎。
+# `builtin_workflows()` 把它们编译成 `WorkflowDefV2`，由 `WorkflowRuntime` 注册：
+#
+# - `trigger` / `filter` → step 的触发器（filter 翻译成条件表达式）
+# - 命令式步骤（`crontab -l`）→ `agent_type: shell`，执行经 ToolGateway
+#   （策略 / 风险 / 审计 / 脱敏照常生效）
+# - 散文式步骤（「比对上次 hash 基线」这种要判断的）→ `agent_type: trm-agent`，
+#   交给子 Agent；没有 driver / 没装 Agent 脚本时节点**明确失败**，不装成功
+# - `config.enabled = False`：剧本里有 kill / firewall-cmd，默认不自动触发
+# ─────────────────────────────────────────────────────────────────────────
+
+#: 本地命令步骤（与 workflow_catalog 同值：都是 `agent_type: shell` 这个约定）
+SHELL_AGENT = "shell"
+#: 需要判断的步骤 → 子 Agent
+REVIEW_AGENT = "trm-agent"
+STEP_TIMEOUT_SECONDS = 30.0
+
+_CJK_RE = re.compile(r"[⺀-鿿가-힯＀-￯]")
+_COMMAND_HEAD_RE = re.compile(r"^[A-Za-z0-9_./~$@-]+$")
+
+#: 剧本里这几个词是「动作代称」（写手册时的简写），不是能跑的命令
+PROSE_STEPS = frozenset({"report", "audit"})
+
+
+def is_local_command(step: str) -> bool:
+    """这一步是「能直接跑的本地命令」还是「要判断的散文」？
+
+    判据很土但够用：含中日韩字符 → 散文；首 token 不像命令 → 散文。
+    """
+    text = (step or "").strip()
+    if not text or _CJK_RE.search(text):
+        return False
+    if text.lower() in PROSE_STEPS:
+        return False
+    return bool(_COMMAND_HEAD_RE.match(text.split()[0]))
+
+
+def trigger_condition(entry: dict[str, Any]) -> str:
+    """把 `filter` 翻译成 WorkflowDefV2 的条件表达式。"""
+    filters = entry.get("filter") or {}
+    return " and ".join(
+        "payload.get({!r}) == {!r}".format(key, value)
+        for key, value in sorted(filters.items())
+    )
+
+
+def to_workflow_def_v2(entry: dict[str, Any]) -> Any:
+    """一条威胁响应剧本 → WorkflowDefV2（延迟 import：workflow_engine 较重）。"""
+    from .workflow_engine import (
+        AgentTask,
+        WorkflowDefV2,
+        WorkflowStep,
+        WorkflowStepCondition,
+    )
+
+    name = entry["name"]
+    threat = (entry.get("filter") or {}).get("threat_name", "")
+    tasks = [
+        AgentTask(
+            task_id=f"{name}_step_{index}",
+            agent_type=SHELL_AGENT if is_local_command(step) else REVIEW_AGENT,
+            instruction=step,
+            timeout_seconds=STEP_TIMEOUT_SECONDS,
+        )
+        for index, step in enumerate(entry.get("steps") or [])
+    ]
+    return WorkflowDefV2(
+        id=name,
+        name=name,
+        description=f"内置威胁响应剧本（{threat or '通用'}）：{len(tasks)} 步",
+        steps=[WorkflowStep(
+            trigger=WorkflowStepCondition(
+                event_type=entry.get("trigger", ""),
+                condition=trigger_condition(entry),
+            ),
+            execute=tasks,
+        )],
+        config={
+            "enabled": False,
+            "builtin": True,
+            "threat_name": threat,
+            "source": "threat_workflows",
+            "note": (
+                "内置剧本默认不自动触发：trm workflow run <id> 手动执行，"
+                "或 trm workflow enable <id> 落盘成自己的 workflow 后常驻触发"
+            ),
+        },
+    )
+
+
+def builtin_workflows() -> list[Any]:
+    """全部内置剧本（WorkflowDefV2 列表）。"""
+    return [to_workflow_def_v2(entry) for entry in THREAT_WORKFLOWS]
