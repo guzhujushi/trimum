@@ -53,6 +53,12 @@ ssh guzhujushi@100.115.86.48 'sudo bash /tmp/sync_opt_tree.sh --fix-home'  # 顺
   同步后自己执行 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`。
 - `config/mcp-catalog.yaml` 的默认路径按包位置解析（`REPO_ROOT/config/`），部署树对应
   `/opt/trimum/config/mcp-catalog.yaml`，所以 `config/` 必须一起同步。
+- 同步源顺序：**默认优先 `/tmp/trimum-sync.tar`**（`git archive` 全量、权威），只有 tar 不存在或显式
+  `--from-home` 时才用开发树。原因：`/home/guzhujushi/trimum/src` 是 root 属主，`tar -xf` 建不出
+  `src/agent-sdk`，拿开发树当源会把缺件一路带到 `/opt`（2026-09-20 实际踩到）。
+- `--fix-home` 修完属主后，会把源里的 `src/` 补写回开发树（补上 `src/agent-sdk`）。
+- 一并同步的顶层文件：`AGENTS/ARCH/PRD/STATUS/TODO.md`、`pyproject.toml`、`docs/OPERATIONS.md`。
+  其中 `pyproject.toml` 曾漂移成旧版（缺 `cryptography>=42` 声明），元数据与 venv 不一致。
 
 ## sudo 脚本规范
 - 需要 sudo 的操作写成可执行脚本。
