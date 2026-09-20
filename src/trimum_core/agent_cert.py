@@ -112,6 +112,15 @@ def _get_machine_id() -> str:
     return _MACHINE_ID_CACHE
 
 
+def machine_id() -> str:
+    """Public accessor for the cached machine fingerprint.
+
+    Exposed so the identity module can bind a self-signed certificate to this
+    machine without reaching into a private helper.
+    """
+    return _get_machine_id()
+
+
 # ---------------------------------------------------------------------------
 # 证书文件 IO
 # ---------------------------------------------------------------------------
@@ -345,6 +354,7 @@ __all__ = [
     "AgentCert",
     "verify_cert",
     "create_self_signed_cert",
+    "machine_id",
     "check_agent_trust",
     "confirm_and_trust",
     "ConfirmEntry",
