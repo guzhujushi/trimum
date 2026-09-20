@@ -289,6 +289,7 @@ trm config set <key> <value>       # 设置配置项
 | **Phase 3 收尾 P0/P1 清零 + 真机 Ubuntu 验证** | ✅ 已提交并推送四分支（server `3af9e07` / main `26d52f5` / ubuntu `4768820` / arch-linux `b540f36`） |
 | **2026-09-20 文档一致性修订 + CLI-Anything / MCP 调研** | ✅ 新增 `docs/CLI-ANYTHING-RESEARCH.md` / `docs/MCP-INTEGRATION-PLAN.md`；修正 STATUS / TODO / browser 方案口径 |
 | **2026-09-20 生态四层 E1 / E6 / E3** | ✅ E1 命令面 + Skills 分发；E6 选装模型 + 首启引导（宿主探测 / 身份证书 / 官方 Agent 证书）；E3 环境层 `trm env`（详见 `STATUS.md`、`ARCH.md`） |
+| **2026-09-20 收尾校验 + 下次继续指针** | ✅ 全量测试 687/8/4（与基线逐条一致，无回归）+ `trm commands --check` 58 条 + `trm mcp call` 端到端冒烟 stdout 纯 JSON；TODO 记 M3 输入/输出/红线，STATUS / ARCH 修正过期口径；四分支同步 |
 | **2026-09-20 E2 MCP 接入（M0/M1/M2）** | ✅ stdio 客户端 + 文件化注册（deny-by-default）+ `MCPDispatcher` 实装 + `mcp_call` 审计 + `trm mcp`；73 项新测试 |
 
 ---
@@ -321,3 +322,5 @@ trm config set <key> <value>       # 设置配置项
 | `main` | ✅ 已同步 | E1 `49b2ef4` / E6 `e0e8f0b` / 清理+证书 `2b88561` / E3 `2b4e9b2` / **E2 `8af7d5d`** |
 | `ubuntu` | ✅ 已同步 | E1 `ba3ebe7` / E6 `e335db6` / 清理+证书 `c0885a8` / E3 `a5c6ad5` / **E2 `166841d`** |
 | `arch-linux` | ✅ 已同步 | E1 `1f58b7c` / E6 `417b9cc` / 清理+证书 `18f88c8` / E3 `98c8ccd` / **E2 `c68ce85`** |
+
+> 收尾文档提交（2026-09-20，`docs:` 校验结果 + M3 继续指针）：server `7346ee6` / main `a7cd2db` / ubuntu `fbd6b0f` / arch-linux `0b6e1ac`
