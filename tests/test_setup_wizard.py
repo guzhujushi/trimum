@@ -264,6 +264,21 @@ class TestSetupCommand:
         assert data["steps"]["toolchain"]["selected"] == ["python"]
         assert data["state_written"] is False
 
+    def test_skipped_identity_note_keeps_stdout_json_clean(self, sandbox, capsys, monkeypatch):
+        """身份步骤被跳过时只提示、不污染 stdout（真机缺 cryptography 时踩过）。"""
+        monkeypatch.setattr(identity_mod, "crypto_available", lambda: False)
+        monkeypatch.setattr(
+            identity_mod,
+            "generate_identity",
+            lambda **_kwargs: {"status": "skipped", "reason": "cryptography is not installed"},
+        )
+        assert main(["--json", "setup", "--dry-run", "--yes", "--tools", "python"]) == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["steps"]["identity"]["status"] == "skipped"
+        assert "identity step skipped" in captured.err
+        assert "identity step skipped" not in captured.out
+
     def test_skip_removes_steps(self, sandbox, capsys):
         assert main(["setup", "--dry-run", "--yes", "--skip", "identity", "--skip", "toolchain"]) == 0
         out = capsys.readouterr().out

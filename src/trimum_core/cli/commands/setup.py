@@ -9,6 +9,7 @@ installer or a parent agent can drive it without parsing prose.
 from __future__ import annotations
 
 import argparse
+import sys
 
 from .._utils import emit, fail
 from trimum_core.setup_wizard import (
@@ -179,7 +180,7 @@ def handler(args: argparse.Namespace) -> int:
 
     identity = report["steps"].get("identity") or {}
     if identity.get("status") == "skipped":
-        print(f"[i] identity step skipped: {identity.get('reason', '')}")
+        print(f"[i] identity step skipped: {identity.get('reason', '')}", file=sys.stderr)
     return 0
 
 
