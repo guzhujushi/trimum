@@ -16,12 +16,12 @@ import argparse
 import json
 from pathlib import Path
 
-from .._utils import emit, fail, run_async
+from .._utils import emit, fail, load_config, rpc_call, run_async
 
 __command_meta__ = {
     "mcp": {
         "summary": "MCP servers: list, inspect and call",
-        "args": "{list,tools,call,paths}",
+        "args": "{list,tools,call,paths,status,restart}",
         "tags": ["mcp", "ecosystem"],
         "risk": "low",
     },
@@ -54,6 +54,20 @@ __command_meta__ = {
         "args": "",
         "tags": ["mcp"],
         "risk": "low",
+    },
+    "mcp status": {
+        "summary": "Show which MCP servers are running (daemon pool, else local)",
+        "args": "[--dir PATH]",
+        "examples": ["trm mcp status", "trm --json mcp status"],
+        "tags": ["mcp"],
+        "risk": "low",
+    },
+    "mcp restart": {
+        "summary": "Restart one MCP server without touching the others",
+        "args": "<server> [--dir PATH]",
+        "examples": ["trm mcp restart filesystem"],
+        "tags": ["mcp"],
+        "risk": "medium",
     },
     "mcp catalog": {
         "summary": "Curated MCP candidate list (import from a README snapshot)",
@@ -110,6 +124,15 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     paths_parser = nested.add_parser("paths", help="show where definitions are read from")
     paths_parser.add_argument("--dir", default="", metavar="PATH", help="read definitions elsewhere")
     paths_parser.set_defaults(handler=handler)
+
+    status_parser = nested.add_parser("status", help="show which servers are running")
+    status_parser.add_argument("--dir", default="", metavar="PATH", help="read definitions elsewhere")
+    status_parser.set_defaults(handler=handler)
+
+    restart_parser = nested.add_parser("restart", help="restart one server (stop + start)")
+    restart_parser.add_argument("server", metavar="SERVER", help="server name (the definition's file name)")
+    restart_parser.add_argument("--dir", default="", metavar="PATH", help="read definitions elsewhere")
+    restart_parser.set_defaults(handler=handler)
 
     catalog_parser = nested.add_parser(
         "catalog", help="curated candidate list (import / review)"
@@ -168,7 +191,7 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
 
 def _show_help(args: argparse.Namespace) -> int:
     del args
-    print("usage: trm mcp {list,tools,call,paths} ...")
+    print("usage: trm mcp {list,tools,call,paths,status,restart} ...")
     return 0
 
 
@@ -260,6 +283,45 @@ def _human_paths(data: dict) -> None:
     print(f"definitions : {data['directory']}" + ("" if data["exists"] else "  (missing)"))
     print(f"override    : export {data['config_env']}=/path/to/dir")
     print(f"servers     : {data['count']} configured, {len(data['enabled'])} enabled")
+
+
+def _status_payload(source: str, servers: list[dict]) -> dict:
+    """Wrap pool rows with where they came from and how many are live."""
+    return {
+        "source": source,
+        "servers": servers,
+        "running": sum(1 for row in servers if row.get("connected")),
+    }
+
+
+def _human_status(data: dict) -> None:
+    rows = data.get("servers", [])
+    print(f"source: {data.get('source', '?')}  {data.get('running', 0)}/{len(rows)} running")
+    if not rows:
+        print("no MCP server configured (deny-by-default; drop a <name>.json5 there)")
+    for row in rows:
+        if row.get("connected"):
+            state = "running"
+        elif row.get("enabled"):
+            state = "enabled"
+        else:
+            state = "disabled"
+        extras = [str(row.get("transport", ""))]
+        if row.get("url"):
+            extras.append(str(row["url"]))
+        if row.get("pid"):
+            extras.append(f"pid={row['pid']}")
+        if row.get("idle_seconds") is not None:
+            extras.append(f"idle={row['idle_seconds']}s")
+        if row.get("cgroup"):
+            extras.append(f"cgroup={row['cgroup']}")
+        print(f"  {row['server']:<16}{state:<9}{' '.join(extras)}")
+
+
+def _human_restart(data: dict) -> None:
+    print(f"restarted: {data['server']}")
+    if data.get("source") == "cli":
+        print("  (no daemon running: started to verify, then closed again)")
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +512,82 @@ def _catalog_dispatch(args: argparse.Namespace) -> int:
     return _catalog_help(args)
 
 
+def _daemon_config(args: argparse.Namespace):
+    """Config for reaching the daemon — same `--config` the rest of the CLI uses.
+
+    回归：这里一度写死 `Config()`，于是 `trm --config X mcp status` 问的是默认
+    socket 上的**另一个** daemon（或干脆问不到），静默退回本地一次性路径。
+    """
+    return load_config(args)
+
+
+async def _pool_status_local(args: argparse.Namespace) -> list[dict]:
+    """Read the local pool's status in one event loop, then shut it down."""
+    dispatcher = _dispatcher(args)
+    try:
+        return await dispatcher.pool_status()
+    finally:
+        await dispatcher.close()
+
+
+async def _restart_local(args: argparse.Namespace, server: str) -> dict:
+    """Restart without a daemon: stop/start once, then close everything.
+
+    Nothing is resident in a one-shot CLI process, so the honest equivalent of
+    `restart` is "prove this definition still starts" — the server is brought
+    up, checked, and closed again on the way out.
+    """
+    dispatcher = _dispatcher(args)
+    try:
+        await dispatcher.restart_server(server)
+    except Exception as exc:
+        return {"success": False, "server": server, "source": "cli", "error": str(exc)}
+    finally:
+        await dispatcher.close()
+    return {"success": True, "server": server, "source": "cli"}
+
+
+def _status_command(args: argparse.Namespace) -> int:
+    """`trm mcp status` — what is running, how long idle, whether it is bound.
+
+    With a daemon up the answer comes from its shared pool (that is where the
+    servers actually live, with their idle reaper and cgroup binding).
+    Otherwise the definitions are read locally.  Neither path starts a server,
+    so this is safe to run at any time.
+    """
+    directory = (getattr(args, "dir", "") or "").strip()
+    if not directory:
+        servers = rpc_call(_daemon_config(args), "mcp.status")
+        if servers is not None:
+            emit(args, _status_payload("daemon", servers), _human_status)
+            return 0
+
+    servers = run_async(_pool_status_local(args))
+    emit(args, _status_payload("cli", servers), _human_status)
+    return 0
+
+
+def _restart_command(args: argparse.Namespace) -> int:
+    """`trm mcp restart <server>` — stop and start one server, nothing else."""
+    server = (getattr(args, "server", "") or "").strip()
+    if not server:
+        return fail("server name is required: trm mcp restart <server>")
+
+    directory = (getattr(args, "dir", "") or "").strip()
+    result = None
+    if not directory:
+        answer = rpc_call(_daemon_config(args), "mcp.restart", {"server": server})
+        if isinstance(answer, dict):
+            result = {**answer, "source": "daemon"}
+    if result is None:
+        result = run_async(_restart_local(args, server))
+
+    if not result.get("success"):
+        return fail(result.get("error") or f"could not restart MCP server '{server}'")
+    emit(args, result, _human_restart)
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Handler
 # ---------------------------------------------------------------------------
@@ -462,6 +600,10 @@ def handler(args: argparse.Namespace) -> int:
     command = getattr(args, "mcp_command", None)
     if command == "catalog":
         return _catalog_dispatch(args)
+    if command == "status":
+        return _status_command(args)
+    if command == "restart":
+        return _restart_command(args)
 
     dispatcher = _dispatcher(args)
 

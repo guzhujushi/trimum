@@ -206,6 +206,16 @@ class ResourceController(ABC):
     ) -> None:
         """Apply cgroup v2 constraints to a process."""
 
+    async def assigned_pids(self, agent_id: str) -> list[int]:
+        """PIDs actually constrained for *agent_id* (empty when unknowable).
+
+        ``apply_cgroup`` is deliberately silent about a failure it cannot fix
+        (no permission on ``/sys/fs/cgroup``), so callers that need to *report*
+        the state — ``trm mcp status`` for one — read it back from here instead
+        of assuming the call succeeded.
+        """
+        return []
+
 
 class PsutilController(ResourceController):
     """Best-effort resource controller backed by psutil.
@@ -282,6 +292,19 @@ class PsutilController(ResourceController):
         limits: ResourceLimits,
     ) -> None:
         log.warning("platform not supported")
+
+    async def assigned_pids(self, agent_id: str) -> list[int]:
+        """PIDs listed in the agent's ``cgroup.procs`` (empty when unreadable)."""
+        text = self._read_text(agent_id, "cgroup.procs")
+        if not text:
+            return []
+        pids: list[int] = []
+        for line in text.splitlines():
+            try:
+                pids.append(int(line.strip()))
+            except ValueError:
+                continue
+        return pids
 
     def record_file_write(self, agent_id: str, count: int = 1) -> None:
         """Record file-write events for the one-minute sliding window."""
@@ -489,6 +512,19 @@ class CgroupV2Controller(ResourceController):
                 agent_id,
                 exc_info=True,
             )
+
+    async def assigned_pids(self, agent_id: str) -> list[int]:
+        """PIDs listed in the agent's ``cgroup.procs`` (empty when unreadable)."""
+        text = self._read_text(agent_id, "cgroup.procs")
+        if not text:
+            return []
+        pids: list[int] = []
+        for line in text.splitlines():
+            try:
+                pids.append(int(line.strip()))
+            except ValueError:
+                continue
+        return pids
 
     def record_file_write(self, agent_id: str, count: int = 1) -> None:
         """Record file-write events for the one-minute sliding window."""
