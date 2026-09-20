@@ -31,6 +31,7 @@ from .models import (
     ToolType,
 )
 from .logger import get_logger
+from .mcp_bridge import split_name
 
 logger = get_logger("tool_dispatchers")
 
@@ -735,11 +736,13 @@ class MCPDispatcher:
         *,
         registry: Any = None,
         pool: Any = None,
+        tool_index: Any = None,
         audit_store: Any = None,
         event_bus: Any = None,
     ) -> None:
         self._registry = registry
         self._pool = pool
+        self._tool_index = tool_index
         self.audit_store = audit_store
         self.event_bus = event_bus
         self._audit_tasks: set[asyncio.Task] = set()
@@ -772,6 +775,24 @@ class MCPDispatcher:
 
             self._pool = MCPServerPool(self.registry)
         return self._pool
+
+    @property
+    def tool_index(self) -> Any:
+        """Index of aggregated remote tools, built on first use.
+
+        Lazy for the same reason the pool is: an idle daemon should not touch
+        the cache file until something actually asks for aggregated names.
+        """
+        if self._tool_index is None:
+            from .mcp_bridge import MCPToolIndex
+
+            self._tool_index = MCPToolIndex()
+        return self._tool_index
+
+    def set_tool_index(self, index: Any) -> None:
+        """Adopt a shared index — the daemon hands over the one instance."""
+        if index is not None:
+            self._tool_index = index
 
     def status(self) -> dict[str, Any]:
         """Registry view for ``trm mcp list`` (no server is started)."""
@@ -852,6 +873,9 @@ class MCPDispatcher:
                     "tools": [tool.to_dict() for tool in tools],
                 }
             )
+            # 顺手写下清单：`trm tool list` 读的就是这份缓存，所以「列远端
+            # 工具」不会把已经空闲回收掉的 server 再拉起来。
+            self.tool_index.record(definition, [tool.to_dict() for tool in tools])
 
         failures = [row for row in servers if not row["ok"]]
         if failures and len(failures) == len(servers):
@@ -870,14 +894,16 @@ class MCPDispatcher:
         from .mcp_client import MCPError
 
         args = [str(arg) for arg in request.args if str(arg).strip()]
-        if len(args) < 2:
+        split = self._split_call(args)
+        if split is None:
             return _err(
                 "Usage: mcp.tools.call <server> <tool> [json-arguments] "
-                "(example: mcp.tools.call filesystem read_file '{\"path\": \"/tmp/x\"}')"
+                "(example: mcp.tools.call filesystem read_file '{\"path\": \"/tmp/x\"}') "
+                "- or the aggregated name shown by `trm tool list`: "
+                "mcp.tools.call <server>__<tool> [json-arguments]"
             )
 
-        server_name, tool_name = args[0], args[1]
-        raw_arguments = " ".join(args[2:]).strip()
+        server_name, tool_name, raw_arguments = split
         try:
             arguments = json.loads(raw_arguments) if raw_arguments else {}
         except ValueError as exc:
@@ -964,6 +990,32 @@ class MCPDispatcher:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _split_call(self, args: list[str]) -> tuple[str, str, str] | None:
+        """Parse call arguments into ``(server, tool, json)``; None if unusable.
+
+        Both spellings mean the same thing::
+
+            mcp.tools.call <server> <tool> [json-arguments]
+            mcp.tools.call <server>__<tool> [json-arguments]
+
+        The second is the name ``trm tool list`` shows for aggregated remote
+        tools, so an agent reading that list does not have to split it back
+        apart by hand.
+
+        The only real ambiguity is a server literally named ``a__b``.  Server
+        names may contain ``__``, so the registry gets the casting vote: when
+        ``args[0]`` is a defined server the classic reading wins, otherwise
+        ``args[0]`` is an aggregated name.
+        """
+        if not args:
+            return None
+        parts = split_name(args[0])
+        if parts is not None and self.registry.get(args[0]) is None:
+            return parts[0], parts[1], " ".join(args[1:]).strip()
+        if len(args) < 2:
+            return None
+        return args[0], args[1], " ".join(args[2:]).strip()
 
     def _not_found(self, name: str) -> str:
         known = ", ".join(self.registry.names()) or "(none)"

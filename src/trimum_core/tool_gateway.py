@@ -110,9 +110,12 @@ class ToolRegistry:
     as fallbacks when no file-based manifest is found.
     """
 
-    def __init__(self, tools_path: str | None = None) -> None:
+    def __init__(self, tools_path: str | None = None, *, mcp_index: Any = None) -> None:
         self._tools: dict[str, ToolDefinition] = {}
         self._tool_modules: dict[str, types.ModuleType] = {}
+        # 聚合进来的远端工具（`<server>__<tool>`）→ 来源（server / tool / schema）
+        self._mcp_bindings: dict[str, dict[str, Any]] = {}
+        self._mcp_index = mcp_index
         self._tools_path = tools_path
         self.load_all()
 
@@ -120,6 +123,7 @@ class ToolRegistry:
         """Reload all tool definitions and entry-point modules."""
         self._tools.clear()
         self._tool_modules.clear()
+        self._mcp_bindings.clear()
 
         # 1. File-based tools
         file_count = 0
@@ -144,6 +148,9 @@ class ToolRegistry:
 
         # 3. Built-in fallbacks for tools not registered via file
         self._register_defaults()
+
+        # 4. 聚合的远端工具（`<server>__<tool>`）：读缓存，不启动任何 MCP server
+        self.load_mcp_tools()
 
         return file_count
 
@@ -290,6 +297,9 @@ class ToolRegistry:
     def register(self, tool: ToolDefinition) -> None:
         """Register or replace a tool definition."""
         self._tools[tool.name] = tool
+        # 显式注册的名字就此归本地：撤掉聚合来源，否则下一次刷新会把它当成
+        # 远端工具「收回」（`load_mcp_tools` 只清自己登记过的名字）
+        self._mcp_bindings.pop(tool.name, None)
         logger.debug("tool_registry.registered", tool=tool.name)
 
     def get(self, name: str) -> Optional[ToolDefinition]:
@@ -314,9 +324,62 @@ class ToolRegistry:
         """Remove a tool by name. Returns True if found and removed."""
         if name in self._tools:
             del self._tools[name]
+            self._mcp_bindings.pop(name, None)
             logger.debug("tool_registry.unregistered", tool=name)
             return True
         return False
+
+    # ------------------------------------------------------------------
+    # 远端工具聚合（<server>__<tool>，见 mcp_bridge.py）
+    # ------------------------------------------------------------------
+
+    def load_mcp_tools(self, index: Any = None) -> int:
+        """把 MCP 工具索引里的条目并进这张表，返回登记数量。
+
+        读的是 `MCPToolIndex` 的**缓存**（上一次成功 ``tools/list`` 的结果），
+        所以不需要启动任何 server —— 这正是它能和 M4 的懒启动 / 空闲回收共存
+        的前提。每次都先撤掉旧的聚合条目再重建，server 撤掉的工具不会留成
+        指向空气的僵尸名字。
+
+        名字撞上本地工具时本地工具优先：本地工具是显式注册的，被一个缓存
+        条目盖掉属于事故，而远端工具少一个入口只是少一个入口。
+        """
+        from . import mcp_bridge
+
+        if index is not None:
+            self._mcp_index = index
+        elif self._mcp_index is None:
+            self._mcp_index = mcp_bridge.MCPToolIndex()
+
+        for name in list(self._mcp_bindings):
+            self._tools.pop(name, None)
+        self._mcp_bindings.clear()
+
+        entries = self._mcp_index.entries()
+        skipped: list[str] = []
+        for name, entry in entries.items():
+            if name in self._tools:
+                # 撞上本地工具的名字：本地工具是显式注册的，让它赢（远端
+                # 工具用不到这个名字只是少一个入口，盖掉本地工具却是事故）
+                skipped.append(name)
+                continue
+            self._tools[name] = mcp_bridge.tool_definition(entry)
+            self._mcp_bindings[name] = entry
+        if entries:
+            logger.debug(
+                "tool_registry.mcp_tools_loaded",
+                count=len(self._mcp_bindings),
+                skipped=len(skipped),
+            )
+        return len(self._mcp_bindings)
+
+    def mcp_binding(self, name: str) -> Optional[dict[str, Any]]:
+        """聚合条目的来源（server / tool / input_schema…）；本地工具返回 None。"""
+        return self._mcp_bindings.get(name)
+
+    def list_mcp_tools(self) -> list[dict[str, Any]]:
+        """所有聚合条目（供 `trm tool list` 标注来源）。"""
+        return [dict(entry) for entry in self._mcp_bindings.values()]
 
 
 # ---------------------------------------------------------------------------
