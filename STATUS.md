@@ -937,7 +937,7 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 
 - 新增 `tests/test_mcp_bridge.py`（**87 项**）：命名 / 指纹（含「密钥不落盘」）/ 缓存读写与损坏容错 /
   `forget` + `prune` / 注册表注册与刷新 / 同名冲突 / 两种调用写法等价 / 审计里的 server + tool /
-  `trm tool list --mcp` 的来源标注 / daemon 接线（含 `prune_mcp_index` 的「读不到目录 ≠ 清空缓存」护栏）。
+  `trm tool list --mcp` 的来源标注 / daemon 接线（含 `prune_mcp_index` 的目录护栏）。
 - 本地全量 `pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider` → **915 passed / 5 failed / 7 skipped**。
   本轮前基线是 825/8/7：新增 87 项，另 **3 项由红转绿** —— `test_depends_on` 1 项 + `test_integration` 2 项
   长期失败的原因正是「往真实 `~/.trimum` 写被沙箱拒绝」，`tests/conftest.py` 的隔离把病根去掉了。
@@ -991,7 +991,10 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
   在 5 秒后把它复活并先绑上 8321，脚本自己起的实例反而失败 —— 日志里只留 `[Errno 98]`，看起来像端口被外人占了。
   判断依据：`ss -ltnp` 里占端口的 PID 其 `fd1`/`fd2` 指向 `/run/systemd/journal/stdout`（日志进 journal，
   不写 `/tmp/trmd.out`）。已给脚本加守卫，并在 `docs/OPERATIONS.md` 新增「daemon 托管与重启（systemd）」。
-- **幽灵缓存已清**（2026-09-20 21:03）：`~/.trimum/mcp-tools.json` 备份到 `/tmp/mcp-tools.json.bak-20260920` 后删除 —— 清后 `trm tool list --mcp` 为 **0 条**、`trm tool list` 总数从 17 回到 **13**（全部为本地工具）。语义问题本身留待定：`prune_mcp_index()` 对「目录读不到」按设计不动作，所以「删掉全部定义」时缓存仍会变成幽灵条目。已记入 `TODO.md`：二选一 = 让「缺目录」也算「一个 server 都没有」，或加一条 `trm mcp index --prune` 手工清理入口。
+- **幽灵缓存已清 + 语义已收口**（2026-09-20 21:03 起）：`~/.trimum/mcp-tools.json` 备份到 `/tmp/mcp-tools.json.bak-20260920` 后删除 —— 清后 `trm tool list --mcp` 为 **0 条**、`trm tool list` 总数从 17 回到 **13**。
+  随后把「二选一」改成了**第三种更精确的解法**：原护栏把「一个 server 都没配」和「不知道有哪些 server」混成了一件事。新增 `mcp_registry.definitions_readable()`：
+  **目录不存在 = 一个都没配**（可清，否则留下幽灵条目）；**目录在但列不出来**（权限 / IO / 指到一个文件）= 不知道（不动缓存，记 `mcp_index.prune_skipped`）。
+  测试：`tests/test_mcp_bridge.py` 87 → **93**（+5 `TestDefinitionsReadable`，旧的「读不到就不清」用例拆成「目录消失 → 清」与「列不出来 → 不清」两条）；本地全量 915 → **921 passed** / 5 failed / 7 skipped（失败名单与基线一致，+6 即新增用例）。
 - **daemon 托管形态改判**（2026-09-20 晚）：`trmd.service` 现为 **`enabled + active`**（`Restart=always` / `RestartSec=5` / `User=guzhujushi`），重启一律 `sudo systemctl restart trmd`。历史：当天曾先选「纯手工 daemon」，但单元被重新拉起后与手工进程互抢 8321（journal `NRestarts` 已到 2150）。`scripts/restart_trmd.sh` 已加守卫；切换工具仍为 `scripts/fix_trmd_loop.sh`。`trm status` 实测 `source: rpc`（socket `/run/user/1000/trimum.sock` 正常）。
 - **开发树 `.venv/bin/trm` 修复**：脚本仍指向已消失的 `trimum_core.main.cli_dispatch`，改成 `trimum_core.cli:main` 后 `trm --version` 与 `trm commands --check`（63 条）正常。部署树 `/opt/trimum/venv/bin/trm` 一直是好的。
 

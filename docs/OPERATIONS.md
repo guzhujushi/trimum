@@ -133,6 +133,11 @@ trm mcp call echo__echo '{"text": "hi"}'  # 与 `trm mcp call echo echo '...'` �
 - 缓存可以随时删（下次列工具会重建）；文件写坏只会被当成「还没有缓存」，不影响任何调用。
 - server 定义删掉后，缓存里的名字会在 daemon **下次启动**时被 `prune` 清掉；在那之前调用它会得到
   `MCP server not found: <server>`（参数已解成 server + tool），不会静默失败。
+- **整个 `~/.trimum/mcp/` 目录被删**也算「定义不存在」：启动时那一轮 `prune` 会把缓存清空
+  （不清的话 `trm tool list` 会列出一批调用必然失败的幽灵工具）；只有目录**存在但列不出来**
+  （权限 / IO）时才按「不知道有哪些 server」处理：不动缓存，并在 journal 里记一条
+  `mcp_index.prune_skipped reason=unreadable`。
+- 手工清缓存：直接 `rm ~/.trimum/mcp-tools.json`（下次成功 `tools/list` 会重建）。
 - 缓存里**不含密钥**（`env` / `headers` 只记键名），可以放心 `cat`。
 - 名字撞上本地工具时**本地工具赢**（远端工具少一个入口，比覆盖本地工具安全）。
 

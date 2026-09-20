@@ -184,11 +184,22 @@ def build_mcp_tool_index() -> Any:
 def prune_mcp_index(index: Any, registry: Any) -> int:
     """把「定义已经不存在」的 server 从缓存里剔掉，返回剔掉的数量。
 
-    目录读不到时什么都不做 —— 那说明「不知道有哪些 server」，而不是「一个
-    server 都没有」；按后者处理会把整份缓存清空。
+    「定义已经不存在」也包括**整个目录被删掉**：那种情况下缓存里每一条都指着
+    不存在的 server，留着只会让 `trm tool list` 列出一批调用必然失败的幽灵
+    工具。只有「目录在、但列不出来」（权限 / IO）才算「不知道有哪些 server」，
+    那时不动缓存 —— 判定见 `mcp_registry.definitions_readable()`。
     """
+    from .mcp_registry import definitions_readable
+
     directory = getattr(registry, "directory", None)
-    if directory is None or not Path(directory).is_dir():
+    if directory is None:
+        return 0
+    if not definitions_readable(directory):
+        logger.info(
+            "mcp_index.prune_skipped",
+            directory=str(directory),
+            reason="unreadable",
+        )
         return 0
     return index.prune(registry.names())
 

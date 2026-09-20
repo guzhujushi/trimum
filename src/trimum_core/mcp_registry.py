@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import re
 import time
 from fnmatch import fnmatch
@@ -79,6 +80,35 @@ def default_mcp_dir() -> Path:
     if override and override.strip():
         return Path(override).expanduser()
     return trimum_path("mcp")
+
+
+def definitions_readable(directory: str | Path) -> bool:
+    """``~/.trimum/mcp/`` 里的定义**列不列得出来**？
+
+    清缓存前必须分清三种情况，它们看起来都是「一个 server 都没有」：
+
+    * 目录存在、列得出来 → ``True``：照 ``names()`` 正常对账；
+    * 目录**不存在** → ``True``：那就是「一个 server 都没配」。缓存里那些
+      ``a__b`` 已经没有定义可指，留着只会变成调用必然失败的幽灵条目；
+    * 目录在、却列不出来（权限 / IO）→ ``False``：「读不到」不等于「没有」，
+      拿空名单去清缓存，等于因为一次 chmod 丢掉整份清单。
+
+    缓存是派生数据、本来可重建，但重建要把每个 server 逐个拉起来列工具
+    （`uvx` / `npx` 冷启动很贵），所以「不知道」时宁可不动作。
+    """
+    try:
+        with os.scandir(directory) as entries:
+            next(entries, None)
+    except FileNotFoundError:
+        return True
+    except OSError as exc:
+        log.debug(
+            "mcp_registry.definitions_unreadable",
+            directory=str(directory),
+            error=str(exc),
+        )
+        return False
+    return True
 
 
 def _strip_json_comments(text: str) -> str:
@@ -675,6 +705,7 @@ def iter_enabled(registry: MCPRegistry) -> Iterable[MCPServerDefinition]:
 
 __all__ = [
     "MCP_DIR_ENV",
+    "definitions_readable",
     "DEFAULT_IDLE_TTL",
     "RISK_LEVELS",
     "NAME_PATTERN",
