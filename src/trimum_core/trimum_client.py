@@ -9,7 +9,8 @@ Usage:
     trimum-client --tcp 18321 health
 
 Environment:
-    TRIMUM_SOCKET   Unix socket path (default: ~/.local/share/trimum/trimum.sock)
+    TRIMUM_SOCKET   Unix socket path (default: $XDG_RUNTIME_DIR/trimum.sock,
+                    else /run/user/<uid>/trimum.sock, else ~/.local/share/...)
     TRIMUM_TCP      TCP port for fallback (default: none)
 """
 
@@ -24,21 +25,39 @@ from pathlib import Path
 from typing import Any
 
 
+def socket_candidates() -> list[Path]:
+    """按优先级列出候选 socket 路径。
+
+    顺序与 daemon 端 `trimum_core.config.default_socket_path()` 保持一致：
+    `XDG_RUNTIME_DIR` → `/run/user/<uid>` → 数据目录。
+    """
+    candidates: list[Path] = []
+
+    xdg = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg:
+        candidates.append(Path(xdg) / "trimum.sock")
+
+    if hasattr(os, "getuid"):
+        candidates.append(Path("/run") / "user" / str(os.getuid()) / "trimum.sock")
+
+    candidates.append(Path.home() / ".local" / "share" / "trimum" / "trimum.sock")
+    return candidates
+
+
 def discover_socket() -> str:
     """Find the trimum socket path from env or default locations."""
     env = os.environ.get("TRIMUM_SOCKET")
     if env:
         return env
 
-    # Linux XDG
-    xdg = os.environ.get("XDG_RUNTIME_DIR")
-    if xdg:
-        candidate = Path(xdg) / "trimum.sock"
+    candidates = socket_candidates()
+    for candidate in candidates:
         if candidate.exists():
             return str(candidate)
 
-    # Default
-    return str(Path.home() / ".local" / "share" / "trimum" / "trimum.sock")
+    # 都不存在时返回优先级最高的候选，报错信息才指得准；原先会退到
+    # 数据目录，与 daemon 实际绑定的 `$XDG_RUNTIME_DIR/trimum.sock` 对不上。
+    return str(candidates[0])
 
 
 class RpcClient:
