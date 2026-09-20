@@ -3,7 +3,7 @@
 > 最后更新：2026-09-20（E1 命令面 / Skills 分发 → E6 选装模型 + 首启引导 → E3 环境层 `trm env`）
 > 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E3**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E2（MCP）/ E4 / E5 / E7 待做
 > 测试：本地 **614 passed / 8 failed / 4 skipped**（8 项为 Windows 沙箱写 `~/.trimum` 被拒 + LLM 断网，与既有基线逐条一致，无回归）；真机 Ubuntu 待开机后补跑
-> 当前工作分支：`server`；E1/E6/清理提交已推送四分支（server `1456aba` / main `2b88561` / ubuntu `c0885a8` / arch-linux `18f88c8`），E3 紧随其后
+> 当前工作分支：`server`；E1/E6/清理/E3 均已推送四分支（E3：server `4331437` / main `2b4e9b2` / ubuntu `a5c6ad5` / arch-linux `98c8ccd`）
 
 ---
 
@@ -313,7 +313,7 @@ trm config set <key> <value>       # 设置配置项
 
 | 分支 | 状态 | 备注 |
 |------|------|------|
-| `server` | ✅ 已同步 | 当前工作分支；E1 `779c0e0` / E6 `ab26edf` / 清理+证书 `1456aba` / E3（本轮，紧随其后） |
-| `main` | ✅ 已同步 | E1 `49b2ef4` / E6 `e0e8f0b` / 清理+证书 `2b88561` / E3（cherry-pick） |
-| `ubuntu` | ✅ 已同步 | E1 `ba3ebe7` / E6 `e335db6` / 清理+证书 `c0885a8` / E3（cherry-pick） |
-| `arch-linux` | ✅ 已同步 | E1 `1f58b7c` / E6 `417b9cc` / 清理+证书 `18f88c8` / E3（cherry-pick） |
+| `server` | ✅ 已同步 | 当前工作分支；E1 `779c0e0` / E6 `ab26edf` / 清理+证书 `1456aba` / **E3 `4331437`** |
+| `main` | ✅ 已同步 | E1 `49b2ef4` / E6 `e0e8f0b` / 清理+证书 `2b88561` / **E3 `2b4e9b2`** |
+| `ubuntu` | ✅ 已同步 | E1 `ba3ebe7` / E6 `e335db6` / 清理+证书 `c0885a8` / **E3 `a5c6ad5`** |
+| `arch-linux` | ✅ 已同步 | E1 `1f58b7c` / E6 `417b9cc` / 清理+证书 `18f88c8` / **E3 `98c8ccd`** |
