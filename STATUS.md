@@ -631,3 +631,75 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - `PRD.md`：新增 E3 已交付；范围边界与验收标准改为「生态轮」口径（不再写「本轮只改文档」）
 - `TODO.md`：E3 勾选（含遗留）、已完成表、测试状态表（614 passed）、分支同步表
 - `docs/ECOSYSTEM-STRATEGY.md`：§4 缺口 1/2/5 标记已完成、§5 路线图标题改 E0-E7 且 E3 标记完成
+---
+
+## 2026-09-20 E2：MCP 接入（M0 设计冻结 + M1 stdio 客户端 + M2 注册/分发/审计）
+
+> 生态四层的 **L1**（`docs/ECOSYSTEM-STRATEGY.md` §3）。此前 `MCPDispatcher` 是占位实现，
+> 固定返回「MCP bridging not yet available」；本轮把它做成真的：**trimum 第一次有了跨进程的生态接入能力**。
+> 方案与阶段划分：`docs/MCP-INTEGRATION-PLAN.md`（§2.3 记 M0 决议）。M3（策展导入器）/ M4（HTTP/SSE + 空闲回收 + cgroup）未做。
+
+### 交付
+
+- [x] `src/trimum_core/mcp_client.py`：stdio MCP 客户端 —— 子进程 + JSON-RPC 2.0 **换行分帧**，
+  `connect` / `initialize` / `list_tools` / `call_tool` / `ping` / `close`；
+  超时 / 非法 JSON / 提前 EOF 一律标记 broken（坏流不复用）；协议版本协商（服务器给旧版本则记录并告警）
+- [x] `src/trimum_core/mcp_registry.py`：`~/.trimum/mcp/<name>.json5` → `MCPServerDefinition`
+  （`TRIMUM_MCP_DIR` 可改目录）；`MCPRegistry` 加载并**上报坏文件为 problems**（不炸）；
+  `MCPServerPool` 懒启动 / 按名复用 / 坏连接重建 / `close_all`
+- [x] `tool_dispatchers.MCPDispatcher` 实装：`mcp.tools.list [server]`（空 = 所有已启用）、
+  `mcp.tools.call <server> <tool> [json-arguments]`；输出 JSON；调用失败/工具报错区分（`status=error` 带结构化详情）
+- [x] `tool_gateway` 回填审计：构造完成后把 `audit_store` / `event_bus` 交给 MCP 分发器（`bind_audit`），
+  其余分发器不受影响
+- [x] `trm mcp list/tools/call/paths`（`cli/commands/mcp.py`）：与网关**共用同一个 dispatcher**，不是第二套实现
+- [x] 测试：`tests/fixtures/mcp_echo_server.py`（真协议 stdio server）+ `tests/test_mcp_client.py`（16）
+  + `tests/test_mcp_registry.py`（27）+ `tests/test_mcp_dispatcher.py`（30）
+
+### M0 决议（摘要，全文见方案 §2.3）
+
+| 问题 | 决议 |
+|---|---|
+| 自研 client vs 复用 openai-agents MCP | **自研最小 client**：stdio 分帧就是「一行一个 JSON-RPC 2.0」，asyncio 足够；引 SDK 会把 Agent SDK 取舍绑进协议层（接口留好，将来只换 transport） |
+| 首批用例 | ① 本机能力接入（uvx 类本地 server）② 远程 SaaS 受控通道（`trust: cloud`）③ 一行文件零代码扩能力 |
+| 传输范围 | M2 只做 stdio；`transport: http` 明确报「M4 未实现」，不假装能用 |
+| 工具聚合进 `ToolRegistry` | 顺延 M3（`ToolRegistry` 是静态 `ToolDefinition` 表，动态工具需要新机制）；M2 由 `mcp.tools.list` 提供运行时枚举 |
+| 安全默认 | deny-by-default（`enabled` 缺省 false）；`allow_tools`/`deny_tools` glob（deny 优先）；`trust: cloud` 额外继承 `*delete*` `*exec*` `*shell*` `*eval*` 等默认黑名单；**参数值不入审计** |
+
+### 本轮修掉的缺陷（测试/实测暴露）
+
+| 缺陷 | 处置 |
+|---|---|
+| **`trm --json` 的 stdout 被日志污染**：`trm --json mcp call ...` 会把 `mcp_registry.loaded` / `mcp.started` / `mcp.audit` 三行打在 JSON 前面（实测确认），任何「库里有 INFO 日志」的命令都会中招 | CLI 入口把 structlog **诊断路由到 stderr**（`logger.setup_cli_logging()`），stdout 只留载荷；实测重跑后 stdout 为纯 JSON |
+| CLI 跑完不关 MCP 服务器：子进程遗留 + Windows 上 `Event loop is closed` 噪声 | CLI 把 `execute` 与 `dispatcher.close()` 放进同一个协程（`_run_once`），实测噪声消失 |
+| `MCPServerPool.client(refresh=True)` 泄漏旧客户端（进程不关） | 改为先丢弃旧连接再建新的（测试 `test_refresh_forces_a_new_client` 覆盖） |
+| 被策略 deny 的 MCP 调用**没有留痕** | deny 路径补 `mcp_call` 审计（`action=denied`、`duration_ms=0`），且断言不会拉起任何服务器 |
+| 测试助手生成的 json5 非法（Python repr 的 `True` / 单引号转义） | 改用 `json.dumps`（JSON 是 JSON5 的子集） |
+
+### 验证
+
+- `python -m pytest tests/test_mcp_client.py tests/test_mcp_registry.py tests/test_mcp_dispatcher.py -q` → **73 passed**
+  （真协议 fixture server，覆盖握手 / 工具列表 / 调用 / isError / 远端错误 / 超时 / 服务器秒退 / 命令缺失 /
+  带外通知 / stderr 落文件 / 注册加载与坏文件 / 白黑名单 / 连接池复用与重建 / 审计 / CLI）
+- 全量：`pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider` → **687 passed / 8 failed / 4 skipped**；
+  8 项与既有基线逐条一致（沙箱写 `~/.trimum` 被拒 + LLM 断网），**无回归**（上一轮 614 passed，+73 为本轮新增）
+- `trm commands --check` → `ok: 58 commands checked, no problems`（新增 `mcp` / `mcp list` / `mcp tools` / `mcp call` / `mcp paths`）
+- 端到端实测（临时 `TRIMUM_MCP_DIR` + 真 fixture server）：`trm mcp list` 显示定义与状态；
+  `trm mcp tools echo` 列出 4 个工具；`trm --json mcp call echo echo '{"text": "x"}' --yes` 输出**纯 JSON**（`text: "echo: x"`）
+
+### 遗留
+
+- [ ] **M3 策展导入器**：`tmp/research/awesome-README.md`（4,117 条）→ `config/mcp-catalog.yaml` 候选清单（人工审核后才启用）；
+  筛选红线仍待执行：优先 `uvx` / `pip install` / 单二进制，`npx` 派系默认不收（Node 回流风险）
+- [ ] **M4 HTTP/SSE 传输 + 空闲回收（`idle_ttl` 已在定义里但未生效）+ cgroup 绑定 + `trm mcp status/restart`**
+- [ ] **真实第三方 server 冒烟未做**：本轮用自建 fixture server 覆盖协议；沙箱内无法 `uvx`/联网，未对发布版
+  `mcp-server-*` 做端到端验证（等能联网的环境）
+- [ ] **工具聚合**（`<server>__<tool>` 注册进 `ToolRegistry`）未做：Agent 目前需先 `mcp.tools.list` 再 `mcp.tools.call`
+- [ ] `trm mcp` 未在 Linux 真机验证（等 Ubuntu 开机）；MCP 服务器进程的 cgroup 归属尚无约束
+
+### 文档同步
+
+- `docs/MCP-INTEGRATION-PLAN.md`：新增 §2.1/2.2/2.3（E2 前后对照、M0 决议），M0/M1/M2 标记完成
+- `ARCH.md`：新增「MCP 接入（E2）」章节（模块表 / 关键设计 / 审计 / CLI 输出契约）
+- `PRD.md`：新增 E2 已交付
+- `TODO.md`：E2 与 M0/M1/M2 勾选、遗留（M3/M4）、测试状态改 687、已完成表与覆盖清单
+- `docs/ECOSYSTEM-STRATEGY.md`：§3 L1、§4 缺口 3、§5 路线图 E2 标记完成

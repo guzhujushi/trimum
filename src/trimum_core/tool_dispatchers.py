@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Optional, Protocol
 
 from .models import (
+    AuditEvent,
     ExecuteRequest,
     ExecuteResponse,
     RiskLevel,
@@ -714,10 +715,324 @@ class NotificationDispatcher:
 
 
 class MCPDispatcher:
-    """Placeholder for MCP protocol bridging."""
+    """MCP tool bridging — ``mcp.tools.list`` / ``mcp.tools.call``.
+
+    Server definitions live in ``~/.trimum/mcp/<name>.json5`` (deny-by-default, see
+    ``mcp_registry.py``) and the protocol lives in ``mcp_client.py``; this class is
+    only the translation layer between trimum's argument convention and MCP:
+
+    * ``mcp.tools.list [server]`` — one named server, or every enabled server;
+    * ``mcp.tools.call <server> <tool> [json-arguments]`` — one tool invocation.
+
+    Output is JSON (agents consume it directly).  Every call emits an ``mcp_call``
+    audit event — server, tool, duration and outcome, never the argument *values* —
+    and is broadcast as ``task.audit.mcp_call`` when an EventBus is bound by
+    :class:`~trimum_core.tool_gateway.ToolGateway`.
+    """
+
+    def __init__(
+        self,
+        *,
+        registry: Any = None,
+        pool: Any = None,
+        audit_store: Any = None,
+        event_bus: Any = None,
+    ) -> None:
+        self._registry = registry
+        self._pool = pool
+        self.audit_store = audit_store
+        self.event_bus = event_bus
+        self._audit_tasks: set[asyncio.Task] = set()
+
+    # ------------------------------------------------------------------
+    # Wiring
+    # ------------------------------------------------------------------
+
+    def bind_audit(self, *, audit_store: Any = None, event_bus: Any = None) -> None:
+        """Attach the audit sinks (ToolGateway calls this once it is built)."""
+        if audit_store is not None:
+            self.audit_store = audit_store
+        if event_bus is not None:
+            self.event_bus = event_bus
+
+    @property
+    def registry(self) -> Any:
+        """Server registry, created on first use (cheap: reads files only)."""
+        if self._registry is None:
+            from .mcp_registry import MCPRegistry
+
+            self._registry = MCPRegistry()
+        return self._registry
+
+    @property
+    def pool(self) -> Any:
+        """Connection pool, created on first use (spawns servers lazily)."""
+        if self._pool is None:
+            from .mcp_registry import MCPServerPool
+
+            self._pool = MCPServerPool(self.registry)
+        return self._pool
+
+    def status(self) -> dict[str, Any]:
+        """Registry view for ``trm mcp list`` (no server is started)."""
+        return self.registry.describe()
+
+    async def close(self) -> None:
+        """Stop every server this dispatcher started."""
+        if self._pool is not None:
+            await self._pool.close_all()
+
+    # ------------------------------------------------------------------
+    # Execution
+    # ------------------------------------------------------------------
 
     async def execute(self, request: ExecuteRequest) -> ExecuteResponse:
-        return _err("MCP bridging not yet available")
+        if request.tool == ToolType.MCP_TOOLS_LIST:
+            return await self._list_tools(request)
+        if request.tool == ToolType.MCP_TOOLS_CALL:
+            return await self._call_tool(request)
+        return _err(f"Unsupported MCP tool: {request.tool}", risk=RiskLevel.LOW)
+
+    async def _list_tools(self, request: ExecuteRequest) -> ExecuteResponse:
+        from .mcp_client import MCPError
+
+        wanted = [str(arg) for arg in request.args if str(arg).strip()]
+        if wanted:
+            definition = self.registry.get(wanted[0])
+            if definition is None:
+                return _err(self._not_found(wanted[0]))
+            if not definition.enabled:
+                return _err(self._disabled(definition))
+            definitions = [definition]
+        else:
+            definitions = self.registry.enabled()
+            if not definitions:
+                return _err(
+                    "No enabled MCP server found in "
+                    f"{self.registry.directory} (deny-by-default: set "
+                    '"enabled": true in <name>.json5)'
+                )
+
+        servers: list[dict[str, Any]] = []
+        for definition in definitions:
+            try:
+                client = await self.pool.client(definition.name)
+                tools = await client.list_tools()
+            except MCPError as exc:
+                servers.append(
+                    {"server": definition.name, "ok": False, "error": str(exc), "tools": []}
+                )
+                continue
+            servers.append(
+                {
+                    "server": definition.name,
+                    "ok": True,
+                    "trust": definition.trust,
+                    "risk": definition.risk,
+                    "count": len(tools),
+                    "tools": [tool.to_dict() for tool in tools],
+                }
+            )
+
+        failures = [row for row in servers if not row["ok"]]
+        if failures and len(failures) == len(servers):
+            return _err(
+                "MCP tools/list failed: "
+                + "; ".join(f"{row['server']}: {row['error']}" for row in failures)
+            )
+
+        output = json.dumps({"servers": servers}, ensure_ascii=False, indent=2)
+        return _ok(
+            output,
+            risk=RiskLevel.MEDIUM if failures else RiskLevel.LOW,
+        )
+
+    async def _call_tool(self, request: ExecuteRequest) -> ExecuteResponse:
+        from .mcp_client import MCPError
+
+        args = [str(arg) for arg in request.args if str(arg).strip()]
+        if len(args) < 2:
+            return _err(
+                "Usage: mcp.tools.call <server> <tool> [json-arguments] "
+                "(example: mcp.tools.call filesystem read_file '{\"path\": \"/tmp/x\"}')"
+            )
+
+        server_name, tool_name = args[0], args[1]
+        raw_arguments = " ".join(args[2:]).strip()
+        try:
+            arguments = json.loads(raw_arguments) if raw_arguments else {}
+        except ValueError as exc:
+            return _err(f"MCP tool arguments must be a JSON object: {exc}")
+        if not isinstance(arguments, dict):
+            return _err("MCP tool arguments must be a JSON object")
+
+        definition = self.registry.get(server_name)
+        if definition is None:
+            return _err(self._not_found(server_name))
+        if not definition.enabled:
+            return _err(self._disabled(definition))
+        if not definition.allows_tool(tool_name):
+            patterns = ", ".join(definition.deny_patterns()) or "(allow_tools list)"
+            reason = (
+                f"MCP tool '{tool_name}' is denied for server '{definition.name}' "
+                f"(allow_tools/deny_tools; deny patterns: {patterns})"
+            )
+            # 被策略拦下的调用也要留痕（它压根没触达服务器，duration 为 0）
+            self._record_audit(
+                request,
+                definition,
+                tool=tool_name,
+                ok=False,
+                is_error=False,
+                duration_ms=0,
+                error=reason,
+                action="denied",
+            )
+            return _err(reason)
+
+        started = time.monotonic()
+        try:
+            client = await self.pool.client(definition.name)
+            result = await client.call_tool(tool_name, arguments, timeout=definition.timeout)
+        except MCPError as exc:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            self._record_audit(
+                request,
+                definition,
+                tool=tool_name,
+                ok=False,
+                is_error=False,
+                duration_ms=duration_ms,
+                error=str(exc),
+                action="denied",
+            )
+            return _err(
+                f"MCP call failed (TRM-4007): {exc}",
+                risk=RiskLevel(definition.risk),
+            )
+
+        payload = {
+            **result.to_dict(),
+            "trust": definition.trust,
+            "transport": definition.transport,
+        }
+        self._record_audit(
+            request,
+            definition,
+            tool=tool_name,
+            ok=not result.is_error,
+            is_error=result.is_error,
+            duration_ms=result.duration_ms,
+            error=result.text[:300] if result.is_error else "",
+            action="allowed",
+            argument_keys=sorted(arguments),
+        )
+
+        output = json.dumps(payload, ensure_ascii=False, indent=2)
+        if result.is_error:
+            return ExecuteResponse(
+                execution_id=uuid.uuid4().hex[:12],
+                status="error",
+                output=output,
+                error=result.text[:400] or "MCP tool reported an error",
+                exit_code=1,
+                risk=RiskLevel(definition.risk),
+                action=Action.AUTO,
+                reason=f"MCP tool '{tool_name}' returned isError",
+            )
+        return _ok(output, risk=RiskLevel(definition.risk))
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _not_found(self, name: str) -> str:
+        known = ", ".join(self.registry.names()) or "(none)"
+        return (
+            f"MCP server not found: {name or '(empty)'} "
+            f"(looked in {self.registry.directory}; known: {known})"
+        )
+
+    @staticmethod
+    def _disabled(definition: Any) -> str:
+        return (
+            f"MCP server '{definition.name}' is disabled "
+            f"(set enabled: true in {definition.path or 'its definition file'})"
+        )
+
+    def _record_audit(
+        self,
+        request: ExecuteRequest,
+        definition: Any,
+        *,
+        tool: str,
+        ok: bool,
+        is_error: bool,
+        duration_ms: int,
+        error: str = "",
+        action: str = "allowed",
+        argument_keys: list[str] | None = None,
+    ) -> None:
+        """Append an ``mcp_call`` audit event and broadcast it (never raises)."""
+        event = AuditEvent(
+            event_id=uuid.uuid4().hex[:12],
+            event_type="mcp_call",
+            agent_id=request.agent_id or "unknown",
+            agent_name=request.agent_manifest.name if request.agent_manifest else "unknown",
+            tool=ToolType.MCP_TOOLS_CALL.value,
+            command=f"{definition.name}.{tool}"[:500],
+            risk=str(definition.risk),
+            action=action,
+            reason=error,
+            details={
+                "server": definition.name,
+                "tool": tool,
+                "transport": definition.transport,
+                "trust": definition.trust,
+                "duration_ms": duration_ms,
+                "ok": ok,
+                "is_error": is_error,
+                "argument_keys": argument_keys or [],
+                "path": definition.path,
+            },
+            timestamp=time.time(),
+            source_type=getattr(request.source_type, "value", str(request.source_type)),
+        )
+
+        logger.info(
+            "mcp.audit",
+            server=definition.name,
+            tool=tool,
+            risk=definition.risk,
+            action=action,
+            duration_ms=duration_ms,
+            ok=ok,
+        )
+
+        if self.audit_store is not None:
+            self.audit_store.append(event)
+
+        if self.event_bus is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # pragma: no cover - sync caller
+            return
+        try:
+            task = loop.create_task(
+                self.event_bus.emit_task(
+                    "audit.mcp_call",
+                    payload=event.model_dump(),
+                    source="mcp",
+                    severity="warning" if not ok else "info",
+                )
+            )
+        except RuntimeError:  # pragma: no cover - loop already closing
+            return
+        self._audit_tasks.add(task)
+        task.add_done_callback(self._audit_tasks.discard)
+
+
 
 
 class CustomDispatcher:
