@@ -28,7 +28,7 @@ for arg in "$@"; do
         --fix-home) FIX_HOME=1 ;;
         --dry-run) DRY_RUN=1 ;;
         --from-home) FROM_HOME=1 ;;
-        -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
