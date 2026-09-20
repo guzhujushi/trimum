@@ -1,8 +1,12 @@
-"""`trm skill` command group — list and distribute Agent Skills.
+"""`trm skill` command group — list / sync / paths / import.
 
 Two layers are visible here and deliberately kept apart: Agent Skills
 (``SKILL.md``) are distributed into other harnesses' skill roots, while
 trimum's own executable skills (``skill.yaml``) are only reported.
+
+``import`` is the E4 on-ramp (``docs/E4-PLAN.md``): fetch a skill from a local
+directory or a git repo into ``<TRIMUM_HOME>/skills``.  Importing only reads and
+copies text — nothing inside a skill is ever executed here.
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .._ask import ask_confirm
 from .._utils import emit, fail
 from trimum_core.skill_sync import (
     LINK_MODES,
@@ -50,6 +55,17 @@ __command_meta__ = {
         "args": "[--create] [--all-hosts]",
         "tags": ["skills"],
         "risk": "low",
+    },
+    "skill import": {
+        "summary": "Import Agent Skills from a local directory or a git repo",
+        "args": "<path|git-url> [--root DIR] [--trust T] [--dry-run] [--yes] [--force]",
+        "examples": [
+            "trm skill import ./skills --dry-run",
+            "trm skill import git@github.com:me/skills.git --yes",
+        ],
+        "tags": ["skills", "ecosystem"],
+        "risk": "medium",
+        "since": "0.6.0",
     },
 }
 
@@ -103,6 +119,24 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     )
     sync_parser.set_defaults(handler=handler)
 
+    import_parser = nested.add_parser(
+        "import",
+        help="copy Agent Skills from a local directory or git repo into the skill root",
+    )
+    import_parser.add_argument("source", help="skill directory, a directory of them, or a git URL")
+    import_parser.add_argument(
+        "--root", default=None, help="skill root (default <TRIMUM_HOME>/skills)"
+    )
+    import_parser.add_argument(
+        "--trust",
+        default="third-party",
+        choices=["official", "curated", "third-party", "local"],
+    )
+    import_parser.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
+    import_parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    import_parser.add_argument("--force", action="store_true", help="overwrite an existing skill")
+    import_parser.set_defaults(handler=handler)
+
     paths_parser = nested.add_parser("paths", help="show skill source and target roots")
     paths_parser.add_argument(
         "--create", action="store_true", help="create missing target roots"
@@ -122,7 +156,7 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
 
 def _show_help(args: argparse.Namespace) -> int:
     del args
-    print("usage: trm skill {list,sync,paths} ...")
+    print("usage: trm skill {list,sync,paths,import} ...")
     return 0
 
 
@@ -216,9 +250,79 @@ def _human_sync(data: dict) -> None:
     print(f"{prefix}{counts or 'nothing to do'}")
 
 
+def _handle_import(args: argparse.Namespace) -> int:
+    """Import skills: plan (cloning if needed) → validate → confirm → copy."""
+    from trimum_core import skill_import
+
+    try:
+        plan = skill_import.plan_import(
+            args.source, root=args.root, trust=args.trust
+        )
+    except skill_import.SkillImportError as exc:
+        return fail(str(exc))
+
+    try:
+        importable = [item for item in plan["skills"] if not item["problems"]]
+        copied: list[str] = []
+        if not args.dry_run:
+            if not importable:
+                detail = "; ".join(
+                    f"{item.get('name') or item['path']}: {'; '.join(item['problems'])}"
+                    for item in plan["skills"]
+                )
+                return fail(f"nothing importable: {detail}")
+            if not args.yes:
+                question = (
+                    f"import {len(importable)} skill(s) into {plan['root']}"
+                    + (" (overwriting existing)" if args.force else "")
+                    + "?"
+                )
+                if not ask_confirm(question):
+                    return fail("aborted (use --yes for non-interactive runs)")
+            try:
+                copied = skill_import.write_skills(plan, force=args.force)
+            except skill_import.ImportRefused as exc:
+                return fail(str(exc))
+
+        payload = {
+            "dry_run": bool(args.dry_run),
+            "source": plan["source"],
+            "origin": plan["origin"],
+            "root": plan["root"],
+            "skills": plan["skills"],
+            "problems": plan["problems"],
+            "importable": len(importable),
+            "installed": copied,
+        }
+        emit(args, payload, _human_import)
+        return 0
+    finally:
+        skill_import.cleanup(plan)
+
+
+def _human_import(data: dict) -> None:
+    verb = "would import" if data["dry_run"] else "imported"
+    print(f"{verb} {data['source']} ({data['origin']}) -> {data['root']}")
+    for item in data["skills"]:
+        label = item.get("name") or item["path"]
+        if item["problems"]:
+            print(f"  [skip] {label}")
+            for problem in item["problems"]:
+                print(f"         ! {problem}")
+            continue
+        print(f"  [ok]   {label:<24} files={len(item['files'])} kind={item['kind']}")
+        for warning in item["warnings"]:
+            print(f"         - {warning}")
+    for path in data["installed"]:
+        print(f"  wrote {path}")
+
+
 def handler(args: argparse.Namespace) -> int:
     """Execute the requested skill subcommand."""
     command = getattr(args, "skill_command", None)
+
+    if command == "import":
+        return _handle_import(args)
 
     if command == "list":
         emit(args, _collect_list_data(args), _human_list)

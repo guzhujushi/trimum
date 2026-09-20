@@ -85,8 +85,15 @@ class SkillSyncResult:
 
 
 def default_source_roots() -> list[Path]:
-    """Return the skill source roots, most specific first."""
-    roots = [Path.home() / ".trimum" / "skills"]
+    """Return the skill source roots, most specific first.
+
+    The first root is the trimum data root (``<TRIMUM_HOME>/skills``), which is
+    also where :mod:`trimum_core.skill_import` puts imported skills —— two code
+    paths resolving the root differently would mean "imported but invisible".
+    """
+    from .paths import trimum_path
+
+    roots = [trimum_path("skills")]
     override = os.environ.get(SOURCE_ENV)
     if override:
         roots.append(Path(override).expanduser())
