@@ -33,6 +33,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import agent_cert as agent_cert_mod
 from . import hosts as hosts_mod
 from . import identity as identity_mod
 from .paths import ensure_trimum_home, trimum_path
@@ -42,7 +43,7 @@ from .skill_sync import (
     sync_skills,
 )
 
-STEPS = ("hosts", "identity", "toolchain", "skills")
+STEPS = ("hosts", "identity", "official", "toolchain", "skills")
 
 #: Repository-relative catalog; the curated opt-in toolchain lives in-repo so it
 #: is versioned together with the wizard that reads it.
@@ -194,6 +195,31 @@ def _step_identity(*, max_risk: str, dry_run: bool, force: bool) -> dict:
     return identity_mod.generate_identity(max_risk=max_risk, force=force, dry_run=dry_run)
 
 
+def _step_official(*, dry_run: bool) -> dict:
+    """Issue official certificates for trimum's own (bundled) agents.
+
+    Every agent trimum develops is an official agent, so it must not go through
+    the "user confirms an unknown agent" path.  Official certificates carry the
+    ``scope: official`` capability block; user self-signed certificates keep
+    ``scope: local`` and are deliberately *not* overwritten by this step.
+    """
+    bundled = agent_cert_mod.discover_bundled_agents()
+    if dry_run:
+        return {
+            "bundled": bundled,
+            "issued": [],
+            "existing": [],
+            "dry_run": True,
+            "note": "dry-run：未签发官方证书。",
+        }
+    result = agent_cert_mod.ensure_official_certs()
+    result["dry_run"] = False
+    result["note"] = (
+        "官方 Agent 免用户确认（证书 scope=official）；用户自签证书 scope=local 不受影响。"
+    )
+    return result
+
+
 def _step_toolchain(
     *,
     tools: str,
@@ -314,6 +340,8 @@ def run_setup(
         report["steps"]["identity"] = _step_identity(
             max_risk=max_risk, dry_run=dry_run, force=force_identity
         )
+    if "official" in steps:
+        report["steps"]["official"] = _step_official(dry_run=dry_run)
     if "toolchain" in steps:
         report["steps"]["toolchain"] = _step_toolchain(
             tools=tools,

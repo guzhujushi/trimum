@@ -531,3 +531,51 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
   不参与执行判定（属 E5 范畴，接线前不要对外宣称「证书限制工具」已生效）
 - [ ] `trm env inventory` / `trm env install`（E3）仍缺：目录已备好，但「探测已装软件 + 调包管理器装」未实现
 - [ ] `trm setup` 尚未在 Linux 真机上跑过（等 Ubuntu 开机）
+
+---
+
+## 2026-09-20 文档清理（过期 / 重复 / 垃圾）
+
+> 原则：**STATUS.md 保留全部历史**（开发流程有纪念意义），只清除其它过期与重复内容；
+> 删除的正文仍可从 `git log` 取回。
+
+### 已删除（tracked）
+
+| 文件 | 原因 |
+|---|---|
+| `docs/ARCH.md` | 与根 `ARCH.md` 重复，且旧 |
+| `docs/STATUS.md` | 与根 `STATUS.md` 重复，且旧 |
+| `docs/ARCHITECTURE.md` | 旧版整体架构（v5.0，2026-09-01），已被根 `ARCH.md` 取代 |
+| `docs/DEVELOPMENT-ROADMAP.md` | 旧路线图（2026-09-02），已被 `TODO.md` / `STATUS.md` 取代 |
+| `docs/PHASE3-4-PLAN.md` | Phase 3 已收尾，计划过期 |
+| `docs/ECOSYSTEM-COMPARISON.md` | 竞品分析（2026-09-01），已被 `docs/ECOSYSTEM-STRATEGY.md` 取代 |
+| `docs/REFERENCE-PROJECTS.md` / `docs/REFERENCE-AUDIT.md` | 早期参考项目调研与对照审计，结论已落地 |
+| `docs/REUSE-STRATEGY.md` | Phase 2 状况快照，过期 |
+| `docs/PYDANTIC-AI-COMPARISON.md` | 早期对比调研，选型已定 |
+| `docs/DEEPSEEK-ADVICE-REVIEW.md` / `docs/建议_原始.md` | 外部建议审核稿，原始件已无追溯价值 |
+| `docs/TECHNICAL-BOM.md` | 技术选型 BOM，已被 `ARCH.md`「技术选型」+ `pyproject.toml` 取代 |
+| `docs/INTEGRATION-PLAN-BROWSER.md` | CLI-Anything `browser` 方案已被调研否决；有效结论移入 `docs/CLI-ANYTHING-RESEARCH.md` 与 `ARCH.md`「浏览器工具」 |
+
+### 已删除（未跟踪 / 垃圾）
+
+`HANDOFF.md`（含错拼、已过期）、`codex_out_memory.log`、`codex-tasks/browser-tool-debug/` 下的
+`boot.log` / `runtime.log` / `stderr.log` / `stdout.log` / `__pycache__`（保留 `FINDINGS.md` 与 `patched-home/*.py`）。
+
+### 同时修正
+
+- `ARCH.md` 顶部悬空引用（原指向已删除的 `docs/ARCHITECTURE.md` / `docs/ARCH.md`）
+- `PRD.md` 验收标准中的 `docs/INTEGRATION-PLAN-BROWSER.md` 引用改为 `docs/ECOSYSTEM-STRATEGY.md`
+- `pyproject.toml`：`cryptography>=42` 转为正式依赖（身份密钥对与未来签名校验都要用；缺失时的优雅降级与测试保留）
+
+### 追加（同日）：官方 Agent 证书 + 依赖
+
+- [x] **trimum 自己开发的 Agent 全部是官方 Agent** → 一律走官方证书（`cert_type=official` / `issued_by=trimum` /
+  `scope=official`），**免用户确认**；`agent_cert.discover_bundled_agents()` 从 `<repo>/agents` + `/opt/trimum/agents`
+  发现官方 Agent（不含 `~/.trimum/agents`，那里是用户拷入的第三方 Agent），`ensure_official_certs()` 幂等签发
+- [x] `AgentCert` 新增 `capabilities`（`{tools, max_risk, expires_at, scope}`）—— 证书携带「可以动用哪些工具」，
+  旧证书缺字段按空处理（向后兼容，有测试）
+- [x] `trm setup` 步骤变为 `hosts → identity → official → toolchain → skills`；`--skip official` 可跳过
+- [x] `agent_cert` 的 `certs/` `agents/` 目录改走 `paths.trimum_home()`（`TRIMUM_HOME` 可覆盖，默认 `~/.trimum` 不变）
+- [x] `pyproject.toml`：**`cryptography>=42` 转为正式依赖**（身份密钥对 + 未来签名校验都需要；缺失时的优雅降级路径与测试保留）
+- 测试：`tests/test_agent_cert.py` 新增 `TestCapabilities` / `TestOfficialAgents`（11 项），
+  `tests/test_setup_wizard.py` 新增 `TestOfficialStep`（4 项）

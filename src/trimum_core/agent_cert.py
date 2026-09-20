@@ -30,6 +30,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+from .paths import trimum_path
+
 
 class CertificateType(str, Enum):
     OFFICIAL = "official"
@@ -49,11 +51,11 @@ class CertTrustLevel(str, Enum):
 
 
 def _certs_dir() -> Path:
-    return Path.home() / ".trimum" / "certs"
+    return trimum_path("certs")
 
 
 def _agents_dir() -> Path:
-    return Path.home() / ".trimum" / "agents"
+    return trimum_path("agents")
 
 
 def cert_dirs() -> dict[str, Path]:
@@ -135,6 +137,7 @@ class AgentCert:
         issued_by: str = "unknown",
         machine_id: str = "",
         expires_at: Optional[str] = None,
+        capabilities: Optional[dict] = None,
     ) -> None:
         self.agent_name = agent_name
         if isinstance(cert_type, str):
@@ -144,6 +147,9 @@ class AgentCert:
         self.issued_by = issued_by
         self.machine_id = machine_id or ""
         self.expires_at = expires_at
+        #: 「这个身份可以动用哪些工具、风险上限多少」——只收紧内置策略，
+        #: 具体判定在 ToolGateway / security_rule 层（接线见 STATUS.md 遗留项）。
+        self.capabilities = dict(capabilities) if capabilities else {}
 
     @staticmethod
     def compute_fingerprint(path: str) -> str:
@@ -164,6 +170,7 @@ class AgentCert:
             "issued_by": self.issued_by,
             "machine_id": self.machine_id,
             "expires_at": self.expires_at or "",
+            "capabilities": dict(self.capabilities),
         }
 
     @staticmethod
@@ -175,6 +182,7 @@ class AgentCert:
             issued_by=data.get("issued_by", "unknown"),
             machine_id=data.get("machine_id", ""),
             expires_at=data.get("expires_at") or None,
+            capabilities=data.get("capabilities") or {},
         )
 
     def save(self, directory: str | Path) -> None:
@@ -239,6 +247,108 @@ def verify_cert(agent_name: str, cert: Optional[AgentCert]) -> CertTrustLevel:
         return CertTrustLevel.CONFIRM
 
     return CertTrustLevel.CONFIRM
+
+
+# ---------------------------------------------------------------------------
+# 官方 Agent（trimum 自己开发的 Agent 一律走官方证书）
+# ---------------------------------------------------------------------------
+
+#: 官方 Agent 的能力上限：``scope=official`` 表示「随 trimum 发行包分发」，
+#: 它与用户自签证书（``scope=local``）互不覆盖：官方证书回答「这是我们自己的
+#: Agent」，用户证书回答「这台机器上的这个人允许它干什么」。
+OFFICIAL_SCOPE = "official"
+
+
+def default_capabilities(*, scope: str = OFFICIAL_SCOPE) -> dict:
+    """Return the default capability block written into a certificate."""
+    return {
+        "tools": ["*"],
+        "max_risk": "inherit",
+        "expires_at": None,
+        "scope": scope,
+    }
+
+
+def bundled_agent_dirs() -> list[Path]:
+    """Directories that ship trimum's own (official) agents.
+
+    Source checkout (``<repo>/agents``) and the deployed tree
+    (``/opt/trimum/agents``).  ``~/.trimum/agents`` is deliberately excluded:
+    that is where *copied* — possibly third-party — agents live.
+    """
+    return [
+        Path(__file__).resolve().parents[2] / "agents",
+        Path("/opt/trimum/agents"),
+    ]
+
+
+def discover_bundled_agents(dirs: Optional[list[Path]] = None) -> list[str]:
+    """Return the names of the official agents shipped with trimum."""
+    names: list[str] = []
+    for directory in dirs if dirs is not None else bundled_agent_dirs():
+        base = Path(directory)
+        if not base.is_dir():
+            continue
+        for child in sorted(base.iterdir()):
+            if not child.is_dir():
+                continue
+            if any(
+                (child / marker).is_file()
+                for marker in ("agent.json", "manifest.json", "agent.yaml", "manifest.yaml")
+            ):
+                if child.name not in names:
+                    names.append(child.name)
+    return names
+
+
+def issue_official_cert(
+    agent_name: str,
+    *,
+    capabilities: Optional[dict] = None,
+    directory: str | Path | None = None,
+    force: bool = False,
+) -> Optional["AgentCert"]:
+    """Write an ``official`` certificate for a trimum-developed agent.
+
+    Official agents need no user confirmation, so this is what turns a bundled
+    agent into ``CertTrustLevel.TRUSTED``.  Returns the certificate, or ``None``
+    when the certificate already exists and *force* is false.
+    """
+    target = Path(directory) if directory is not None else cert_dirs()["official"]
+    target.mkdir(parents=True, exist_ok=True)
+    if AgentCert.load(agent_name, target) is not None and not force:
+        return None
+
+    cert = AgentCert(
+        agent_name=agent_name,
+        cert_type=CertificateType.OFFICIAL,
+        issued_by="trimum",
+        machine_id="",
+        capabilities=capabilities or default_capabilities(),
+    )
+    cert.save(target)
+    return cert
+
+
+def ensure_official_certs(
+    *,
+    dirs: Optional[list[Path]] = None,
+    force: bool = False,
+) -> dict:
+    """Issue missing official certificates for every bundled agent.
+
+    Read-only discovery plus idempotent issuance — safe to call from the
+    first-run wizard on every start.
+    """
+    bundled = discover_bundled_agents(dirs)
+    issued: list[str] = []
+    existing: list[str] = []
+    for name in bundled:
+        if issue_official_cert(name, force=force) is None:
+            existing.append(name)
+        else:
+            issued.append(name)
+    return {"bundled": bundled, "issued": issued, "existing": existing}
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +465,12 @@ __all__ = [
     "verify_cert",
     "create_self_signed_cert",
     "machine_id",
+    "OFFICIAL_SCOPE",
+    "default_capabilities",
+    "bundled_agent_dirs",
+    "discover_bundled_agents",
+    "issue_official_cert",
+    "ensure_official_certs",
     "check_agent_trust",
     "confirm_and_trust",
     "ConfirmEntry",

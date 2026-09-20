@@ -17,6 +17,7 @@ dependencies = [
     "psutil>=5.9",
     "httpx>=0.27",
     "json5>=0.9",
+    "cryptography>=42",
     "rich>=13.0",
 ]
 

@@ -1,4 +1,4 @@
-"""`trm setup` — first-run wizard: hosts, identity, optional tools, skills.
+"""`trm setup` — first-run wizard: hosts, identity, official certs, tools, skills.
 
 trimum treats the developer toolchain as opt-in (``docs/ECOSYSTEM-STRATEGY.md``
 §7.3): nothing is assumed to be installed, the wizard asks once, and the whole
@@ -19,7 +19,7 @@ from trimum_core.setup_wizard import (
 
 __command_meta__ = {
     "setup": {
-        "summary": "First-run wizard: detect hosts, create identity, pick tools, link skills",
+        "summary": "First-run wizard: detect hosts, create identity, certify official agents, pick tools, link skills",
         "args": (
             "[--dry-run] [--yes] [--tools a,b] [--all-hosts] "
             "[--max-risk inherit|low|medium|high] [--skip STEP] [--catalog PATH]"
@@ -116,6 +116,13 @@ def _human(report: dict) -> None:
                 f"  {'':<12} capabilities tools={caps['tools']} "
                 f"max_risk={caps['max_risk']} scope={caps['scope']}"
             )
+
+    official = report["steps"].get("official")
+    if official:
+        issued = ", ".join(official["issued"]) or "(none)"
+        print(f"  official   : bundled {len(official['bundled'])} agent(s), issued {issued}")
+        if official.get("existing"):
+            print(f"  {'':<12} already certified {', '.join(official['existing'])}")
 
     toolchain = report["steps"].get("toolchain")
     if toolchain:

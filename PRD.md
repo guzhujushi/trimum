@@ -17,7 +17,7 @@ Agent Registry 等能力，并通过 `~/.trimum/tools/<name>/` 的文件化工�
 
 ### 本次任务需求（2026-09-20）
 
-- 对齐文档口径：`STATUS.md` / `TODO.md` / `docs/INTEGRATION-PLAN-BROWSER.md` 与实测实现保持一致。
+- 对齐文档口径：`STATUS.md` / `TODO.md` / `docs/ECOSYSTEM-STRATEGY.md` 与实测实现保持一致。
 - 核实「OpenCLI 弃用 → CLI-Anything 接入」这一 P0 前提是否成立，产出调研结论。
 - 为「引入 MCP 生态（awesome-mcp-servers）」给出可行方案与阶段计划。
 
@@ -30,7 +30,8 @@ Agent Registry 等能力，并通过 `~/.trimum/tools/<name>/` 的文件化工�
 
 - 宿主探测：`trimum_core/hosts.py` —— 14 个已知 agent 宿主，三路证据（环境变量强制 / 配置目录 / PATH 上的 CLI），
   输出「本机装了哪些宿主」，skills 分发目标由它决定（`--all-hosts` 可回到全量模式）。
-- 首启引导 `trm setup`：宿主探测 → 身份证书（Ed25519 密钥对 + 自签身份文档，绑 `machine_id` + user）→
+- 官方 Agent 证书：trimum 自己开发的 Agent 全部按官方 Agent 处理（`cert_type=official`、`scope=official`、`issued_by=trimum`），**免用户确认**；向导 `official` 步骤发现随包分发的 Agent 并幂等签发官方证书，用户自签证书（`scope=local`）不受影响。
+- 首启引导 `trm setup`：宿主探测 → 身份证书（Ed25519 密钥对 + 自签身份文档，绑 `machine_id` + user）→ 官方 Agent 证书 →
   选装工具链（`config/setup-catalog.yaml`，7 组 25 项，**只登记不安装**）→ Agent Skills 分发；
   结果写 `~/.trimum/config/setup.json5`，支持 `--dry-run` / `--yes` / `--tools a,b` / `--skip STEP` / `--max-risk`。
 - 「零预装可跑」已兑现并有测试：一个第三方 agent 都没有时，技能只落 `~/.trimum/agent-skills`；
