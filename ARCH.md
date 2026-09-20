@@ -145,6 +145,7 @@
 
 > 完整方案见 `docs/MCP-INTEGRATION-PLAN.md`。现状核实：`MCPDispatcher`
 > （`src/trimum_core/tool_dispatchers.py:716`）为占位实现，固定返回 `MCP bridging not yet available`。
+> ⚠️ 本节是 E2 立项前的**规划快照**，已被下方「MCP 接入（E2，2026-09-20 已实现：M0/M1/M2）」取代：实际未采用 `mcp_bridge.py`，M2 只做 stdio 传输（HTTP/SSE 顺延 M4）。
 
 - **模块**：`mcp_client.py`（`stdio` / `streamable-http` 传输）、`mcp_registry.py`
   （`~/.trimum/mcp/<name>.json5` 定义 + 懒启动/空闲回收）、`mcp_bridge.py`
