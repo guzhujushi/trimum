@@ -4,14 +4,21 @@
 - 唯一正确拼写：`trimum`，CLI 命令：`trm`。禁止写成 `trinum`。
 
 ## 分支映射
+- `server` = trimum-server —— **日常开发分支**（唯一需要每轮提交/推送的分支）
 - `main` = trimum（主分支）
 - `ubuntu` = trimum-ubuntu
 - `arch-linux` = trimum-arch
-- `server` = trimum-server
 
-## Git 同步纪律
+## Git 分支纪律（2026-09-20 定）
+- **日常开发只提交、只推送 `server`。** `main` / `ubuntu` / `arch-linux` **不随每轮改动走**，
+  不要每个提交都去 cherry-pick 三分支 —— 那是无谓的四倍工作量。
+- **只有收尾阶段**（一个里程碑闭环、要发布或上真机验收时）才做四分支同步：
+  1. 逐提交 `git cherry-pick` 到三个分支（不要无脑 merge，冲突逐个解决）；
+  2. `git diff --name-status <target>..server` 必须为空，`.gitignore`/平台独有文件不被覆盖；
+  3. `git fetch` 复核四个分支与 `origin` 一致，再按 `main` → `ubuntu` → `arch-linux` → `server` 推送；
+  4. 把四列提交号写进 `STATUS.md` 的「提交与分支」表（**那时**才需要四列哈希）。
+- 平时 `STATUS.md` 只记录 `server` 的提交号即可。
 - 同步改动时只提交目标文件，先看 `git diff --name-status <target>..<source>`。
-- 不要无脑 merge；优先 cherry-pick 单个提交，冲突逐个解决。
 - 不覆盖各分支独有文件（deploy/桌面/平台相关配置）。
 - push 前通过代理 `http://127.0.0.1:7993`，使用 `.env` 里的 `GITHUB_TOKEN`。
 
