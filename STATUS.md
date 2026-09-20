@@ -829,5 +829,25 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - smoke 全绿：`health` / `agent list` / `workflow list` / `mcp list` / `version` / `log audit --json`（90 行）/ `exec`（exit=0、输出回显、审计落盘）
 - `/opt/trimum` 也补齐了：`src/agent-sdk/` 到位、`pyproject.toml` 含 `cryptography>=42`、`config/` 5 个 yaml
 
+#### 代码侧加固（2026-09-20，TODO 里 4 条 P1）
+
+| 问题 | 修复 | 回归测试 |
+|---|---|---|
+| 端口被占只抛 uvicorn `[Errno 98] address already in use`（systemd `Restart=always` 下变成每 5s 的崩溃循环） | `main.check_tcp_port()`（connect + bind 双探测）启动前预检；被占则打印「启动中止 —— TCP 127.0.0.1:8321 已被占用」并 `exit 3` | `tests/test_daemon_singleton.py::TestPortPrecheck` |
+| `ipc_handler._start_unix_socket()` 先 `unlink` 再 `bind`，短命进程抢走运行中 daemon 的 socket（RPC 静默降级 HTTP 的根因） | 新增 `ipc_handler.socket_is_live()` 探针（`connect` 成功才算活）：有人在听则 `socket_held_by_other=True` 退让，不 unlink、不 bind；只有无人监听的 stale 文件才清理 | `test_ipc_listener.py::TestSocketTakeoverGuard` |
+| `config.py` 把 socket 写死 `/run/user/1000/trimum.sock`（假设 uid=1000），客户端走 `XDG_RUNTIME_DIR` → 换 uid 两端对不上 | `config.default_socket_path()`：`XDG_RUNTIME_DIR` → `/run/user/<uid>` → 数据目录；`trimum_client.socket_candidates()` 与 daemon 同序，都不存在时返回 runtime dir 候选（不再退到数据目录） | `tests/test_socket_path_consistency.py` |
+| `/health` 版本号自相矛盾：HTTP `0.2.0`（L203）vs IPC `0.2.1`（L122） | `api_server._core_version()` 统一取 `trimum_core.__version__`（0.5.0），HTTP / IPC / FastAPI metadata 三处同源 | `test_api_server_startup.py::TestHealthVersion` |
+| （顺带）`Config.__init__` 只做 `dict(DEFAULT_CONFIG)` 浅拷贝，`set()` / yaml 合并会污染全局默认值，进程内后续 `Config()` 继承别人写的 `socket_path` | 改为 `copy.deepcopy(DEFAULT_CONFIG)` | `test_socket_path_consistency.py::test_config_instance_does_not_pollute_global_defaults` |
+
+真机验证（Ubuntu 100.115.86.48，`/home/guzhujushi/trimum`）：
+
+- **失败清单逐条比对**：回退到修复前（HEAD 版本）`11 failed / 739 passed / 2 skipped`，装回修复后 `11 failed / 755 passed / 2 skipped`，两个方向 `comm` 差异均为空 → 无回归（新增 16 项通过）
+- **端口被占**：`trmd` → `exit=3`、`TCP 127.0.0.1:8321 已被占用（已有服务在监听）`（不再抛 `[Errno 98]`）
+- **socket 被占**：`trmd --port 8322` → `exit=3`、`IPC socket /run/user/1000/trimum.sock 已被其它进程监听`；生产 daemon socket 的 `stat`（inode/mtime/size）前后完全一致 → **没被抢占**，daemon PID 10429 存活，`trm status` 仍 `source: rpc`
+- **独立实例**：`8322 + 独立 socket/db` 正常启停；`/health` 的 HTTP 与 IPC 两条路都返回 `0.5.0`；SIGTERM 退出时清理自己的 socket
+- 提交：server `PENDING` / main `PENDING` / ubuntu `PENDING` / arch-linux `PENDING`
+
+**待用户执行（sudo）**：`sudo bash /tmp/sync_opt_singleton_fix.sh`（把修复补进 `/opt/trimum`，即 daemon 运行树），随后以 guzhujushi 身份跑 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`（不要用 sudo）→ `trm status` 的 `version` 应从 `0.2.1` 变成 `0.5.0`
+
 ### 提交与分支
 - server `209c98e` / main `e0ad16f` / ubuntu `3040b00` / arch-linux `9925c19`（同一提交 cherry-pick）

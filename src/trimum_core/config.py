@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -21,7 +22,33 @@ DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.yaml"
 DEFAULT_POLICY_PATH = DEFAULT_CONFIG_DIR / "policy.yaml"
 DEFAULT_CONTEXT_DB = DEFAULT_DATA_DIR / "context.db"
 DEFAULT_LOG_PATH = DEFAULT_DATA_DIR / "trimum.log"
-DEFAULT_SOCKET_PATH = Path("/run/user/1000/trimum.sock")
+
+
+# IPC socket：跟随 XDG/uid，不再写死 uid=1000
+def default_socket_path(
+    runtime_dir: Optional[str] = None, uid: Optional[int] = None
+) -> Path:
+    """默认 IPC socket 路径。
+
+    优先 `XDG_RUNTIME_DIR`（与客户端 `trimum_client.discover_socket()` 的查找
+    口径一致），否则退回 systemd 用户实例约定的 `/run/user/<uid>`；连 uid 都
+    拿不到（Windows）时退回数据目录。
+
+    原先写死 `/run/user/1000/trimum.sock`（假设 uid=1000），换 uid 就会与
+    客户端对不上。
+    """
+    if runtime_dir is None:
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        return Path(runtime_dir) / "trimum.sock"
+    if uid is None and hasattr(os, "getuid"):
+        uid = os.getuid()
+    if uid is not None:
+        return Path("/run") / "user" / str(uid) / "trimum.sock"
+    return DEFAULT_DATA_DIR / "trimum.sock"
+
+
+DEFAULT_SOCKET_PATH = default_socket_path()
 
 # Windows fallback for development
 WINDOWS_CONFIG_DIR = Path.home() / ".trimum"
@@ -56,7 +83,10 @@ class Config:
     """trimum Core configuration."""
 
     def __init__(self, config_path: Optional[Path] = None):
-        self._raw: dict[str, Any] = dict(DEFAULT_CONFIG)  # shallow copy
+        # 必须深拷贝：浅拷贝下 `_raw["core"]` 与 `DEFAULT_CONFIG["core"]` 是同一个
+        # dict，任何 set()/yaml 合并都会污染全局默认值，导致进程内后续 Config()
+        # 继承别人写的路径（socket_path 尤其致命）。
+        self._raw: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG)
         self.config_path = config_path or DEFAULT_CONFIG_PATH
         self._load_file()
 

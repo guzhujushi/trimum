@@ -75,3 +75,37 @@ class TestStartup:
         paths = {route.path for route in app.routes}
         assert "/api/security/learn" in paths
         assert "/api/security/learning" in paths
+
+
+class TestHealthVersion:
+    """`/health` 的版本号只能有一处口径（`trimum_core.__version__`）。
+
+    回归：IPC 路径写死 "0.2.1"、HTTP 路径写死 "0.2.0"，与包版本 0.5.0 三处
+    各说各话。
+    """
+
+    def test_http_and_ipc_health_report_package_version(self, tmp_path):
+        import trimum_core
+        from fastapi.testclient import TestClient
+
+        from trimum_core.api_server import _register_ipc_routes
+        from trimum_core.ipc_handler import IpcHandler
+
+        app = create_app(build_config(tmp_path))
+        state = app.state.trimum
+
+        # HTTP 路径（不进入 lifespan，就不需要跑整个 startup）
+        response = TestClient(app).get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok", "version": trimum_core.__version__}
+        assert app.version == trimum_core.__version__
+
+        # IPC 路径
+        ipc = IpcHandler(socket_path=str(tmp_path / "trimum.sock"))
+        _register_ipc_routes(ipc, state)
+        handler = ipc.router.get("health")
+        assert handler is not None
+        assert asyncio.run(handler({})) == {
+            "status": "ok",
+            "version": trimum_core.__version__,
+        }

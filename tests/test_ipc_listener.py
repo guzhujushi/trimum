@@ -7,13 +7,14 @@
 
 import asyncio
 import os
+import socket
 import sys
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from trimum_core.ipc_handler import IpcHandler
+from trimum_core.ipc_handler import IpcHandler, socket_is_live
 
 
 class TestIpcListenerSocket:
@@ -54,3 +55,64 @@ class TestIpcListenerSocket:
         await ipc.stop()
 
         assert not os.path.exists(ipc.socket_path)
+
+
+class TestSocketTakeoverGuard:
+    """回归：短命进程不得抢走运行中 daemon 的 unix socket。
+
+    真机故障链（2026-09-20）：`trmd.service`（Restart=always）与手工 daemon
+    抢同一个 socket，每次启动都先 unlink 别人的 socket 再 bind，自己死掉后
+    留下无人监听的 socket 文件 —— 客户端于是静默降级成 HTTP
+    （`trm status` 显示 `source: http`）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_second_handler_does_not_steal_live_socket(self, tmp_path):
+        if os.name == "nt":
+            pytest.skip("Windows 上跳过 AF_UNIX 监听")
+
+        path = str(tmp_path / "trimum.sock")
+        first = IpcHandler(socket_path=path, max_conn=5)
+        await first.start()
+        second = IpcHandler(socket_path=path, max_conn=5)
+        try:
+            await second.start()
+
+            assert second._server is None, "不得抢占已有人在监听的 socket"
+            assert second.socket_held_by_other is True
+            assert first._server is not None, "原实例的监听不能被破坏"
+            assert os.path.exists(path)
+
+            # stop() 也不能顺手 unlink 别人的 socket
+            await second.stop()
+            assert os.path.exists(path)
+        finally:
+            await second.stop()
+            await first.stop()
+
+        assert not os.path.exists(path), "持有者 stop() 时才清理自己的 socket"
+
+    @pytest.mark.asyncio
+    async def test_stale_socket_file_is_replaced(self, tmp_path):
+        """无人监听的残留文件必须照旧清理重建（不能因此起不来）。"""
+        if os.name == "nt":
+            pytest.skip("Windows 上跳过 AF_UNIX 监听")
+
+        path = str(tmp_path / "trimum.sock")
+        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stale.bind(path)
+        stale.close()  # 只留文件，没有 listener
+        assert os.path.exists(path)
+
+        ipc = IpcHandler(socket_path=path, max_conn=5)
+        await ipc.start()
+        try:
+            assert ipc._server is not None
+            assert ipc.socket_held_by_other is False
+        finally:
+            await ipc.stop()
+
+        assert not os.path.exists(path)
+
+    def test_socket_is_live_is_false_for_missing_path(self, tmp_path):
+        assert socket_is_live(str(tmp_path / "nope.sock")) is False
