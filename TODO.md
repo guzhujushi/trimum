@@ -1,9 +1,9 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-20（文档一致性修订 + CLI-Anything / MCP 调研）
-> 当前阶段：Phase 3 收尾已完成。**生态战略立项**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源
-> 测试：本地 **482 passed**；真机 Ubuntu **483 passed**（11 failed 与同机 `git archive HEAD` 基线逐条一致，均为宿主环境缺失，无回归）
-> 当前工作分支：`server`；Phase 3 P0/P1 提交已推送四分支（server `3af9e07` / main `26d52f5` / ubuntu `4768820` / arch-linux `b540f36`）
+> 最后更新：2026-09-20（E1 命令面 / Skills 分发 → E6 选装模型 + 首启引导 → E3 环境层 `trm env`）
+> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E3**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E2（MCP）/ E4 / E5 / E7 待做
+> 测试：本地 **614 passed / 8 failed / 4 skipped**（8 项为 Windows 沙箱写 `~/.trimum` 被拒 + LLM 断网，与既有基线逐条一致，无回归）；真机 Ubuntu 待开机后补跑
+> 当前工作分支：`server`；E1/E6/清理提交已推送四分支（server `1456aba` / main `2b88561` / ubuntu `c0885a8` / arch-linux `18f88c8`），E3 紧随其后
 
 ---
 
@@ -211,7 +211,12 @@ trm config set <key> <value>       # 设置配置项
 - [x] **E1. 自描述能力面**（2026-09-20 完成）：命令元数据契约（`cli/registry.py`）+ `trm commands [--all|--json|--check]`；`trm skill list/sync/paths` + `skill_sync.py`（symlink → Windows junction → copy 回退）
   - 测试：`tests/test_cli_commands_meta.py`（15）+ `tests/test_skill_sync.py`（22）；`trm commands --check` 检出并修掉 `ask` 的 `run` 别名无摘要问题
 - [ ] **E2. MCP**：见下方「MCP 接入」章节（M1/M2）
-- [ ] **E3. 生态导入**：`trm skill list/import`、`trm env inventory`（pacman / apt / mise / winget 探测）
+- [x] **E3. 环境层**（2026-09-20 完成）：`src/trimum_core/env_toolchain.py` + `trm env inventory|install`
+  - [x] 9 个包管理器探测（pacman / apt / dnf / zypper / apk / brew / winget / scoop / mise）+ 已装包解析 + 目录覆盖清单
+  - [x] 计划与执行分离：`plan_install` → `commands_for`（winget 一包一条）→ `run_install`；`--dry-run` 只打印
+  - [x] 红线：不自建包仓库 / 清单只读（risk: low）/ 安装必须显式确认（`--yes` 或交互）/ 已装幂等（退出码 0）
+  - [x] 测试：`tests/test_env_toolchain.py`（34）；`trm commands --check` → 53 条通过
+  - 遗留：`trm skill import`（生态导入）未做，顺延到 E4；`trm env install` 未在 Linux 真机实跑（等 Ubuntu 开机）
 - [ ] **E4. 广接入**：通用 CLI 适配器（`--help` → 工具条目 + 风险分级）、workflow 目录格式 + `trm workflow import`
 
 > 排序理由：Skills 层近乎零成本 → MCP 成本中等 → CLI 适配器 → workflow 目录。
@@ -280,6 +285,7 @@ trm config set <key> <value>       # 设置配置项
 | **CLI-Anything 排查（Chrome/CDP/Python）** | ✅ 所有 4 个问题已解决 |
 | **Phase 3 收尾 P0/P1 清零 + 真机 Ubuntu 验证** | ✅ 已提交并推送四分支（server `3af9e07` / main `26d52f5` / ubuntu `4768820` / arch-linux `b540f36`） |
 | **2026-09-20 文档一致性修订 + CLI-Anything / MCP 调研** | ✅ 新增 `docs/CLI-ANYTHING-RESEARCH.md` / `docs/MCP-INTEGRATION-PLAN.md`；修正 STATUS / TODO / browser 方案口径 |
+| **2026-09-20 生态四层 E1 / E6 / E3** | ✅ E1 命令面 + Skills 分发；E6 选装模型 + 首启引导（宿主探测 / 身份证书 / 官方 Agent 证书）；E3 环境层 `trm env`（详见 `STATUS.md`、`ARCH.md`） |
 
 ---
 
@@ -296,9 +302,10 @@ trm config set <key> <value>       # 设置配置项
 
 | 项目 | 状态 |
 |------|------|
-| 本地全量测试 | 482 passed / 8 failed / 4 skipped (2026-09-20) |
+| 本地全量测试 | 614 passed / 8 failed / 4 skipped (2026-09-20，E3 后) |
 | 真机 Ubuntu 全量测试 | 483 passed / 11 failed (2026-09-20)，11 项与同机 `git archive HEAD` 基线逐条一致，无回归 |
-| 新增覆盖 | `test_tool_gateway_security_rule.py`（11）、`test_context_compactor.py`（13）、`test_audit_store.py`（15）、`test_source_type_flow.py`（6）、`test_learning_feedback.py`（11）、`test_agent_spawn.py`（12）、`test_api_server_startup.py`（3）、`test_ipc_listener.py`（3）、`test_cli_commands.py::TestSecurityLearningCommand`（3） |
+| 新增覆盖（2026-09-20 生态轮） | `test_cli_commands_meta.py`（15）、`test_skill_sync.py`（27）、`test_hosts.py`（13）、`test_setup_wizard.py`（33）、`test_agent_cert.py` 增补（11）、`test_env_toolchain.py`（34） |
+| 新增覆盖（Phase 3 收尾） | `test_tool_gateway_security_rule.py`（11）、`test_context_compactor.py`（13）、`test_audit_store.py`（15）、`test_source_type_flow.py`（6）、`test_learning_feedback.py`（11）、`test_agent_spawn.py`（12）、`test_api_server_startup.py`（3）、`test_ipc_listener.py`（3）、`test_cli_commands.py::TestSecurityLearningCommand`（3） |
 
 ---
 
@@ -306,7 +313,7 @@ trm config set <key> <value>       # 设置配置项
 
 | 分支 | 状态 | 备注 |
 |------|------|------|
-| `server` | ✅ 已同步 | 当前工作分支，Phase 3 P0/P1 已 push（`3af9e07`） |
-| `main` | ✅ 已同步 | Phase 3 P0/P1 已 push（`26d52f5`） |
-| `ubuntu` | ✅ 已同步 | Phase 3 P0/P1 已 push（`4768820`） |
-| `arch-linux` | ✅ 已同步 | Phase 3 P0/P1 已 push（`b540f36`） |
+| `server` | ✅ 已同步 | 当前工作分支；E1 `779c0e0` / E6 `ab26edf` / 清理+证书 `1456aba` / E3（本轮，紧随其后） |
+| `main` | ✅ 已同步 | E1 `49b2ef4` / E6 `e0e8f0b` / 清理+证书 `2b88561` / E3（cherry-pick） |
+| `ubuntu` | ✅ 已同步 | E1 `ba3ebe7` / E6 `e335db6` / 清理+证书 `c0885a8` / E3（cherry-pick） |
+| `arch-linux` | ✅ 已同步 | E1 `1f58b7c` / E6 `417b9cc` / 清理+证书 `18f88c8` / E3（cherry-pick） |

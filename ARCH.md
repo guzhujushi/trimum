@@ -227,6 +227,59 @@
   `trm install <name>`（官方包安装，E5）留给将来，不与向导抢名称。
 - 测试：`tests/test_hosts.py`、`tests/test_setup_wizard.py`、`tests/test_skill_sync.py::TestDynamicTargets`。
 
+## 环境层与工具链安装（E3，2026-09-20 已实现）
+
+> 生态四层的 **L0**（`docs/ECOSYSTEM-STRATEGY.md` §3）。定位：**软件生态交给发行版** ——
+> trimum 不自建包仓库，只回答「机器上有什么 / 能不能装 / 装的时候会执行什么」。
+
+### 模块（`src/trimum_core/env_toolchain.py`）
+
+- **包管理器表**：每个管理器声明探测命令（`probe`）、列举已装（`list_cmd`）、安装命令（`install_cmd`）、
+  是否需要 `sudo`、适用平台；`INSTALLABLE_IDS` 决定「trimum 可代装」的集合（`mise` 不在其中）。
+
+| 管理器 | 平台 | 探测 | 列举已装 | 安装 | sudo |
+|---|---|---|---|---|---|
+| `pacman` | linux | `pacman --version` | `pacman -Qq` | `pacman -S --noconfirm` | 是 |
+| `apt` | linux | `apt-get --version` | `dpkg-query -W -f ...` | `apt-get install -y` | 是 |
+| `dnf` | linux | `dnf --version` | `rpm -qa` | `dnf install -y` | 是 |
+| `zypper` | linux | `zypper --version` | `rpm -qa` | `zypper --non-interactive install` | 是 |
+| `apk` | linux | `apk --version` | `apk info` | `apk add` | 是 |
+| `brew` | darwin/linux | `brew --version` | `brew list -1` | `brew install` | 否 |
+| `winget` | win32 | `winget --version` | `winget list` | `winget install -e --id` | 否 |
+| `scoop` | win32 | `scoop --version` | `scoop list` | `scoop install` | 否 |
+| `mise` | 全平台 | `mise --version` | `mise ls` | **不代装**（只管运行时版本，只登记） | 否 |
+
+- **顺序即优先级**：`KNOWN_MANAGERS` 的顺序决定 `inventory()` 的 `preferred_manager`
+  （pacman → apt → dnf → zypper → apk → brew → winget → scoop）。
+- **解析**：`parse_installed()` 按管理器的输出语言解析（dpkg 的 `name:arch` 去后缀；pacman / brew 一行一名；
+  **winget 按列对齐切分**取 `Id` 列 —— winget 的 Name 列可能含空格，不能用 `split()[1]`）。
+- **单遍探测**：`inventory(statuses=...)` 复用调用方已跑过的探测结果，`trm env install` 因此只探测一遍包管理器
+  （有测试断言 `detect_managers` 只被调用一次）。
+- **sudo 策略**：`build_command()` 在管理器需要且当前进程**不是 root** 时加 `sudo`；显式 `use_sudo=` 优先
+  （跨平台单测依赖这个显式开关）。`commands_for()` 决定调用次数：**winget 一包一条命令**，其余合并成一条。
+- **计划与执行分离**：`plan_install()` 只产出「确切命令 + `already_installed` / `unavailable` / `unknown` 三类清单」；
+  `run_install()` 是**唯一的执行点**，`dry_run=True` 时连 runner 都不调用。
+
+### 命令（`src/trimum_core/cli/commands/env.py`）
+
+- `trm env inventory [--manager ID] [--catalog PATH]` —— **risk: low**，只读：管理器现状 + 目录覆盖（已装 / 可选 / 选装记录）。
+- `trm env install <name>... [--manager ID] [--dry-run] [--yes] [--catalog PATH]` —— **risk: high，requires_sudo**：
+  未知条目或该管理器无对应包 → 直接失败；否则打印计划与命令，确认后执行。
+
+### 安装红线（契约，写进代码与测试）
+
+| 红线 | 落点 |
+|---|---|
+| 不自建包仓库 | 只调系统包管理器；`config/setup-catalog.yaml` 只登记包名 |
+| 探测与清单只读 | `detect_managers()` / `inventory()` 不做任何写操作（risk: low） |
+| 安装必须显式确认 | 交互确认，或非交互 `--yes`；否则 abort（退出码 1） |
+| `--dry-run` 不执行 | `run_install(dry_run=True)` 不调用 runner（有测试） |
+| 幂等 | 已装条目不再重装、不弹确认、退出码 0（不算失败） |
+| 错误不吞 | 探测失败不致命；安装逐条返回 `returncode` / `error`（含 sudo 无 tty） |
+| 与 `trm setup` 的分工 | 向导**只登记选装**、不安装；安装是显式动作，两者共用同一份 `config/setup-catalog.yaml` |
+
+- 测试：`tests/test_env_toolchain.py`（34 项：探测 / 解析 / 计划 / 执行 / 清单 / CLI）。
+
 ## 官方分发渠道（规划，2026-09-20）
 
 - 官网发布官方 Agent / Tool / Workflow；包格式 `.trmpkg` = `tar.gz` + `manifest.json5`
