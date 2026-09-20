@@ -438,3 +438,16 @@ def test_execute_returns_expected_shape():
 - [ ] 有基本测试（至少在 `tests/` 下有一个能跑的用例）
 - [ ] 编码用 UTF-8，行尾 LF（尤其生成 .sh / .py 时避免 CRLF）
 - [ ] 不硬编码凭据/密钥，一律走环境变量
+
+## 11. 可借鉴：外部工具目录的两种约定（2026-09-20）
+
+调研 `epiral/bb-browser`（见 `docs/BB-BROWSER-EVALUATION.md`）时撞见两条值得抄的约定，
+本仓库暂未强制，写在这里供新工具参考：
+
+1. **适配器自带示例**：bb-browser 的 `site info <name>` 会给出 `args / example / domain`，
+   调用方不必读源码就知道怎么用。trimum 的 `tool.json5` 目前只有 `allowed_flags`，
+   新工具建议在 `description` 里写清一条可复制的调用示例（`trm exec <tool> ...`）。
+2. **稳定元素编号**：它的 `snapshot -i` 把可访问性树压成 `@1`、`@2`… 之后 `click @3` /
+   `fill @5 "x"` 全用编号指代，杜绝「让 LLM 编 CSS 选择器」。写浏览器类/UI 类工具时优先
+   返回编号而不是选择器。
+

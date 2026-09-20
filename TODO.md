@@ -1,9 +1,9 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → **M4.5 远端工具聚合**）
+> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → **M4.5 远端工具聚合** → **M4.5 收口小项**）
 > 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E4 / E5 / E7 待做
-> 测试：本地 **915 passed / 5 failed / 7 skipped**（5 项 = 既有基线：Windows 沙箱 + PATH 缺 `python.exe` + LLM 断网）。本轮新增 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录），基线由 8 项降到 5 项 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu **914 passed / 11 failed / 2 skipped**（同机对照 M4 终态基线 827/11/2，失败名单逐条相同，无回归）
-> 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固/M4 均已推送四分支（M4：server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）；**M4.5 本轮提交号见节尾记录**。
+> 测试：本地 **940 passed / 5 failed / 7 skipped**（5 项 = 既有基线：Windows 沙箱 + PATH 缺 `python.exe` + LLM 断网）。本轮新增 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录），基线由 8 项降到 5 项 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu **914 passed / 11 failed / 2 skipped**（同机对照 M4 终态基线 827/11/2，失败名单逐条相同，无回归）
+> 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固/M4 均已推送四分支（M4：server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）；**M4.5 收口小项提交号见 `STATUS.md` 的「提交与分支」表**（幽灵条目 `9e63a81` / env+网关确认 `d34054a` / install 向导 `bd00990`，四分支已同步）。
 > ✅ **真机部署已完成（2026-09-20 20:52）**：`sudo bash /tmp/sync_opt_tree.sh` 全树同步落地，`/opt/trimum` 三个关键文件与本地 HEAD 逐文件对上（`mcp_bridge.py` `f503f505…` / `mcp_registry.py` `86447a65…` / `tool_gateway.py` `47d8a205…`），部署树 `[4b/5]` 自检通过；daemon 20:52:27 启动 → 跑的就是新代码（`trm status` 的 `source: rpc`，PID 23850）。真机聚合实测 4 条 `source=mcp`（`echo__echo` / `echo__fail` / `echo__slow` / …），总数 17；幽灵缓存已清（备份 `/tmp/mcp-tools.json.bak-20260920`），清后 `tool list --mcp` 为 0 条、总数 13。
 > ▶ **下次继续从这里开始（2026-09-20 M4.5 收尾之后）**：M4 / M4.5 代码、测试、文档、真机部署全部闭环 → 下一步 = **E4 广接入**（通用 CLI 适配器 + workflow 目录导入，并顺带补 E3 遗留的 `trm skill import`），再往后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`。
 
@@ -270,7 +270,7 @@ trm config set <key> <value>       # 设置配置项
 - [ ] 自动补全脚本（bash/zsh/fish）
 
 ### 其他待办（承接之前）
-- [ ] **浏览器工具备选（2026-09-20 调研）**：`epiral/bb-browser`（6,222★，CLI + MCP，用本机登录态控制 Chrome）已获用户认可，可作为自研 CDP 工具的补充/对照，待评估接入
+- [x] **浏览器工具备选 `epiral/bb-browser` 评估完成（2026-09-20）→ 结论：不接入**：本体是 Node/TS（与「去 Node」冲突）；MCP server 源码不在公开仓库（与它自己的 `PRIVACY.md` 「可审计」矛盾）；`site` 社区适配器在页面上下文 `eval` 第三方 JS，绕开 `ToolGateway` / 策略 / 审计；上游 4 个月无 push。借鉴项已落 `docs/TOOL-DEVELOPER-GUIDE.md` §11（适配器自带 example/domain、`@N` 稳定元素编号）。完整报告：`docs/BB-BROWSER-EVALUATION.md`
 - [x] **#3.8 Browser Tool 后端收尾**：opencli 已真正弃用（`tool.json5.disabled` + 加载器只认 manifest，2026-09-19 验证不再报 module_failed）
 - [x] **真机 `/opt/trimum` 已同步**（2026-09-20 20:52 全树同步）：补上 M4 遗留的 `reap()` 修复，缺的 9 个模块 / 5 个 CLI 命令 / 5 个 yaml / 9 个 test 文件全部进树；复核哈希见文件头
 - [x] **daemon 部署形态**（P2，2026-09-20 改判）：**回到 systemd 托管** —— `trmd.service` 现为 `enabled + active`（`Restart=always` / `RestartSec=5` / `User=guzhujushi`），手工 daemon 已退出。重启一律 `sudo systemctl restart trmd`；`scripts/restart_trmd.sh` 已加 systemd 守卫（检测到单元 active 时不再抢端口，非 root 下打指引并 `exit 3`）。历史：当天曾先选「纯手工 daemon」，但单元被重新拉起后与手工进程互抢 8321（journal 里 `NRestarts` 已到 2150），故改判。切换工具仍保留 `scripts/fix_trmd_loop.sh`
@@ -278,7 +278,7 @@ trm config set <key> <value>       # 设置配置项
 - [x] **幽灵聚合条目的语义**（2026-09-20 收口）：原护栏「目录读不到就不动缓存」把「一个 server 都没配」和「不知道有哪些 server」混成了一件事。新增 `mcp_registry.definitions_readable()`：**目录不存在 → 照清**，**目录在但列不出来 → 不动并记 `mcp_index.prune_skipped`**；`tests/test_mcp_bridge.py` 87 → 93 项，全量 921 passed 无回归
 - [x] **`trm env install` 真机跑通**（2026-09-20）：dry-run / 已装幂等 / 非 root 报错三条路径已在真机验证，并修掉两个真缺陷（管道里 `_confirm()` 永久挂死、失败时不打原因）；`ToolGateway._prompt_confirm()` 同样修成 fail closed
 - [ ] **`trm env install` 的 root 真执行路径待跑**：`sudo bash /tmp/trm_env_install_real.sh`（全是已装包，幂等）
-- [ ] **`install_fn.py` 安装向导的 `prompt()` 只挡 EOFError**（2026-09-20 发现）：管道里跑 `trm install` 会在第一个提问处挂住。它是纯交互向导，建议非 TTY 时打印将要问的问题并跳过可选步骤（LLM key / 开机自启 / 立即启动）
+- [x] **`install_fn.py` 安装向导非交互挂死已修**（2026-09-20）：拆出 `_interactive()` / `_read_yes_no()`，非 TTY 不提问，三个可选步骤（LLM key / 开机自启 / 立即启动）一律跳过并提示；新增 `tests/test_install_fn.py` 14 项（含「管道里 `input()` 绝不被调用」）；实测管道场景 1.1s 退出（修前挂死）
 - [ ] **daemon 单实例与 socket 加固（2026-09-20 真机发现，P1；运维侧已闭环）**：
   - [x] 运维处置：`trmd.service`（enabled + `Restart=always`）与手工 daemon 抢 `127.0.0.1:8321`，单元每 5s `exit 3`（`NRestarts` 到 117）→ `scripts/fix_trmd_loop.sh`；执行方案A后 `trmd` 为 disabled/inactive、`Errno 98` 归零、`trm status` 回到 `source: rpc`
   - [x] 端口冲突应 fail-fast：端口/socket 被占时在触碰 socket 之前退出，并提示「已有 daemon 在跑」（现在只会抛 uvicorn 的 `[Errno 98]`）

@@ -939,8 +939,28 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - 测试：`test_env_toolchain.py` 34 → **37**、`test_tool_gateway_security_rule.py` +2；本地全量 **925 passed** /
   5 failed / 7 skipped（失败名单与基线一致）。
 - 仍待用户执行：`sudo bash /tmp/trm_env_install_real.sh`（root 下的真执行路径，全是已装包、幂等）。
-- 同类待办（未修）：`install_fn.py` 安装向导的 `prompt()` 也只挡 `EOFError`；它是纯交互向导，
-  管道里会挂 —— 已记 `TODO.md`。
+- 同类最后一处也已修：`install_fn.py` 安装向导的 `prompt()`（见下）。
+
+### 非交互挂死的最后一处：`trm install` 向导（2026-09-20）
+
+`install_fn.install()` 的 `prompt()` 只挡 `EOFError` → 管道开着但不给数据时永久阻塞（本轮先复现再修）。
+拆出 `_interactive()` / `_read_yes_no()`：**非 TTY 不提问**，LLM key / 开机自启 / 立即启动三个可选步骤
+一律跳过并打一行「非交互模式，跳过」；`_read_yes_no` 顺带补挡 `OSError`。
+
+- 新增 `tests/test_install_fn.py`（**14 项**）：`isatty` 三态、默认值回落、EOF / 中断 / IO 错误、
+  「管道里 `input()` 绝不被调用」（真挂死即测试失败）、交互态答 n 不碰 systemctl、答 y 经 getpass 写 `.env`。
+- 实测：管道场景 **1.1s 退出**（修前挂死）；本地全量 **940 passed** / 5 failed / 7 skipped
+  （失败名单与基线逐条一致，+14 即新增用例）。
+- `docs/OPERATIONS.md` 新增「同一类挂死的三处」汇总表（env / mcp / 网关 Layer 1 / install 向导）。
+
+### 浏览器工具备选 `bb-browser` 评估（调研，无代码变更）
+
+结论：**维持自研 CDP 工具，不引入依赖**。四条硬理由：本体是 Node/TS（与「去 Node」冲突）；
+MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计」矛盾）；`site` 适配器在**页面上下文
+`eval` 第三方 JS**，绕开 `ToolGateway` / 策略 / 审计；上游 4 个月无 push（最后 push 2026-05-29）。
+
+值得借鉴的两点已落文档：适配器自带 `example / domain`、`snapshot -i` 的 `@N` 稳定元素编号
+（`docs/TOOL-DEVELOPER-GUIDE.md` §11 + `TODO.md`）。完整报告：`docs/BB-BROWSER-EVALUATION.md`。
 
 ## M4.5 远端工具聚合（2026-09-20）
 
@@ -1032,3 +1052,7 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 | M4.5 文档 + 运维记录 | `5718407` | `682d01e` | `6d81617` | `8d80cc4` |
 | 同步脚本加 M4.5 聚合自检 | `d1039ef` | `ec4e3aa` | `f56fbc5` | `b605e2c` |
 | daemon 重启脚本加 systemd 守卫 | `f752482` | `bdddfc5` | `fa6715f` | `c9f767b` |
+| M4.5 真机收尾 + TODO/STATUS 对齐 | `59951be` | `8c663ef` | `c4426e2` | `7949d6a` |
+| 幽灵聚合条目（清缓存 + `definitions_readable`） | `9e63a81` | `8437694` | `af9c731` | `c6e7ba9` |
+| 无人值守确认不挂死 + 安装失败报原因 | `d34054a` | `07d43a3` | `0494adb` | `4ed51b1` |
+| `trm install` 向导非交互跳过可选步骤 | `bd00990` | `303f9ee` | `a8a16be` | `2ce3f3d` |
