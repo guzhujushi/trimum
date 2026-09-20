@@ -1,11 +1,26 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-20（M4 传输与生命周期 → **M4.5 远端工具聚合**）
+> 最后更新：2026-09-20（M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → **E4 广接入**）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
 > 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3/M4**（见文末「M4 传输与生命周期」），下一项是**远端工具聚合进 `ToolRegistry`**（`<server>__<tool>`）；其余为 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）。
 > 真机：M4 已在 Ubuntu 真机验收（2026-09-20，隔离 daemon **16 PASS / 0 FAIL**；全量 827 passed / 11 failed / 2 skipped，11 项为既有宿主状态基线，无回归）。
+
+---
+
+## E4 广接入（进行中，2026-09-20）
+
+> 计划与设计：`docs/E4-PLAN.md`（生态四层缺口 #4 通用 CLI 适配器 / #6 workflow 目录 / #7 统一 schema，
+> 外加 E3 顺延的 `trm skill import`）。
+
+- [ ] S1 `ecosystem.py`：生态条目 schema（trust/risk/requires/source_url/author/enabled）+ 风险分级器 + 校验器
+- [ ] S2 `cli_adapter.py` + `trm tool import-cli|enable|disable`：`--help` 探测 → 工具条目 + 风险分级 → 生成 manifest
+- [ ] S3 `workflow_catalog.py` + `trm workflow import`：Warp 式 YAML → 编译进 `WorkflowDefV2`
+- [ ] S4 `skill_import.py` + `trm skill import`：本地路径 / git URL → `~/.trimum/skills/`
+- [ ] S5 `tool_file_loader` 支持 `enabled`（第三方默认不启用）+ `trm tool list --all`
+- [ ] S6 文档同步（ARCH / TODO / ECOSYSTEM-STRATEGY 缺口表 / OPERATIONS）
+- [ ] S7 真机验证 + 提交
 
 ---
 
