@@ -1,11 +1,11 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → **E2 MCP 接入 M0/M1/M2** → 收尾校验：全量测试 + 命令面 + 端到端冒烟）
-> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E4 / E5 / E7 与 MCP 的 M3/M4 待做
+> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → **M3 策展导入器**）
+> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M3**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E4 / E5 / E7 与 MCP 的 M4 待做
 > 测试：本地 **687 passed / 8 failed / 4 skipped**（8 项为 Windows 沙箱写 `~/.trimum` 被拒 + LLM 断网，与既有基线逐条一致，无回归）；真机 Ubuntu 待开机后补跑
 > 当前工作分支：`server`；E1/E6/清理/E3/E2 均已推送四分支（E3：server `4331437` / main `2b4e9b2` / ubuntu `a5c6ad5` / arch-linux `98c8ccd`；E2：server `634e62a` / main `8af7d5d` / ubuntu `166841d` / arch-linux `c68ce85`）
-> ▶ **下次继续从这里开始（2026-09-20 收尾）**：**M3 策展导入器** —— 输入 `tmp/research/awesome-README.md`（1.7 MB / 4,117 条，已 gitignore，本机在），输出 `config/mcp-catalog.yaml` 候选清单（`reviewed: false`，**人工审核后才允许启用**）；条目解析规则见 `docs/MCP-INTEGRATION-PLAN.md` §3；
-> 红线：优先 `uvx` / `pip install` / 单二进制（Go/Rust），`npx` 派系默认不收。**纯离线可做，不依赖 Ubuntu 真机。**
+> ▶ **下次继续从这里开始（2026-09-20 M3 收尾）**：**M4 传输与生命周期** —— `streamable-http` 传输、`idle_ttl` 空闲回收、`apply_cgroup(pid)` 绑定、`trm mcp status/restart`、`docs/OPERATIONS.md` 补 MCP 章节；
+> 次要项：把远端工具聚合进 `ToolRegistry`（`<server>__<tool>`），Agent 不必先 `mcp.tools.list` 再 `mcp.tools.call`。**M4 的 HTTP 部分需要联网 / 真机。** 审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`。
 
 ---
 
@@ -255,7 +255,7 @@ trm config set <key> <value>       # 设置配置项
 - [x] **M1. stdio 客户端**（2026-09-20）：`src/trimum_core/mcp_client.py`（JSON-RPC 2.0 换行分帧、stderr 落文件、超时/EOF 标记坏连接）+ `tests/test_mcp_client.py`（16 项，真协议 fixture server）
 - [x] **M2. 注册与鉴权**（2026-09-20）：`mcp_registry.py`（`~/.trimum/mcp/<name>.json5`，deny-by-default + glob 白黑名单 + 连接池）+ `MCPDispatcher` 实装 + `ToolGateway` 回填审计 + `mcp_call` 事件 + `trm mcp list/tools/call/paths`；`tests/test_mcp_registry.py`（27）/ `tests/test_mcp_dispatcher.py`（30）
   - 顺带修掉：`trm --json` 的 stdout 被 INFO 日志污染（CLI 诊断改走 stderr）；连接池 `refresh` 泄漏旧客户端
-- [ ] **M3. 策展导入器**：awesome-mcp-servers README → `config/mcp-catalog.yaml` 候选清单（人工审核后才启用）
+- [x] **M3. 策展导入器**（2026-09-20 完成）：`mcp_catalog.py` + `trm mcp catalog import/list` → `config/mcp-catalog.yaml`（4,118 条 → **232 条候选**，`reviewed: false`，人工审核后才启用）；离线、确定性输出、拒绝覆盖已存在清单（`--force` 保留人工 `reviewed`/`name`/`note`）；`tests/test_mcp_catalog.py`（52）
 - [ ] **M4. HTTP/SSE + 生命周期**：空闲回收、cgroup 绑定、`trm mcp list/status/restart`、运维文档
 
 策展红线：优先 `uvx` / `pip install` / 单二进制（Go/Rust），`npx` 派系默认不收。
@@ -291,6 +291,7 @@ trm config set <key> <value>       # 设置配置项
 | **2026-09-20 生态四层 E1 / E6 / E3** | ✅ E1 命令面 + Skills 分发；E6 选装模型 + 首启引导（宿主探测 / 身份证书 / 官方 Agent 证书）；E3 环境层 `trm env`（详见 `STATUS.md`、`ARCH.md`） |
 | **2026-09-20 收尾校验 + 下次继续指针** | ✅ 全量测试 687/8/4（与基线逐条一致，无回归）+ `trm commands --check` 58 条 + `trm mcp call` 端到端冒烟 stdout 纯 JSON；TODO 记 M3 输入/输出/红线，STATUS / ARCH 修正过期口径；四分支同步 |
 | **2026-09-20 E2 MCP 接入（M0/M1/M2）** | ✅ stdio 客户端 + 文件化注册（deny-by-default）+ `MCPDispatcher` 实装 + `mcp_call` 审计 + `trm mcp`；73 项新测试 |
+| **2026-09-20 M3 MCP 策展导入器** | ✅ `mcp_catalog.py` + `trm mcp catalog import/list` + `config/mcp-catalog.yaml`（4,118 → 232 条候选，红线逐条计数可查）；52 项新测试 |
 
 ---
 
@@ -307,9 +308,10 @@ trm config set <key> <value>       # 设置配置项
 
 | 项目 | 状态 |
 |------|------|
-| 本地全量测试 | 687 passed / 8 failed / 4 skipped (2026-09-20，E2 后) |
+| 本地全量测试 | 739 passed / 8 failed / 4 skipped (2026-09-20，M3 后；+52 为本轮新增)。8 项与基线**同源**：沙箱写 `~/.trimum` 被拒（PermissionError）+ PATH 缺 `python.exe` + LLM 断网，**无回归** |
 | 真机 Ubuntu 全量测试 | 483 passed / 11 failed (2026-09-20)，11 项与同机 `git archive HEAD` 基线逐条一致，无回归 |
 | 新增覆盖（2026-09-20 生态轮） | `test_cli_commands_meta.py`（15）、`test_skill_sync.py`（27）、`test_hosts.py`（13）、`test_setup_wizard.py`（33）、`test_agent_cert.py` 增补（11）、`test_env_toolchain.py`（34）、`test_mcp_client.py`（16）、`test_mcp_registry.py`（27）、`test_mcp_dispatcher.py`（30） |
+| 新增覆盖（2026-09-20 M3） | `test_mcp_catalog.py`（52）：解析/分类/红线/命名/渲染 IO/CLI + 真实快照比对 |
 | 新增覆盖（Phase 3 收尾） | `test_tool_gateway_security_rule.py`（11）、`test_context_compactor.py`（13）、`test_audit_store.py`（15）、`test_source_type_flow.py`（6）、`test_learning_feedback.py`（11）、`test_agent_spawn.py`（12）、`test_api_server_startup.py`（3）、`test_ipc_listener.py`（3）、`test_cli_commands.py::TestSecurityLearningCommand`（3） |
 
 ---
@@ -318,7 +320,7 @@ trm config set <key> <value>       # 设置配置项
 
 | 分支 | 状态 | 备注 |
 |------|------|------|
-| `server` | ✅ 已同步 | 当前工作分支；E1 `779c0e0` / E6 `ab26edf` / 清理+证书 `1456aba` / E3 `4331437` / **E2 `634e62a`** |
+| `server` | ✅ 已同步 | 当前工作分支；E1 `779c0e0` / E6 `ab26edf` / 清理+证书 `1456aba` / E3 `4331437` / E2 `634e62a` / **M3 未提交**（待四分支同步） |
 | `main` | ✅ 已同步 | E1 `49b2ef4` / E6 `e0e8f0b` / 清理+证书 `2b88561` / E3 `2b4e9b2` / **E2 `8af7d5d`** |
 | `ubuntu` | ✅ 已同步 | E1 `ba3ebe7` / E6 `e335db6` / 清理+证书 `c0885a8` / E3 `a5c6ad5` / **E2 `166841d`** |
 | `arch-linux` | ✅ 已同步 | E1 `1f58b7c` / E6 `417b9cc` / 清理+证书 `18f88c8` / E3 `98c8ccd` / **E2 `c68ce85`** |

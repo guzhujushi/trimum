@@ -168,6 +168,44 @@ Security 234、Other Tools 211、Communication 161、Databases 138、Aggregators
   notes: "官方参考实现，读写白名单目录"
 ```
 
+### 5.1 导入器用法（M3 已实现，2026-09-20）
+
+```bash
+# 预览：不写文件，只报「选了多少 / 每条红线拦了多少」
+trm mcp catalog import --dry-run
+
+# 生成候选清单（写入 config/mcp-catalog.yaml；文件已存在时需 --force）
+trm mcp catalog import
+
+# 审核入口：按分类 / 分发 / 语言筛，或只看还没审的
+trm mcp catalog list --category file-systems --dist uvx
+trm mcp catalog list --unreviewed
+```
+
+实测（2026-09-20 快照，`tmp/research/awesome-README.md`）：
+
+| 分档 | 条数 |
+|---|---|
+| 上游 README 条目 | 4,118 |
+| **通过红线 → 候选** | **232**（uvx 104 / pip 110 / cargo 10 / docker 5 / go 2 / uv 1；本地 170、云端 62） |
+| 拦下 · 语言不合格 | 2,480（ts 2,219 / unknown 197 / java 29 / csharp 28 / c_cpp 5 / ruby 2） |
+| 拦下 · 描述里没有安装方式（`dist:unknown`） | 1,356 |
+| 拦下 · Node 派系（npx 14 / npm 2） | 16 |
+| 拦下 · 其他分发（brew） | 7 |
+| 拦下 · 不在 `Server Implementations` 小节 | 27 |
+
+**审核流程（人工，三步）：**
+
+1. `trm mcp catalog list --unreviewed --category <id>` 挑条目，读 `description` / `flags` / `install_hint`；
+2. 把要启用的条目 `reviewed` 改成 `true`（可加 `note`）—— 改这一个字段**不会启用任何东西**；
+3. 手工写成 `~/.trimum/mcp/<name>.json5` 并显式 `enabled: true`，走 §4.2 的 deny-by-default 注册。
+
+`flags` 是给审核人看的提示：`no-install-hint`（没写安装方式）/ `unknown-scope`（缺范围标记）/
+`scope-mixed`（本地+云端都标）/ `multi-language` / `embedded` / `no-linux`。
+
+重新导入（`--force`）按 `repo` 保留已有条目的 `reviewed` / `name` / `note`，审核工作不会被下一次刷新冲掉；
+`--include-npx` / `--all-languages` / `--include-unknown-dist` 可以把被红线拦掉的条目放回来（默认不收，
+但它们始终以计数形式出现在产物摘要里，不会被静默丢弃）。
 ## 6. 阶段计划
 
 | 阶段 | 内容 | 验收 |
@@ -175,7 +213,7 @@ Security 234、Other Tools 211、Communication 161、Databases 138、Aggregators
 | **M0** ✅ | 冻结本方案；确认真实需求场景（3 个「非它不可」用例）（2026-09-20 完成） | 决议见 §2.3 |
 | **M1** ✅ | `mcp_client.py` stdio 客户端 + `initialize` / `tools/list` / `tools/call`（2026-09-20 完成） | `tests/test_mcp_client.py`（16 项，真实 fixture server + 超时/EOF/带外通知） |
 | **M2** ✅ | `mcp_registry.py` + `MCPDispatcher` 实装 + ToolGateway 审计回填 + `mcp_call` 事件（2026-09-20 完成） | `tests/test_mcp_registry.py`（27）/ `test_mcp_dispatcher.py`（30）；`trm mcp list/tools/call/paths` 可用 |
-| **M3** | 策展导入器（姿势 B）+ `config/mcp-catalog.yaml` + 用户文档 | 导入器单测（离线 fixture：`tmp/research/awesome-README.md`） |
+| **M3** ✅ | 策展导入器（姿势 B）+ `config/mcp-catalog.yaml` + 审核流程文档（2026-09-20 完成，用法见 §5.1） | `tests/test_mcp_catalog.py`（52 项：离线 fixture + 真实快照）→ 232 条候选，红线逐条可解释 |
 | **M4** | HTTP/SSE 传输 + 空闲回收 + cgroup 绑定 + 运维文档 | 长跑测试 + `docs/OPERATIONS.md` 补 MCP 章节 |
 
 ## 7. 风险与未决问题

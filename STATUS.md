@@ -1,10 +1,10 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-20（E2 MCP 接入完成 + 收尾校验）
+> 最后更新：2026-09-20（M3 策展导入器完成）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
-> 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2**（E2，2026-09-20），下一项是 **M3 策展导入器**（`docs/MCP-INTEGRATION-PLAN.md` §6）；其余为 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）。
+> 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3**（E2 + M3，2026-09-20，见文末 §M3），下一项 **M4**（HTTP/SSE + 生命周期）；其余为 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）。
 
 ---
 
@@ -703,3 +703,77 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - `PRD.md`：新增 E2 已交付
 - `TODO.md`：E2 与 M0/M1/M2 勾选、遗留（M3/M4）、测试状态改 687、已完成表与覆盖清单
 - `docs/ECOSYSTEM-STRATEGY.md`：§3 L1、§4 缺口 3、§5 路线图 E2 标记完成
+
+---
+
+## 2026-09-20 M3：策展导入器（awesome-mcp-servers → `config/mcp-catalog.yaml`）
+
+> 依据：`docs/MCP-INTEGRATION-PLAN.md` §3（条目解析规则）/ §5 姿势 B（策展导入器）/ §6 M3。
+> 定位：把 4,118 条上游 README 压成一份**候选清单**，让人只审「能用的那一小撮」；
+> 导入器本身不启用任何 server、不写 `~/.trimum/mcp/`、不联网。**纯离线完成，未用真机。**
+
+### 任务清单（全部完成）
+
+- [x] 解析器：README 行 → 条目（repo / url / 语言 / 范围 / 系统 / 官方 / 描述 / 安装线索）
+- [x] 分类器：语言 + 分发方式（uvx / uv / pip / go / cargo / docker / npx / …）+ 红线过滤
+- [x] 产物：`config/mcp-catalog.yaml`（按分类分组、`reviewed: false`、确定性输出、可复跑）
+- [x] CLI：`trm mcp catalog import|list` + 命令元数据（`trm commands --check` 61 条通过）
+- [x] 测试：`tests/test_mcp_catalog.py`（52，离线 fixture + 真实快照）
+- [x] 文档：`docs/MCP-INTEGRATION-PLAN.md` §5.1/§6、`ARCH.md`、`PRD.md`、`TODO.md`、`docs/ECOSYSTEM-STRATEGY.md` 同步
+
+### 交付
+
+| 文件 | 内容 |
+|---|---|
+| `src/trimum_core/mcp_catalog.py` | 解析 → 分类 → 红线筛选 → 渲染；`parse_readme` / `select_candidates` / `with_names` / `merge_review_state` / `render_catalog` / `write_catalog` / `load_catalog` / `import_catalog` |
+| `config/mcp-catalog.yaml` | 232 条候选 / 39 个分类 / 151 KB；`generated_from` 记相对路径，**无时间戳**（可 diff） |
+| `src/trimum_core/cli/commands/mcp.py` | `trm mcp catalog import`（`--dry-run` / `--force` / `--limit` / `--category` / `--include-npx` / `--all-languages` / `--include-unknown-dist`）、`trm mcp catalog list`（`--unreviewed` / `--category` / `--dist` / `--lang`） |
+| `tests/test_mcp_catalog.py` | 52 项；`tests/fixtures/awesome-mcp-sample.md` 为离线 fixture |
+
+### 实测数据（2026-09-20 快照）
+
+| 分档 | 条数 |
+|---|---|
+| 上游 README 条目 | 4,118 |
+| **候选** | **232**（uvx 104 / pip 110 / cargo 10 / docker 5 / go 2 / uv 1；本地 170 / 云端 62） |
+| 拦下 · 语言 | 2,480（ts 2,219 / unknown 197 / java 29 / csharp 28 / c_cpp 5 / ruby 2） |
+| 拦下 · `dist:unknown`（描述里没有安装方式） | 1,356 |
+| 拦下 · Node 派系 | 16（npx 14 / npm 2） |
+| 拦下 · 其他分发 | 7（brew） |
+| 拦下 · 不在 `Server Implementations` 小节 | 27 |
+
+> 不变量：`parsed == candidates + Σ excluded`（4,118 = 232 + 3,886），测试断言。
+
+### 本轮修掉的缺陷（冒烟 / 测试暴露）
+
+| 缺陷 | 处置 |
+|---|---|
+| **Windows 标记码点写错**：图例里的 🪟 是 U+1FA9F，代码里写成 U+1FAA9 → `systems` 丢 windows、`no-linux` 误判 | 逐图例比对码点后修正（其余 15 个标记核对无误）；断言覆盖 `systems == (macos, windows, linux)` |
+| **分类标题解析错位**：真实标题是 `### 🔗 <a name="..."></a>Label`（emoji 在锚点前），只按「锚点在最前」解析时把 `<a name=...>` 当成了标签 | 改为整行搜索锚点，锚点之后的文字才算标签（`_subsection_heading`） |
+| **安装线索取到 flag**：`uvx --from git+… pkg` → `uvx --from`；`go install x` → `go x` | 新增 `_package_token`（按分发的 value-flag 表跳过参数）+ 每分发独立渲染（`go install x` / `cargo install x` / `docker run <image>`） |
+| CLI `list` 显示绝对路径、长名字撑破表格 | 统一走 `display_path`；显示层截断 30 字符（数据不动） |
+| 测试设计陷阱：用「TS + npx」的条目测不出 `dist:npx`（拒绝顺序是 语言 → 分发） | fixture 补一条「python + npx」条目，红线两条各自可独立观察到 |
+
+### 验证
+
+- `python -m pytest tests/test_mcp_catalog.py -q` → **52 passed**
+- 全量：`pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider` → **739 passed / 8 failed / 4 skipped**
+  （基线 687/8/4，+52 即本轮新增；8 项与基线**同源**：沙箱写 `~/.trimum` 被拒（PermissionError）+ PATH 缺 `python.exe` + LLM 断网，**无回归**）
+- `trm commands --check` → `ok: 61 commands checked, no problems`（新增 `mcp catalog`、`mcp catalog import`、`mcp catalog list`）
+- 端到端（本机真实快照）：`import --dry-run` 只报数不落盘 → `import` 写出 151 KB → `list --unreviewed --category file-systems --dist uvx` 可筛 → `--json` 输出纯 JSON
+- 保护行为：已有清单时 `import` 被拒并提示 `--force`；`--force` 重导入后人工写的 `reviewed` / `note` 仍在（测试断言）
+
+### 遗留
+
+- [ ] **M4**：HTTP/SSE 传输、`idle_ttl` 空闲回收、`apply_cgroup(pid)`、`trm mcp status/restart`、`docs/OPERATIONS.md` 补 MCP 章节
+- [ ] **工具聚合**：远端工具注册进 `ToolRegistry`（`<server>__<tool>`），Agent 不必先 `mcp.tools.list` 再 `mcp.tools.call`
+- [ ] **人工审核尚未开始**：232 条候选 `reviewed` 全为 false（设计如此，不是缺陷）；§2.3 的首批「非它不可」用例还没落到 `~/.trimum/mcp/`
+- [ ] 真机未跑（M3 全离线，无此需要；M4 的 HTTP 部分需要联网 / 真机）
+
+### 文档同步
+
+- `docs/MCP-INTEGRATION-PLAN.md`：新增 **§5.1 导入器用法与审核流程**（含实测分档表）；§6 的 M3 标 ✅
+- `ARCH.md`：新增「MCP 策展导入器（M3）」章节（模块 / 关键设计）
+- `PRD.md`：新增「已交付（M3）」；修正范围边界里过期的「MCP 只出方案不写实现」
+- `TODO.md`：M3 勾选 + 继续指针改为 M4 + 测试状态 739 + 覆盖清单
+- `docs/ECOSYSTEM-STRATEGY.md`：L1 与路线图 E2 行补 M3 ✅
