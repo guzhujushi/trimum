@@ -1274,6 +1274,17 @@ class ToolGateway:
         print(file=sys.stderr)
 
         def _read_confirm() -> bool:
+            # 没人看着的时候不能等：stdin 是「开着但没内容」的管道时，
+            # ``input()`` 不会抛 EOFError、只会一直块住 —— 整条 agent 流程就卡在这一行。
+            # 非 TTY 一律按「拒绝」处理（fail closed）；要无人值守地放行，
+            # 走 JIT 令牌或策略白名单，而不是把确认变成隐式的「yes」。
+            if not sys.stdin.isatty():
+                print(
+                    "   无人值守（stdin 不是终端），按「拒绝」处理；"
+                    "如需放行请走 JIT 令牌 / 策略白名单",
+                    file=sys.stderr,
+                )
+                return False
             try:
                 answer = input("   确认执行？[y/N] ")
                 return answer.strip().lower() in ("y", "yes")
