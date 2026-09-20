@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .._utils import emit, fail, load_config, rpc_call, run_async
@@ -114,8 +115,18 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     tools_parser.set_defaults(handler=handler)
 
     call_parser = nested.add_parser("call", help="call one MCP tool")
-    call_parser.add_argument("server", metavar="SERVER", help="server name (the definition's file name)")
-    call_parser.add_argument("tool", metavar="TOOL", help="tool name as exposed by the server")
+    call_parser.add_argument(
+        "server",
+        metavar="SERVER",
+        help="server name, or the aggregated `<server>__<tool>` name from `trm tool list`",
+    )
+    call_parser.add_argument(
+        "tool",
+        nargs="?",
+        default="",
+        metavar="TOOL",
+        help="tool name as exposed by the server (omit it when passing an aggregated name)",
+    )
     call_parser.add_argument("arguments", nargs="*", metavar="JSON", help="tool arguments as a JSON object")
     call_parser.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
     call_parser.add_argument("--dir", default="", metavar="PATH", help="read definitions elsewhere")
@@ -219,7 +230,16 @@ async def _run_once(dispatcher, request):
 
 
 def _confirm(question: str) -> bool:
-    """Ask before running a high-risk call; never prompt in a piped run."""
+    """Ask before running a high-risk call; never prompt in a piped run.
+
+    ``input()`` only raises ``EOFError`` when stdin is *closed*: a pipe that is
+    still open (``ssh host 'trm mcp call …'``, a CI step, a wrapper script)
+    just blocks forever.  This docstring always promised not to prompt when
+    nobody is watching, so check the TTY and let ``--yes`` be the only way to
+    confirm unattended.
+    """
+    if not sys.stdin.isatty():
+        return False
     try:
         answer = input(f"{question} [y/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt, OSError):
@@ -635,16 +655,18 @@ def handler(args: argparse.Namespace) -> int:
 
     if command == "call":
         server = args.server
-        tool = args.tool
+        tool = (getattr(args, "tool", "") or "").strip()
         arguments = " ".join(args.arguments).strip()
-        if not args.yes and not _confirm(
-            f"调用 MCP 工具 {server}.{tool}，确定继续？"
-        ):
+        # 聚合名只有一个位置参数，别把它拼成 `<聚合名>.` 去问人：该怎么解由
+        # dispatcher 的 _split_call 负责（它还要看注册表判歧义）
+        label = f"{server}.{tool}" if tool else server
+        if not args.yes and not _confirm(f"调用 MCP 工具 {label}，确定继续？"):
             return fail("aborted (use --yes for non-interactive runs)")
 
+        target = [server, tool] if tool else [server]
         request = ExecuteRequest(
             tool=ToolType.MCP_TOOLS_CALL,
-            args=[server, tool, arguments] if arguments else [server, tool],
+            args=[*target, arguments] if arguments else target,
         )
         response = run_async(_run_once(dispatcher, request))
         if response.status == "denied":
