@@ -274,11 +274,13 @@ trm config set <key> <value>       # 设置配置项
 - [ ] **浏览器工具备选（2026-09-20 调研）**：`epiral/bb-browser`（6,222★，CLI + MCP，用本机登录态控制 Chrome）已获用户认可，可作为自研 CDP 工具的补充/对照，待评估接入
 - [x] **#3.8 Browser Tool 后端收尾**：opencli 已真正弃用（`tool.json5.disabled` + 加载器只认 manifest，2026-09-19 验证不再报 module_failed）
 - [ ] **真机 `/opt/trimum` 仍是旧树**（2026-09-20 实测）：`src/trimum_core` 缺 9 个模块（`mcp_client` / `mcp_registry` / `mcp_catalog` / `env_toolchain` / `hosts` / `identity` / `paths` / `skill_sync` / `setup_wizard`）、`cli/commands` 缺 5 个（`commands` / `mcp` / `env` / `setup` / `skill`）、`config/` 缺 5 个 yaml（含 `mcp-catalog.yaml`）、`tests/` 少 9 个文件；`config` / `tests` / `scripts` / `src/trimum_core` 为 root 属主，`tar` 直解会被拒 → 已投送 `sudo bash /tmp/sync_opt_tree.sh`（等用户执行），同步后重启 daemon；不影响 daemon 当前运行
-- [ ] **daemon 部署形态**（P2，2026-09-20 升级为紧急）：普通用户手工起 daemon 时 `apply_cgroup` 无权限降级；系统里既装了 `trmd.service`（enabled + `Restart=always`）又跑着手工 daemon，**两者已在真机实际冲突**（见下条），需要「systemd 单一出口」或「纯手工 daemon」二选一
-- [ ] **daemon 单实例与 socket 加固（2026-09-20 真机发现，P1）**：
-  - 端口冲突不 fail-fast：`trmd.service` 与手工 daemon 抢 `127.0.0.1:8321` → 单元每 5s 起一次、`exit 3`，journal `NRestarts` 已到 97
-  - `ipc_handler._start_unix_socket()` 先 `unlink` 再 `bind`：短命进程会**抢走运行中 daemon 的 unix socket**，自己死掉后留下无人监听的 socket 文件 → `trm` 的 RPC 间歇失效并静默退回 HTTP（`trm status` 显示 `source: http`）
-  - `config.py:24` 把 socket 路径写死 `/run/user/1000/trimum.sock`（假设 uid=1000），而客户端 `trimum_client.discover_socket()` 走 `XDG_RUNTIME_DIR` → 换 uid 就客户端/服务端对不上
+- [ ] **daemon 部署形态**（P2）：`apply_cgroup` 仍需 root，普通用户跑时降级；**2026-09-20 已二选一：走「纯手工 daemon」** —— `trmd.service` 已 `disable --now`，daemon 由 `scripts/restart_trmd.sh` 以 guzhujushi 身份管理；要改回 systemd 托管用 `sudo bash scripts/fix_trmd_loop.sh --use-systemd`
+- [ ] **daemon 单实例与 socket 加固（2026-09-20 真机发现，P1；运维侧已闭环）**：
+  - [x] 运维处置：`trmd.service`（enabled + `Restart=always`）与手工 daemon 抢 `127.0.0.1:8321`，单元每 5s `exit 3`（`NRestarts` 到 117）→ `scripts/fix_trmd_loop.sh`；执行方案A后 `trmd` 为 disabled/inactive、`Errno 98` 归零、`trm status` 回到 `source: rpc`
+  - [ ] 端口冲突应 fail-fast：端口/socket 被占时在触碰 socket 之前退出，并提示「已有 daemon 在跑」（现在只会抛 uvicorn 的 `[Errno 98]`）
+  - [ ] `ipc_handler._start_unix_socket()` 先 `unlink` 再 `bind`：短命进程会**抢走运行中 daemon 的 unix socket**，死后留下无人监听的 socket 文件 —— 这是 RPC 静默降级成 HTTP 的根因；应先探测是否有人监听再决定 unlink
+  - [ ] `config.py:24` 把 socket 路径写死 `/run/user/1000/trimum.sock`（假设 uid=1000），而客户端 `trimum_client.discover_socket()` 走 `XDG_RUNTIME_DIR` → 换 uid 就客户端/服务端对不上
+  - [ ] `api_server.py` 的 `/health` 版本号自相矛盾：IPC 路径 `"0.2.1"`（L122）vs HTTP 路径 `"0.2.0"`（L203），应统一取 `trimum_core.__version__`（0.5.0）
   - 运维侧已备 `scripts/fix_trmd_loop.sh`（`--check` / 默认停用单元 / `--use-systemd` 改 systemd 托管）
 - [ ] **Safety**: Landlock / Seccomp 沙箱（Phase 4）
 - [ ] **3.5 确定性字段 confidence 分级**：三级分流（直接执行 / 确认窗口 / 转 Planner）
