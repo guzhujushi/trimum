@@ -591,7 +591,9 @@ def cli_registry(tmp_path: Path, monkeypatch) -> None:
     """
     from trimum_core.cli.commands import tool as tool_mod
 
-    monkeypatch.setattr(tool_mod, "_registry", lambda: ToolRegistry(str(tmp_path / "tools")))
+    monkeypatch.setattr(
+        tool_mod, "_registry", lambda root=None: ToolRegistry(str(tmp_path / "tools"))
+    )
 
 
 class TestToolListCli:

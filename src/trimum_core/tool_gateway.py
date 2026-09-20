@@ -50,7 +50,7 @@ from .file_trust import FileTrustTracker
 from .security_rule import SecurityRule, DecisionResult
 from .audit_store import AuditStore
 from .tool_dispatchers import DispatcherRegistry
-from .tool_file_loader import scan_tools
+from .tool_file_loader import is_enabled, scan_tools
 from .sec_monitor import OpContextClassifier, SecMonitor
 from .sec_executor import SecExecutor
 from .logger import get_logger
@@ -139,8 +139,16 @@ class ToolRegistry:
                     continue
                 # 弃用的工具会把 tool.json5 改名为 *.disabled：没有启用 manifest
                 # 的目录一律跳过，避免每次启动都去 import 已废弃工具的 main.py。
-                if not (child / "tool.json5").is_file():
+                manifest_path = child / "tool.json5"
+                if not manifest_path.is_file():
                     logger.debug("tool_file_loader.skipped_disabled", tool=child.name)
+                    continue
+                # E4：第三方导入的工具默认 enabled: false —— 登记 ≠ 授权，
+                # 没显式启用就不进注册表，自然也不会被 import。
+                if not is_enabled(manifest_path):
+                    logger.info(
+                        "tool_file_loader.skipped_not_enabled", tool=child.name
+                    )
                     continue
                 main_py = child / "main.py"
                 if main_py.is_file():
