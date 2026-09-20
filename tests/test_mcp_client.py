@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -177,14 +178,30 @@ class TestFailures:
             await client.connect()
         assert "command not found" in str(excinfo.value)
 
-    async def test_http_transport_is_refused_until_m4(self, tmp_path):
-        client = MCPClient(
-            definition(transport="http", command="", url="http://127.0.0.1:9/mcp"),
-            log_dir=tmp_path / "logs",
-        )
+    async def test_unknown_transport_names_are_refused(self, tmp_path):
+        """传输名有白名单：注册层（pydantic）与客户端各拦一道。"""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            definition(transport="carrier-pigeon", command="")
+
+        stub = SimpleNamespace(name="odd", transport="carrier-pigeon", timeout=5.0)
+        client = MCPClient(stub, log_dir=tmp_path / "logs")
         with pytest.raises(MCPProtocolError) as excinfo:
             await client.connect()
-        assert "M4" in str(excinfo.value)
+        assert "carrier-pigeon" in str(excinfo.value)
+
+    async def test_http_transport_needs_a_url(self, tmp_path):
+        from trimum_core.mcp_client import MCPHttpTransport
+
+        transport = MCPHttpTransport("")
+        with pytest.raises(MCPProtocolError) as excinfo:
+            await transport.start()
+        assert "no url" in str(excinfo.value)
+
+        with pytest.raises(MCPProtocolError) as excinfo:
+            await MCPHttpTransport("ftp://example.invalid/mcp").start()
+        assert "must be http(s)" in str(excinfo.value)
 
     async def test_calls_without_a_server_are_rejected(self, tmp_path):
         client = MCPClient(definition(), log_dir=tmp_path / "logs")

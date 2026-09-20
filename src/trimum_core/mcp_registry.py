@@ -20,8 +20,10 @@ client whose stream broke, so a crashed server self-heals on the next call.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
+import time
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal
@@ -29,7 +31,12 @@ from typing import Any, Callable, Iterable, Literal
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from .logger import get_logger
-from .mcp_client import MCPClient, MCPError, MCPProtocolError
+from .mcp_client import (
+    HTTP_TRANSPORTS,
+    MCPClient,
+    MCPError,
+    MCPProtocolError,
+)
 from .paths import trimum_path
 
 log = get_logger("mcp_registry")
@@ -91,16 +98,22 @@ class MCPServerDefinition(BaseModel):
     """One ``<name>.json5`` MCP server definition."""
 
     name: str
-    transport: Literal["stdio", "http"] = "stdio"
+    transport: Literal["stdio", "http", "streamable-http", "streamable_http"] = "stdio"
     command: str = ""
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     cwd: str = ""
     url: str = ""
+    #: Extra HTTP headers (auth tokens for ``trust: cloud`` servers).  Values are
+    #: never echoed by ``to_dict()``, exactly like ``env``.
+    headers: dict[str, str] = Field(default_factory=dict)
     trust: Literal["local", "cloud"] = "local"
     risk: str = "medium"
     timeout: float = 30.0
     idle_ttl: float = DEFAULT_IDLE_TTL
+    #: cgroup caps for the stdio process (0 = keep the controller's default).
+    max_memory_mb: float = 0.0
+    max_cpu_percent: float = 0.0
     enabled: bool = False
     allow_tools: list[str] = Field(default_factory=list)
     deny_tools: list[str] = Field(default_factory=list)
@@ -145,15 +158,38 @@ class MCPServerDefinition(BaseModel):
             return {str(key): str(item) for key, item in value.items()}
         raise ValueError("env must be an object of string values")
 
+    @field_validator("headers", mode="before")
+    @classmethod
+    def _coerce_headers(cls, value: Any) -> Any:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return {str(key): str(item) for key, item in value.items()}
+        raise ValueError("headers must be an object of string values")
+
     @model_validator(mode="after")
     def _check_transport_requirements(self) -> "MCPServerDefinition":
         if self.transport == "stdio" and not self.command.strip():
             raise ValueError("transport 'stdio' requires a command")
-        if self.transport == "http" and not self.url.strip():
-            raise ValueError("transport 'http' requires a url")
+        if self.transport in HTTP_TRANSPORTS and not self.url.strip():
+            raise ValueError(f"transport '{self.transport}' requires a url")
         if self.timeout <= 0:
             raise ValueError("timeout must be positive")
+        if self.idle_ttl < 0:
+            raise ValueError("idle_ttl must not be negative (0 = never reap)")
         return self
+
+    @property
+    def limits(self) -> "ResourceLimits":
+        """cgroup limits for this server (defaults kept when nothing is set)."""
+        from .resource_controller import ResourceLimits
+
+        limits = ResourceLimits()
+        if self.max_memory_mb > 0:
+            limits.max_memory_mb = float(self.max_memory_mb)
+        if self.max_cpu_percent > 0:
+            limits.max_cpu_percent = float(self.max_cpu_percent)
+        return limits
 
     # ------------------------------------------------------------------
     # Capability narrowing
@@ -191,12 +227,15 @@ class MCPServerDefinition(BaseModel):
             "command": self.command,
             "args": list(self.args),
             "env_keys": sorted(self.env),
+            "header_keys": sorted(self.headers),
             "cwd": self.cwd,
             "url": self.url,
             "trust": self.trust,
             "risk": self.risk,
             "timeout": self.timeout,
             "idle_ttl": self.idle_ttl,
+            "max_memory_mb": self.max_memory_mb,
+            "max_cpu_percent": self.max_cpu_percent,
             "enabled": self.enabled,
             "allow_tools": list(self.allow_tools),
             "deny_tools": list(self.deny_tools),
@@ -215,6 +254,7 @@ class MCPRegistry:
         self.problems: list[dict[str, str]] = []
         self._servers: dict[str, MCPServerDefinition] = {}
         self._loaded = False
+        self._fingerprint_seen: tuple[tuple[str, int, int], ...] = ()
 
     # ------------------------------------------------------------------
     # Loading
@@ -222,6 +262,7 @@ class MCPRegistry:
 
     def load(self) -> dict[str, MCPServerDefinition]:
         """(Re)read the directory; never raises, broken files become problems."""
+        self._fingerprint_seen = self._fingerprint()
         self._servers = {}
         self.problems = []
         self._loaded = True
@@ -287,9 +328,35 @@ class MCPRegistry:
     # Access
     # ------------------------------------------------------------------
 
-    def servers(self) -> dict[str, MCPServerDefinition]:
-        if not self._loaded:
+    def _fingerprint(self) -> tuple[tuple[str, int, int], ...]:
+        """Directory fingerprint:每份定义的名字、mtime 与大小。"""
+        try:
+            entries: list[tuple[str, int, int]] = []
+            for path in sorted(
+                [*self.directory.glob("*.json5"), *self.directory.glob("*.json")]
+            ):
+                try:
+                    stat = path.stat()
+                    entries.append((path.name, stat.st_mtime_ns, stat.st_size))
+                except OSError:
+                    entries.append((path.name, 0, 0))
+            return tuple(entries)
+        except OSError:  # pragma: no cover - 目录消失等极端情况
+            return ()
+
+    def _ensure_fresh(self) -> None:
+        """Re-read when the directory changed under us.
+
+        daemon 会**长时间持有**同一个 registry，而 `~/.trimum/mcp/` 的承诺是
+        「放一个文件就是全部安装步骤，不用重启任何东西」。只靠 `_loaded` 缓存
+        的话，M4 之后新加的定义要等 daemon 重启才可见（真机验收时踩到：
+        新增的 httpdemo.json5 一直报 not found）。
+        """
+        if not self._loaded or self._fingerprint() != self._fingerprint_seen:
             self.load()
+
+    def servers(self) -> dict[str, MCPServerDefinition]:
+        self._ensure_fresh()
         return dict(self._servers)
 
     def reload(self) -> dict[str, MCPServerDefinition]:
@@ -297,8 +364,7 @@ class MCPRegistry:
 
     def get(self, name: str) -> MCPServerDefinition | None:
         key = (name or "").strip().lower()
-        if not self._loaded:
-            self.load()
+        self._ensure_fresh()
         return self._servers.get(key)
 
     def names(self) -> list[str]:
@@ -333,8 +399,20 @@ def _short_validation_error(exc: ValidationError) -> str:
 class MCPServerPool:
     """Lazy ``MCPClient`` per enabled server, keyed by server name.
 
-    ``client_factory`` is injectable so tests (and future transports) can supply
-    their own client without spawning a process.
+    Three responsibilities deliberately live here instead of in the client:
+
+    * **lazy start / self-heal** — a server is started on first use, and any client
+      whose stream broke is dropped and rebuilt on the next call (a desynchronised
+      stream cannot be reused safely);
+    * **idle reaping** (M4) — a client untouched for its ``idle_ttl`` is closed, so
+      a fleet of MCP servers does not stay resident forever;
+    * **cgroup binding** (M4) — stdio children are handed to the same resource
+      controller the child agents use.  Best effort by design: without root the
+      controller cannot write ``/sys/fs/cgroup``, and that degrades to a recorded
+      ``unavailable`` state rather than a failed call.
+
+    ``client_factory``, ``cgroup`` and ``clock`` are injectable so tests can drive
+    lifecycle without spawning processes or waiting wall-clock time.
     """
 
     def __init__(
@@ -343,16 +421,38 @@ class MCPServerPool:
         *,
         client_factory: Callable[[MCPServerDefinition], Any] | None = None,
         log_dir: str | Path | None = None,
+        cgroup: Any = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self.registry = registry or MCPRegistry()
         self.log_dir = Path(log_dir) if log_dir is not None else None
         self._factory = client_factory
+        self._cgroup = cgroup
+        self._clock = clock or time.monotonic
         self._clients: dict[str, Any] = {}
+        self._last_used: dict[str, float] = {}
+        self._cgroup_state: dict[str, str] = {}
+        self._reaper: asyncio.Task | None = None
         self._lock = asyncio.Lock()
 
     @property
     def clients(self) -> dict[str, Any]:
         return dict(self._clients)
+
+    @property
+    def cgroup_state(self) -> dict[str, str]:
+        """Per-server cgroup outcome (``bound`` / ``unavailable`` / ``error``)."""
+        return dict(self._cgroup_state)
+
+    def idle_seconds(self, name: str) -> float | None:
+        """Seconds since *name* was last used (None when it is not running)."""
+        key = (name or "").strip().lower()
+        if key not in self._clients:
+            return None
+        return round(self._clock() - self._last_used.get(key, self._clock()), 1)
+
+    def _touch(self, name: str) -> None:
+        self._last_used[name] = self._clock()
 
     async def client(self, name: str, *, refresh: bool = False) -> Any:
         """Return a connected client for *name* (starting it when needed)."""
@@ -372,6 +472,7 @@ class MCPServerPool:
             existing = self._clients.get(definition.name)
             if existing is not None:
                 if not refresh and getattr(existing, "alive", False):
+                    self._touch(definition.name)
                     return existing
                 # broken stream, or an explicit refresh: drop it (and its process)
                 await self._discard(definition.name)
@@ -383,10 +484,19 @@ class MCPServerPool:
                 await _safe_close(client)
                 raise
             self._clients[definition.name] = client
+            self._touch(definition.name)
+            await self._bind_cgroup(definition, client)
             return client
+
+    async def restart(self, name: str) -> bool:
+        """Close and immediately reconnect one server (``trm mcp restart``)."""
+        await self.client(name, refresh=True)
+        return True
 
     async def _discard(self, name: str) -> None:
         client = self._clients.pop(name, None)
+        self._last_used.pop(name, None)
+        self._cgroup_state.pop(name, None)
         if client is not None:
             await _safe_close(client)
 
@@ -395,17 +505,144 @@ class MCPServerPool:
             return self._factory(definition)
         return MCPClient(definition, log_dir=self.log_dir)
 
+    # ------------------------------------------------------------------
+    # cgroup binding (M4)
+    # ------------------------------------------------------------------
+
+    async def _bind_cgroup(self, definition: MCPServerDefinition, client: Any) -> None:
+        """Put a freshly started stdio child under the resource controller."""
+        pid = getattr(client, "pid", None)
+        apply_cgroup = getattr(self._cgroup, "apply_cgroup", None)
+        if self._cgroup is None or not pid or not callable(apply_cgroup):
+            return
+
+        agent_id = f"mcp-{definition.name}"
+        pid = int(pid)
+        try:
+            await apply_cgroup(agent_id, pid, definition.limits)
+        except Exception as exc:  # pragma: no cover - controller is defensive
+            self._cgroup_state[definition.name] = f"error: {exc}"
+            log.warning("mcp.cgroup_failed", server=definition.name, error=str(exc))
+            return
+
+        self._cgroup_state[definition.name] = await self._verify_cgroup(agent_id, pid)
+        log.info(
+            "mcp.cgroup_bound",
+            server=definition.name,
+            pid=pid,
+            state=self._cgroup_state[definition.name],
+        )
+
+    async def _verify_cgroup(self, agent_id: str, pid: int) -> str:
+        """Read the cgroup back: report what is *true*, not what was attempted.
+
+        ``apply_cgroup`` swallows its own permission errors, so a controller that
+        cannot write ``/sys/fs/cgroup`` would otherwise look successful.
+        """
+        reader = getattr(self._cgroup, "assigned_pids", None)
+        if not callable(reader):
+            return "applied (unverified)"
+        try:
+            pids = await reader(agent_id)
+        except Exception:  # pragma: no cover - defensive
+            return "applied (unverified)"
+        if not pids:
+            return "unavailable (not bound: needs root + cgroup v2 on Linux)"
+        return "bound" if pid in pids else "applied (pid not listed)"
+
+    # ------------------------------------------------------------------
+    # Idle reaping (M4)
+    # ------------------------------------------------------------------
+
+    async def reap(self, now: float | None = None) -> list[str]:
+        """Close clients idle longer than their ``idle_ttl``.
+
+        ``idle_ttl <= 0`` means "never reap" — a server the user wants resident.
+        A server whose definition disappeared from the registry is closed right
+        away: it can no longer be reached, so ``idle_ttl`` is beside the point.
+        """
+        moment = self._clock() if now is None else float(now)
+        reaped: list[str] = []
+        for name in list(self._clients):
+            definition = self.registry.get(name)
+            if definition is None:
+                # 定义被删掉或写坏了：这个 client 已经不可达（dispatcher 也查不到
+                # 它），留着只会白占一个进程，别等 DEFAULT_IDLE_TTL 才收。
+                await self._discard(name)
+                reaped.append(name)
+                continue
+            ttl = float(getattr(definition, "idle_ttl", DEFAULT_IDLE_TTL) or 0.0)
+            if ttl <= 0:
+                continue
+            if moment - self._last_used.get(name, moment) < ttl:
+                continue
+            await self._discard(name)
+            reaped.append(name)
+
+        if reaped:
+            log.info("mcp.idle_reaped", servers=sorted(reaped))
+        return reaped
+
+    def start_reaper(self, *, interval: float = 30.0) -> asyncio.Task | None:
+        """Start the background reaper (idempotent; returns the task).
+
+        The interval is floored at 50 ms: a sub-millisecond sweep would spin the
+        event loop for no benefit, while tests still need something fast.
+        """
+        if self._reaper is not None and not self._reaper.done():
+            return self._reaper
+        self._reaper = asyncio.create_task(
+            self._reaper_loop(max(0.05, float(interval))), name="mcp-idle-reaper"
+        )
+        return self._reaper
+
+    async def stop_reaper(self) -> None:
+        """Cancel the background reaper (safe to call when it never started)."""
+        task, self._reaper = self._reaper, None
+        if task is None or task.done():
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def _reaper_loop(self, interval: float) -> None:
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    await self.reap()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # a failed sweep must not kill the loop
+                    log.warning("mcp.reaper_failed", error=str(exc))
+        except asyncio.CancelledError:  # pragma: no cover - shutdown path
+            raise
+
+    # ------------------------------------------------------------------
+    # Introspection
+    # ------------------------------------------------------------------
+
     async def status(self) -> list[dict[str, Any]]:
-        """Configured servers plus the state of any live client."""
+        """Configured servers plus the live state of any running client."""
+        moment = self._clock()
         rows: list[dict[str, Any]] = []
         for _, definition in sorted(self.registry.servers().items()):
             client = self._clients.get(definition.name)
+            connected = bool(client is not None and getattr(client, "alive", False))
+            last = self._last_used.get(definition.name)
             row = {
                 "server": definition.name,
                 "enabled": definition.enabled,
                 "trust": definition.trust,
                 "transport": definition.transport,
-                "connected": bool(client is not None and getattr(client, "alive", False)),
+                "url": definition.url,
+                "connected": connected,
+                "idle_ttl": definition.idle_ttl,
+                "idle_seconds": (
+                    round(moment - last, 1) if connected and last is not None else None
+                ),
+                "pid": getattr(client, "pid", None) if connected else None,
+                "cgroup": self._cgroup_state.get(definition.name, ""),
             }
             if client is not None:
                 row["client"] = client.to_dict() if hasattr(client, "to_dict") else {}
@@ -416,6 +653,7 @@ class MCPServerPool:
         await self._discard((name or "").strip().lower())
 
     async def close_all(self) -> None:
+        await self.stop_reaper()
         for name in list(self._clients):
             await self._discard(name)
 
