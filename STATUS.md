@@ -1,11 +1,11 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-20（M3 策展导入器完成 + M3 真机验证与两处真实缺陷修复）
+> 最后更新：2026-09-20（M4 传输与生命周期完成 + 真机验收 16 PASS / 0 FAIL + 两处真缺陷修复）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
-> 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3**（E2 + M3，2026-09-20，见文末 §M3），下一项 **M4**（HTTP/SSE + 生命周期）；其余为 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）。
-> 真机：M2/M3 的代码路径已在 Ubuntu 真机跑通测试（2026-09-20，739 passed / 11 failed / 2 skipped，无回归，见文末「M3 真机验证 + 两处真实缺陷修复」）。
+> 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3/M4**（见文末「M4 传输与生命周期」），下一项是**远端工具聚合进 `ToolRegistry`**（`<server>__<tool>`）；其余为 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）。
+> 真机：M4 已在 Ubuntu 真机验收（2026-09-20，隔离 daemon **16 PASS / 0 FAIL**；全量 827 passed / 11 failed / 2 skipped，11 项为既有宿主状态基线，无回归）。
 
 ---
 
@@ -858,3 +858,55 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 
 ### 提交与分支
 - server `209c98e` / main `e0ad16f` / ubuntu `3040b00` / arch-linux `9925c19`（同一提交 cherry-pick）
+
+---
+
+## M4 传输与生命周期（2026-09-20）
+
+### 交付内容
+
+| 子项 | 落点 | 测试 |
+|---|---|---|
+| `streamable-http` 传输 | `mcp_client.MCPHttpTransport` + `parse_sse_messages()`：JSON / SSE / 202 无回包 / 404 会话过期 / 超时 / 断连分类，`Mcp-Session-Id` 复用与协议版本回写 | `tests/test_mcp_http_transport.py`（29） |
+| 空闲回收 | `MCPServerPool.reap/start_reaper/stop_reaper`，`idle_ttl` 默认 300s、`0` = 常驻，`clock` 可注入 | `tests/test_mcp_lifecycle.py`（18） |
+| cgroup 绑定 | `_bind_cgroup()` + `_verify_cgroup()`（读回 `assigned_pids` 再报状态，不把「没报错」当成功）；`ResourceController.assigned_pids()` 默认实现 | 同上 |
+| daemon 常驻池 | `api_server.build_mcp_pool()/wire_mcp_dispatchers()/start_mcp()`；`AppState.mcp_pool`/`mcp_reaper`；shutdown `close_all()`；IPC `mcp.status`/`mcp.restart` | `tests/test_mcp_daemon.py`（24） |
+| CLI | `trm mcp status`（daemon 在线走 IPC，否则本地读定义）、`trm mcp restart <server>`（无 daemon 时「起一次验证再关掉」） | 同上 |
+| 运维文档 | `docs/OPERATIONS.md` 新增「MCP server 运维（M4）」；`scripts/sync_opt_m4.sh`（sudo，sha256 校验）；`scripts/accept_m4.py` | — |
+
+新增 71 项测试（29 + 18 + 24）。本地 **825 passed / 8 failed / 7 skipped**，8 项与既有基线逐条一致；
+真机 Ubuntu **827 passed / 11 failed / 2 skipped**，11 项与同步前同一批（宿主状态缺失），**无回归**。
+
+### 真机验收（`scripts/accept_m4.py`，隔离 daemon：8323 端口 + 独立 socket/db/日志）
+
+**16 PASS / 0 FAIL**（开发树与部署树 `/opt/trimum` 各跑一次，两次都是 16/0）
+
+- 接线后 `mcp.status` 的 `source=daemon`、`running=0`（不会提前拉起任何 server）
+- `mcp.restart demo` → pid 14091，再 restart → 14095（真的停旧起新）
+- `idle_ttl=5` 的 demo 被后台回收器回收；`idle_ttl=300` 的 httpdemo 不受影响
+- `streamable-http` 定义在真机完成真实协议往返（列出 7 个工具），`transport=http`
+- cgroup 状态 `unavailable (not bound: needs root + cgroup v2 on Linux)` —— 非 root 降级，调用不受影响
+- 不存在的 server 报 `not found`，不是静默成功
+
+### 真机暴露并修掉的两个真缺陷
+
+| 现象 | 根因 | 修法 |
+|---|---|---|
+| `trm --config X mcp status` 报 `source: cli`，隔离 daemon 被完全绕过（首轮验收 7 条断言全崩） | `cli/commands/mcp.py::_daemon_config()` 写死 `Config()`，问的是默认 socket 上的**另一个** daemon；拿不到就静默退回本地一次性路径 | 改走 `load_config(args)`（与其它命令同一口径）；回归 `test_the_daemon_call_honours_config` / `test_restart_command_also_honours_config` |
+| daemon 启动后新放进 `~/.trimum/mcp/` 的定义一直报 `not found` | `MCPRegistry` 只靠 `_loaded` 缓存，常驻进程里永不失效 —— M4 之前每个 `trm mcp call` 都是新进程，所以看不出来 | `_ensure_fresh()` 按目录指纹（名字 / mtime / 大小）重读；回归 `TestDropInDefinitions`（含「运行中的池也能看到后加的定义」） |
+| 生产 daemon 冒烟时删掉 `~/.trimum/mcp/demo-echo.json5`，已在跑的子进程 45s 后仍在（要等 `DEFAULT_IDLE_TTL`=300s） | `reap()` 对「定义已消失」的 server 退回默认 TTL 兜底；但定义没了之后 dispatcher 也查不到它，这个进程已经不可达 | `reap()` 对 `registry.get(name) is None` 直接回收；回归 `test_a_deleted_definition_closes_the_running_client` |
+
+### 部署状态
+
+- `/opt/trimum` **已装 M4**（2026-09-20 17:33，用户 sudo 执行）；daemon 17:35 重启后 IPC `mcp.status` 返回 `[]`（新代码在跑）。
+- 生产 daemon 冒烟全通：热插 `demo-echo.json5` → `trm mcp status` 立刻可见（`source: daemon`）→
+  `trm mcp restart demo-echo` 拉起真进程（pid 18797，cgroup 记为 `unavailable (not bound: needs root + cgroup v2 on Linux)`）→
+  `trm mcp tools demo-echo` 列出 4 个工具 → 删掉定义后 `status` 不再列出它。
+- 验收后又修了 `reap()` 的「定义消失即时回收」（缺陷 3），所以 `/opt/trimum` 值得再装一次：
+  `sudo bash /tmp/sync_opt_m4.sh --check` → `sudo bash /tmp/sync_opt_m4.sh`（新 sha `a146fb41…`，只会动 1 个文件），
+  再以 guzhujushi 身份 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`。
+- `/home/guzhujushi/trimum`（开发树）已同步，跑过全量测试与隔离验收。
+
+### 提交与分支
+
+- 待办：四分支 cherry-pick + 推送（等用户确认）。

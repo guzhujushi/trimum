@@ -66,6 +66,63 @@ ssh guzhujushi@100.115.86.48 'sudo bash /tmp/sync_opt_tree.sh --fix-home'  # 顺
 - 告诉用户在真机执行：`sudo bash /tmp/sync_opt_tree.sh`。
 - 仓库内保留副本：`scripts/sync_opt_tree.sh`（全树）、`scripts/sync_opt_tests.sh`（仅 tests 与 scripts，旧）。
 
+## MCP server 运维（M4，2026-09-20）
+
+定义即安装：`~/.trimum/mcp/<name>.json5`（`TRIMUM_MCP_DIR` 可换目录）。**deny-by-default**：
+没有 `enabled: true` 的定义会被加载、但永不启动。daemon 按目录指纹热加载——新增或改写定义，
+下一次读状态 / 调用就生效，**不用重启 daemon**（M4 之前每个 `trm mcp call` 都是新进程，看不出这点）。
+
+### 定义字段
+
+| 字段 | 说明 |
+|---|---|
+| `transport` | `stdio`（默认）/ `http` / `streamable-http` / `streamable_http` |
+| `command` `args` `env` | stdio：本机子进程 |
+| `url` `headers` | http 系：远端 MCP 端点。`headers` 里放 token，**不回显**（`trm mcp list` 只列键名） |
+| `trust` | `local` / `cloud`；`cloud` 额外继承破坏性工具默认黑名单 |
+| `enabled` | 默认 `false`（要显式打开） |
+| `allow_tools` / `deny_tools` | glob，deny 优先 |
+| `timeout` | 单次调用超时（秒） |
+| `idle_ttl` | 空闲回收阈值（秒），默认 300；**`0` = 常驻不回收** |
+| `max_memory_mb` / `max_cpu_percent` | 交给 cgroup 的资源上限（Linux） |
+
+### 生命周期（daemon 内）
+
+- 一个 server 一个子进程 / 会话，**按名复用**；坏掉的流直接丢弃重建（自愈）。
+- **空闲回收**：回收器每 30s 扫一轮（`api_server.MCP_REAPER_INTERVAL_SECONDS`），
+  超过自己 `idle_ttl` 的 server 关掉；`idle_ttl: 0` 的常驻。
+- **cgroup 绑定**：stdio 子进程交给 `create_resource_controller()`，`agent_id = mcp-<name>`。
+  非 root / 无 cgroup v2 时 `apply_cgroup` 是空操作，状态记为
+  `unavailable (not bound: needs root + cgroup v2 on Linux)` —— **只记录，不影响调用**。
+- 子进程 stderr 落 `<logging.file 同目录>/mcp-<name>.log`，**不走管道**（避免 64KB 写满卡死）。
+
+### 观测与操作
+
+```bash
+trm mcp list                    # 定义与启用状态（不启动任何进程）
+trm mcp status                  # 谁在跑：pid / 空闲秒数 / cgroup 状态
+trm mcp status --json           # source: daemon | cli
+trm mcp restart <server>        # 停旧起新，其它 server 不受影响
+trm mcp tools [server]          # 列工具（会启动 server）
+trm mcp call <server> <tool> '{"k":"v"}'   # 调用（完整 ToolGateway 分层 + mcp_call 审计）
+```
+
+- `source: daemon` = 状态来自常驻 daemon 的共享池（真实进程）；`source: cli` = daemon 不在线，
+  只读定义（此时一个 server 都不会在跑，这是正常结果而不是故障）。
+- `--config X` 决定问哪个 daemon（`X` 里的 `core.socket_path`）；`--dir Y` 则强制本地读 `Y` 的定义。
+- 无 daemon 时 `trm mcp restart <server>` 的含义是「起一次证明定义还能用，退出前再关掉」。
+- 排障：`status` 的 `cgroup` 列 / `pid` 列；`<日志目录>/mcp-<name>.log`；
+  审计 `trm log audit --json`（`event_type=mcp_call`，只记参数**键名**，不记值）。
+- IPC 方法：`mcp.status`、`mcp.restart`（JSON-RPC over Unix socket，与 CLI 同源）。
+
+### 部署（`/opt/trimum` 需要 sudo）
+
+- `sudo bash /tmp/sync_opt_m4.sh --check` 先看差异 → `sudo bash /tmp/sync_opt_m4.sh` 安装
+  （脚本带 sha256 校验；仓库副本 `scripts/sync_opt_m4.sh`）。
+- 装完以 guzhujushi 身份重启 daemon：`bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`。
+- 无人值守验收：`scripts/accept_m4.py`（起 8323 端口的隔离 daemon，跑 16 项断言，
+  不碰生产 daemon；本机 `python scripts/accept_m4.py` 亦可）。
+
 ## 收尾清单
 - 发布前跑 CLI 测试：`pytest tests/test_cli.py -q`
 - 全量测试跳过已知证书问题：`pytest tests -q --ignore=tests/test_agent_cert.py`
@@ -115,3 +172,6 @@ ssh guzhujushi@100.115.86.48 'sudo bash /tmp/sync_opt_tree.sh --fix-home'  # 顺
 | Agent 日志 | `~/.local/share/trimum/agent-logs/<agent_id>.log` |
 | 审计 | `~/.local/share/trimum/audit.jsonl` |
 | 运行日志 | `~/.local/share/trimum/trimum.log` |
+| MCP 定义 | `~/.trimum/mcp/<name>.json5`（`TRIMUM_MCP_DIR` 可换目录） |
+| MCP 子进程日志 | `<logging.file 同目录>/mcp-<name>.log` |
+| MCP 验收脚本 | `scripts/accept_m4.py`（隔离 daemon，16 项断言） |
