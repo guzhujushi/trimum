@@ -991,10 +991,9 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
   在 5 秒后把它复活并先绑上 8321，脚本自己起的实例反而失败 —— 日志里只留 `[Errno 98]`，看起来像端口被外人占了。
   判断依据：`ss -ltnp` 里占端口的 PID 其 `fd1`/`fd2` 指向 `/run/systemd/journal/stdout`（日志进 journal，
   不写 `/tmp/trmd.out`）。已给脚本加守卫，并在 `docs/OPERATIONS.md` 新增「daemon 托管与重启（systemd）」。
-- **遗留待定**：`/home/guzhujushi/.trimum/mcp-tools.json` 里留着上一轮冒烟的 4 条条目，而 `~/.trimum/mcp/`
-  目录已不存在。`prune_mcp_index()` 对「目录读不到」按设计**不动作**（怕误清整份缓存），于是这 4 条成了
-  调用必然失败的幽灵条目。二选一：删掉这份缓存（`rm ~/.trimum/mcp-tools.json`，下次成功 `tools/list` 会重建），
-  或让「缺目录」也算「一个 server 都没有」。
+- **幽灵缓存已清**（2026-09-20 21:03）：`~/.trimum/mcp-tools.json` 备份到 `/tmp/mcp-tools.json.bak-20260920` 后删除 —— 清后 `trm tool list --mcp` 为 **0 条**、`trm tool list` 总数从 17 回到 **13**（全部为本地工具）。语义问题本身留待定：`prune_mcp_index()` 对「目录读不到」按设计不动作，所以「删掉全部定义」时缓存仍会变成幽灵条目。已记入 `TODO.md`：二选一 = 让「缺目录」也算「一个 server 都没有」，或加一条 `trm mcp index --prune` 手工清理入口。
+- **daemon 托管形态改判**（2026-09-20 晚）：`trmd.service` 现为 **`enabled + active`**（`Restart=always` / `RestartSec=5` / `User=guzhujushi`），重启一律 `sudo systemctl restart trmd`。历史：当天曾先选「纯手工 daemon」，但单元被重新拉起后与手工进程互抢 8321（journal `NRestarts` 已到 2150）。`scripts/restart_trmd.sh` 已加守卫；切换工具仍为 `scripts/fix_trmd_loop.sh`。`trm status` 实测 `source: rpc`（socket `/run/user/1000/trimum.sock` 正常）。
+- **开发树 `.venv/bin/trm` 修复**：脚本仍指向已消失的 `trimum_core.main.cli_dispatch`，改成 `trimum_core.cli:main` 后 `trm --version` 与 `trm commands --check`（63 条）正常。部署树 `/opt/trimum/venv/bin/trm` 一直是好的。
 
 ### 提交与分支
 
