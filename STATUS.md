@@ -847,7 +847,14 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - **独立实例**：`8322 + 独立 socket/db` 正常启停；`/health` 的 HTTP 与 IPC 两条路都返回 `0.5.0`；SIGTERM 退出时清理自己的 socket
 - 提交：server `2f6adbb` / main `2a80fb9` / ubuntu `9ecf111` / arch-linux `fe05347`（同一提交 cherry-pick，四分支内容一致）
 
-**待用户执行（sudo）**：`sudo bash /tmp/sync_opt_singleton_fix.sh`（把修复补进 `/opt/trimum`，即 daemon 运行树），随后以 guzhujushi 身份跑 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`（不要用 sudo）→ `trm status` 的 `version` 应从 `0.2.1` 变成 `0.5.0`
+**已部署 + 验收（2026-09-20 16:49，用户 sudo 执行）**：`sudo bash /tmp/sync_opt_singleton_fix.sh` → 补丁进 `/opt/trimum`（src + tests），daemon 以 guzhujushi 身份重启（PID 12271）。验收脚本 `/tmp/accept_singleton_fix.sh`：**9 PASS / 0 FAIL**
+
+- 版本统一：HTTP `/health` = IPC `health` = `trimum_core.__version__` = `0.5.0`（`trm status` 亦从 `0.2.1` 变 `0.5.0`）
+- `trmd`（同端口）→ `exit 3`「TCP 127.0.0.1:8321 已被占用（已有服务在监听）」；`trmd --port 8322` → `exit 3`「IPC socket /run/user/1000/trimum.sock 已被其它进程监听」；两次输出都不含裸 `Errno 98`
+- socket `stat`（inode/mtime/size）前后一致 → 未被抢占；daemon 仍单实例，`trm status` 仍 `source: rpc`
+- 冒烟：`health` / `version`（`trimum v0.5.0`）/ `agent list` / `workflow list` / `mcp list` / `log audit --json` / `exec`（回显 `trimum-acceptance-ok`）全通
+- 故障复发检查：`trmd.service` `disabled` + `inactive`、`NRestarts=0`、daemon 起来后 `[Errno 98]` 计数 0
+- 备注：`trm health` 打印的 `[MISSING] env API_KEY` 属本地宿主检查（该 shell 未导出 key），与本次改动无关
 
 ### 提交与分支
 - server `209c98e` / main `e0ad16f` / ubuntu `3040b00` / arch-linux `9925c19`（同一提交 cherry-pick）
