@@ -4,8 +4,8 @@
 > 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E4 / E5 / E7 待做
 > 测试：本地 **915 passed / 5 failed / 7 skipped**（5 项 = 既有基线：Windows 沙箱 + PATH 缺 `python.exe` + LLM 断网）。本轮新增 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录），基线由 8 项降到 5 项 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu **914 passed / 11 failed / 2 skipped**（同机对照 M4 终态基线 827/11/2，失败名单逐条相同，无回归）
 > 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固/M4 均已推送四分支（M4：server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）；**M4.5 本轮提交号见节尾记录**。
-> ⏳ **等用户执行（需要 sudo，脚本已 scp 到真机 `/tmp`）**：`sudo bash /tmp/sync_opt_tree.sh --dry-run` 先看要写什么 → `sudo bash /tmp/sync_opt_tree.sh`（全树同步，同时补上 M4 遗留的 `reap()` 修复）→ 以 guzhujushi 身份 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`（别用 sudo）→ `trm mcp status` 看 `source: daemon`，`trm tool list --mcp` 看聚合条目。
-> ▶ **下次继续从这里开始（2026-09-20 M4.5 收尾）**：M4.5（远端工具聚合）代码 / 测试 / 文档已完成并推送四分支，下一步 = **真机同步 + 复测**，再往后是 **E4 / E5 / E7**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`。
+> ✅ **真机部署已完成（2026-09-20 20:52）**：`sudo bash /tmp/sync_opt_tree.sh` 全树同步落地，`/opt/trimum` 三个关键文件与本地 HEAD 逐文件对上（`mcp_bridge.py` `f503f505…` / `mcp_registry.py` `86447a65…` / `tool_gateway.py` `47d8a205…`），部署树 `[4b/5]` 自检通过；daemon 20:52:27 启动 → 跑的就是新代码（`trm status` 的 `source: rpc`，PID 23850）。真机聚合实测 4 条 `source=mcp`（`echo__echo` / `echo__fail` / `echo__slow` / …），总数 17；幽灵缓存已清（备份 `/tmp/mcp-tools.json.bak-20260920`），清后 `tool list --mcp` 为 0 条、总数 13。
+> ▶ **下次继续从这里开始（2026-09-20 M4.5 收尾之后）**：M4 / M4.5 代码、测试、文档、真机部署全部闭环 → 下一步 = **E4 广接入**（通用 CLI 适配器 + workflow 目录导入，并顺带补 E3 遗留的 `trm skill import`），再往后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`。
 
 ---
 
@@ -256,7 +256,7 @@ trm config set <key> <value>       # 设置配置项
 - [x] **M2. 注册与鉴权**（2026-09-20）：`mcp_registry.py`（`~/.trimum/mcp/<name>.json5`，deny-by-default + glob 白黑名单 + 连接池）+ `MCPDispatcher` 实装 + `ToolGateway` 回填审计 + `mcp_call` 事件 + `trm mcp list/tools/call/paths`；`tests/test_mcp_registry.py`（27）/ `tests/test_mcp_dispatcher.py`（30）
   - 顺带修掉：`trm --json` 的 stdout 被 INFO 日志污染（CLI 诊断改走 stderr）；连接池 `refresh` 泄漏旧客户端
 - [x] **M3. 策展导入器**（2026-09-20 完成）：`mcp_catalog.py` + `trm mcp catalog import/list` → `config/mcp-catalog.yaml`（4,118 条 → **232 条候选**，`reviewed: false`，人工审核后才启用）；离线、确定性输出、拒绝覆盖已存在清单（`--force` 保留人工 `reviewed`/`name`/`note`）；`tests/test_mcp_catalog.py`（52）
-- [ ] **M4. HTTP/SSE + 生命周期**：空闲回收、cgroup 绑定、`trm mcp list/status/restart`、运维文档
+- [x] **M4. HTTP/SSE + 生命周期**（2026-09-20 完成）：连接池懒启动 + 空闲回收（`reap()`）、`trm mcp list/status/restart`、运维文档；真机基线 827 passed / 11 failed / 2 skipped（均为既有环境失败）
 
 策展红线：优先 `uvx` / `pip install` / 单二进制（Go/Rust），`npx` 派系默认不收。
 （2026-09-20 快照：awesome 列表 4,117 条中 `npx` 626、`pip install` 127、`uvx` 108。）
@@ -272,8 +272,11 @@ trm config set <key> <value>       # 设置配置项
 ### 其他待办（承接之前）
 - [ ] **浏览器工具备选（2026-09-20 调研）**：`epiral/bb-browser`（6,222★，CLI + MCP，用本机登录态控制 Chrome）已获用户认可，可作为自研 CDP 工具的补充/对照，待评估接入
 - [x] **#3.8 Browser Tool 后端收尾**：opencli 已真正弃用（`tool.json5.disabled` + 加载器只认 manifest，2026-09-19 验证不再报 module_failed）
-- [ ] **真机 `/opt/trimum` 仍是旧树**（2026-09-20 实测）：`src/trimum_core` 缺 9 个模块（`mcp_client` / `mcp_registry` / `mcp_catalog` / `env_toolchain` / `hosts` / `identity` / `paths` / `skill_sync` / `setup_wizard`）、`cli/commands` 缺 5 个（`commands` / `mcp` / `env` / `setup` / `skill`）、`config/` 缺 5 个 yaml（含 `mcp-catalog.yaml`）、`tests/` 少 9 个文件；`config` / `tests` / `scripts` / `src/trimum_core` 为 root 属主，`tar` 直解会被拒 → 已投送 `sudo bash /tmp/sync_opt_tree.sh`（等用户执行），同步后重启 daemon；不影响 daemon 当前运行
-- [ ] **daemon 部署形态**（P2）：`apply_cgroup` 仍需 root，普通用户跑时降级；**2026-09-20 已二选一：走「纯手工 daemon」** —— `trmd.service` 已 `disable --now`，daemon 由 `scripts/restart_trmd.sh` 以 guzhujushi 身份管理；要改回 systemd 托管用 `sudo bash scripts/fix_trmd_loop.sh --use-systemd`
+- [x] **真机 `/opt/trimum` 已同步**（2026-09-20 20:52 全树同步）：补上 M4 遗留的 `reap()` 修复，缺的 9 个模块 / 5 个 CLI 命令 / 5 个 yaml / 9 个 test 文件全部进树；复核哈希见文件头
+- [x] **daemon 部署形态**（P2，2026-09-20 改判）：**回到 systemd 托管** —— `trmd.service` 现为 `enabled + active`（`Restart=always` / `RestartSec=5` / `User=guzhujushi`），手工 daemon 已退出。重启一律 `sudo systemctl restart trmd`；`scripts/restart_trmd.sh` 已加 systemd 守卫（检测到单元 active 时不再抢端口，非 root 下打指引并 `exit 3`）。历史：当天曾先选「纯手工 daemon」，但单元被重新拉起后与手工进程互抢 8321（journal 里 `NRestarts` 已到 2150），故改判。切换工具仍保留 `scripts/fix_trmd_loop.sh`
+- [x] **开发树 `.venv/bin/trm` 入口失效**（2026-09-20 修）：脚本仍是旧的 `from trimum_core.main import cli_dispatch`（`cli_dispatch` 早已不存在）→ 改成 `from trimum_core.cli import main` 后 `trm --version` / `trm commands --check`（63 条）均正常。注意该 venv **没装 setuptools**，`pip install -e . --no-build-isolation` 会 `BackendUnavailable`，要正规重装得先装 setuptools（需网络）
+- [ ] **幽灵聚合条目的语义待定**（M4.5 遗留）：`prune_mcp_index()` 对「`~/.trimum/mcp/` 目录不存在」按设计不动作（怕误清整份缓存），于是「删掉全部定义」时缓存里的 `a__b` 会继续冒充可用工具。二选一：让「缺目录」也算「一个 server 都没有」，或加一条 `trm mcp index --prune` 手工清理入口
+- [ ] **`trm env install` 未在 Linux 真机实跑**（E3 遗留）：代码与 34 项测试就绪，只差真机跑一次 `--dry-run` + 实装
 - [ ] **daemon 单实例与 socket 加固（2026-09-20 真机发现，P1；运维侧已闭环）**：
   - [x] 运维处置：`trmd.service`（enabled + `Restart=always`）与手工 daemon 抢 `127.0.0.1:8321`，单元每 5s `exit 3`（`NRestarts` 到 117）→ `scripts/fix_trmd_loop.sh`；执行方案A后 `trmd` 为 disabled/inactive、`Errno 98` 归零、`trm status` 回到 `source: rpc`
   - [x] 端口冲突应 fail-fast：端口/socket 被占时在触碰 socket 之前退出，并提示「已有 daemon 在跑」（现在只会抛 uvicorn 的 `[Errno 98]`）
