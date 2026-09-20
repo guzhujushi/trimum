@@ -155,6 +155,21 @@ trm mcp call echo__echo '{"text": "hi"}'  # 与 `trm mcp call echo echo '...'` �
 - 无人值守验收：`scripts/accept_m4.py`（起 8323 端口的隔离 daemon，跑 16 项断言，
   不碰生产 daemon；本机 `python scripts/accept_m4.py` 亦可）。
 
+## 工具链安装（`trm env`，2026-09-20 真机验证）
+
+- `trm env inventory` 只读盘点：包管理器探测 + 已装包 + catalog 覆盖（真机 25 项）。
+- `trm env install <name>...` 的权限规则：
+  - 非 root 时，对 apt / pacman / dnf 这些 `needs_sudo` 的包管理器，命令会自动加 `sudo` 前缀
+    —— 所以**必须有可用的提权方式**（有 TTY 能输密码，或 NOPASSWD）；
+  - 无人值守会话（CI、`ssh host 'trm env install x'`）里 sudo 拿不到密码，会以
+    `[exit=1] sudo apt-get install -y x` + **stderr 末行**（实测 `sudo: 需要密码`）结束。
+    真要无人值守安装，就以 root 跑，或先配好 NOPASSWD；
+  - 参考脚本：`/tmp/trm_env_install_real.sh`（root 下的真执行验证，全是已装包，幂等）。
+- `trm env install` 的确认：**stdin 不是 TTY 时一律按「没确认」处理**并提示 `--yes`
+  （2026-09-20 修：以前只挡 `EOFError`，管道开着但没内容时 `input()` 会永久挂死）。
+  `ToolGateway` 的 Layer 1 终端确认同样 fail closed（非 TTY 直接拒绝，提示走 JIT 令牌）。
+- 已装条目是幂等的：`already installed: x` + 退出码 0，不弹确认、不执行命令。
+
 ## daemon 托管与重启（systemd）
 
 生产机 `/etc/systemd/system/trmd.service` 是 daemon 的**真正托管者**：

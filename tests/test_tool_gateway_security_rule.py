@@ -128,6 +128,43 @@ class TestSecurityRuleWiring:
         assert resp.action == Action.AUTO
 
     @pytest.mark.asyncio
+    async def test_confirm_fails_closed_when_stdin_is_not_a_tty(self, monkeypatch):
+        """管道还开着时 input() 会一直块住 → 非 TTY 必须直接拒绝（fail closed）。"""
+        import trimum_core.tool_gateway as gateway_module
+
+        class NotATty:
+            def isatty(self):
+                return False
+
+            def readline(self, *args):
+                return ""
+
+        monkeypatch.setattr(gateway_module.sys, "stdin", NotATty())
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+        gw = ToolGateway(security_rule=FakeRule())
+        assert (
+            await gw._prompt_confirm("rm -rf /", RiskLevel.CRITICAL, "why", "terminal")
+            is False
+        )
+
+    @pytest.mark.asyncio
+    async def test_confirm_reads_the_answer_on_a_tty(self, monkeypatch):
+        import trimum_core.tool_gateway as gateway_module
+
+        class Tty:
+            def isatty(self):
+                return True
+
+        monkeypatch.setattr(gateway_module.sys, "stdin", Tty())
+        gw = ToolGateway(security_rule=FakeRule())
+
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+        assert await gw._prompt_confirm("echo hi", RiskLevel.MEDIUM, "why", "terminal") is True
+
+        monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+        assert await gw._prompt_confirm("echo hi", RiskLevel.MEDIUM, "why", "terminal") is False
+
+    @pytest.mark.asyncio
     async def test_resource_limit_error_becomes_deny(self):
         rule = FakeRule(error=TrimumError(TRMErrorCode.RESOURCE_LIMIT_EXCEEDED, message="CPU 超限"))
         gw = ToolGateway(security_rule=rule)

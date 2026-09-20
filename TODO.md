@@ -218,7 +218,7 @@ trm config set <key> <value>       # 设置配置项
   - [x] 计划与执行分离：`plan_install` → `commands_for`（winget 一包一条）→ `run_install`；`--dry-run` 只打印
   - [x] 红线：不自建包仓库 / 清单只读（risk: low）/ 安装必须显式确认（`--yes` 或交互）/ 已装幂等（退出码 0）
   - [x] 测试：`tests/test_env_toolchain.py`（34）；`trm commands --check` → 53 条通过
-  - 遗留：`trm skill import`（生态导入）未做，顺延到 E4；`trm env install` 未在 Linux 真机实跑（等 Ubuntu 开机）
+  - 遗留：`trm skill import`（生态导入）未做，顺延到 E4；`trm env install` 已于 2026-09-20 在 Linux 真机跑通（dry-run / 幂等 / 非 root 报错，见「其他待办」末尾）
 - [ ] **E4. 广接入**：通用 CLI 适配器（`--help` → 工具条目 + 风险分级）、workflow 目录格式 + `trm workflow import`
 
 > 排序理由：Skills 层近乎零成本 → MCP 成本中等 → CLI 适配器 → workflow 目录。
@@ -276,7 +276,9 @@ trm config set <key> <value>       # 设置配置项
 - [x] **daemon 部署形态**（P2，2026-09-20 改判）：**回到 systemd 托管** —— `trmd.service` 现为 `enabled + active`（`Restart=always` / `RestartSec=5` / `User=guzhujushi`），手工 daemon 已退出。重启一律 `sudo systemctl restart trmd`；`scripts/restart_trmd.sh` 已加 systemd 守卫（检测到单元 active 时不再抢端口，非 root 下打指引并 `exit 3`）。历史：当天曾先选「纯手工 daemon」，但单元被重新拉起后与手工进程互抢 8321（journal 里 `NRestarts` 已到 2150），故改判。切换工具仍保留 `scripts/fix_trmd_loop.sh`
 - [x] **开发树 `.venv/bin/trm` 入口失效**（2026-09-20 修）：脚本仍是旧的 `from trimum_core.main import cli_dispatch`（`cli_dispatch` 早已不存在）→ 改成 `from trimum_core.cli import main` 后 `trm --version` / `trm commands --check`（63 条）均正常。注意该 venv **没装 setuptools**，`pip install -e . --no-build-isolation` 会 `BackendUnavailable`，要正规重装得先装 setuptools（需网络）
 - [x] **幽灵聚合条目的语义**（2026-09-20 收口）：原护栏「目录读不到就不动缓存」把「一个 server 都没配」和「不知道有哪些 server」混成了一件事。新增 `mcp_registry.definitions_readable()`：**目录不存在 → 照清**，**目录在但列不出来 → 不动并记 `mcp_index.prune_skipped`**；`tests/test_mcp_bridge.py` 87 → 93 项，全量 921 passed 无回归
-- [ ] **`trm env install` 未在 Linux 真机实跑**（E3 遗留）：代码与 34 项测试就绪，只差真机跑一次 `--dry-run` + 实装
+- [x] **`trm env install` 真机跑通**（2026-09-20）：dry-run / 已装幂等 / 非 root 报错三条路径已在真机验证，并修掉两个真缺陷（管道里 `_confirm()` 永久挂死、失败时不打原因）；`ToolGateway._prompt_confirm()` 同样修成 fail closed
+- [ ] **`trm env install` 的 root 真执行路径待跑**：`sudo bash /tmp/trm_env_install_real.sh`（全是已装包，幂等）
+- [ ] **`install_fn.py` 安装向导的 `prompt()` 只挡 EOFError**（2026-09-20 发现）：管道里跑 `trm install` 会在第一个提问处挂住。它是纯交互向导，建议非 TTY 时打印将要问的问题并跳过可选步骤（LLM key / 开机自启 / 立即启动）
 - [ ] **daemon 单实例与 socket 加固（2026-09-20 真机发现，P1；运维侧已闭环）**：
   - [x] 运维处置：`trmd.service`（enabled + `Restart=always`）与手工 daemon 抢 `127.0.0.1:8321`，单元每 5s `exit 3`（`NRestarts` 到 117）→ `scripts/fix_trmd_loop.sh`；执行方案A后 `trmd` 为 disabled/inactive、`Errno 98` 归零、`trm status` 回到 `source: rpc`
   - [x] 端口冲突应 fail-fast：端口/socket 被占时在触碰 socket 之前退出，并提示「已有 daemon 在跑」（现在只会抛 uvicorn 的 `[Errno 98]`）

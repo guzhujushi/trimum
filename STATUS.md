@@ -916,6 +916,32 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 
 四分支 cherry-pick 后 `git diff --name-status <target>..server` 均为空，已推送。
 
+## 收口小项（2026-09-20 晚，M4.5 之后）
+
+### `trm env install` 真机验证（E3 遗留）
+
+真机（guzhujushi，apt 2.7.14，25 条 catalog）实测四条路径：
+
+1. `trm env install neovim --dry-run` → 计划正确（`sudo apt-get install -y neovim`），exit 0；
+2. `trm env install ripgrep`（已装）→ `already installed: ripgrep` / `nothing to install`，exit 0
+   （幂等、不弹确认、不执行命令）；
+3. **修掉的缺陷一**：stdin 是「开着但没内容」的管道时（FIFO、`ssh host 'trm env install x'`、CI）
+   `_confirm()` 只挡 `EOFError`，`input()` **永久阻塞** —— 实测挂死。修法与 `trm mcp call` 同一处：
+   先看 `sys.stdin.isatty()`，无人值守只认 `--yes`。修后同一场景 **1 秒**返回 exit=1
+   （`aborted (use --yes for non-interactive runs)`）；
+4. **修掉的缺陷二**：非 root 无密码时只打印 `[exit=1] sudo apt-get install -y neovim`，
+   没有原因 → 现在补一行 stderr 末行（实测 `sudo: 需要密码`）。
+
+顺带：`ToolGateway._prompt_confirm()`（Layer 1 终端确认）有同一处挂死风险 —— 改成非 TTY
+一律 **fail closed**，并在 stderr 说明「请走 JIT 令牌 / 策略白名单」；开着的确认会把整条 agent
+流程卡死在一个等人输入的行上。
+
+- 测试：`test_env_toolchain.py` 34 → **37**、`test_tool_gateway_security_rule.py` +2；本地全量 **925 passed** /
+  5 failed / 7 skipped（失败名单与基线一致）。
+- 仍待用户执行：`sudo bash /tmp/trm_env_install_real.sh`（root 下的真执行路径，全是已装包、幂等）。
+- 同类待办（未修）：`install_fn.py` 安装向导的 `prompt()` 也只挡 `EOFError`；它是纯交互向导，
+  管道里会挂 —— 已记 `TODO.md`。
+
 ## M4.5 远端工具聚合（2026-09-20）
 
 > E2 差距表第 ③ 项（`docs/MCP-INTEGRATION-PLAN.md` §2.2）：让远端工具以 `<server>__<tool>`
