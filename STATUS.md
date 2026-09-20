@@ -909,4 +909,9 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 
 ### 提交与分支
 
-- 待办：四分支 cherry-pick + 推送（等用户确认）。
+| 内容 | server | main | ubuntu | arch-linux |
+|---|---|---|---|---|
+| M4 代码 + 测试 | `20ce9d2` | `f813fc8` | `2480869` | `117e85b` |
+| M4 文档 + 验收脚本 | `19561e0` | `8778a40` | `76a2dee` | `5ff33b9` |
+
+四分支 cherry-pick 后 `git diff --name-status <target>..server` 均为空，已推送。
