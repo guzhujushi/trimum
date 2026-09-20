@@ -275,7 +275,7 @@ trm config set <key> <value>       # 设置配置项
 - [x] **真机 `/opt/trimum` 已同步**（2026-09-20 20:52 全树同步）：补上 M4 遗留的 `reap()` 修复，缺的 9 个模块 / 5 个 CLI 命令 / 5 个 yaml / 9 个 test 文件全部进树；复核哈希见文件头
 - [x] **daemon 部署形态**（P2，2026-09-20 改判）：**回到 systemd 托管** —— `trmd.service` 现为 `enabled + active`（`Restart=always` / `RestartSec=5` / `User=guzhujushi`），手工 daemon 已退出。重启一律 `sudo systemctl restart trmd`；`scripts/restart_trmd.sh` 已加 systemd 守卫（检测到单元 active 时不再抢端口，非 root 下打指引并 `exit 3`）。历史：当天曾先选「纯手工 daemon」，但单元被重新拉起后与手工进程互抢 8321（journal 里 `NRestarts` 已到 2150），故改判。切换工具仍保留 `scripts/fix_trmd_loop.sh`
 - [x] **开发树 `.venv/bin/trm` 入口失效**（2026-09-20 修）：脚本仍是旧的 `from trimum_core.main import cli_dispatch`（`cli_dispatch` 早已不存在）→ 改成 `from trimum_core.cli import main` 后 `trm --version` / `trm commands --check`（63 条）均正常。注意该 venv **没装 setuptools**，`pip install -e . --no-build-isolation` 会 `BackendUnavailable`，要正规重装得先装 setuptools（需网络）
-- [ ] **幽灵聚合条目的语义待定**（M4.5 遗留）：`prune_mcp_index()` 对「`~/.trimum/mcp/` 目录不存在」按设计不动作（怕误清整份缓存），于是「删掉全部定义」时缓存里的 `a__b` 会继续冒充可用工具。二选一：让「缺目录」也算「一个 server 都没有」，或加一条 `trm mcp index --prune` 手工清理入口
+- [x] **幽灵聚合条目的语义**（2026-09-20 收口）：原护栏「目录读不到就不动缓存」把「一个 server 都没配」和「不知道有哪些 server」混成了一件事。新增 `mcp_registry.definitions_readable()`：**目录不存在 → 照清**，**目录在但列不出来 → 不动并记 `mcp_index.prune_skipped`**；`tests/test_mcp_bridge.py` 87 → 93 项，全量 921 passed 无回归
 - [ ] **`trm env install` 未在 Linux 真机实跑**（E3 遗留）：代码与 34 项测试就绪，只差真机跑一次 `--dry-run` + 实装
 - [ ] **daemon 单实例与 socket 加固（2026-09-20 真机发现，P1；运维侧已闭环）**：
   - [x] 运维处置：`trmd.service`（enabled + `Restart=always`）与手工 daemon 抢 `127.0.0.1:8321`，单元每 5s `exit 3`（`NRestarts` 到 117）→ `scripts/fix_trmd_loop.sh`；执行方案A后 `trmd` 为 disabled/inactive、`Errno 98` 归零、`trm status` 回到 `source: rpc`
