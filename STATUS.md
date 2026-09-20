@@ -822,5 +822,12 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
     跑 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh` 拿回 socket）
   - `sudo bash /tmp/fix_trmd_loop.sh --use-systemd` 反过来：停手工 daemon，改由 systemd 托管
 
+#### 处置结果（2026-09-20，已执行方案A）
+- `trmd`：`disabled` + `inactive`，`NRestarts=0`，journal 停在 `Stopped trmd.service`；15:53 之后 `Errno 98` 计数 **0**
+- daemon：单实例 PID 10429（手工起，以 guzhujushi 运行），同时持有 TCP `127.0.0.1:8321` 与 `/run/user/1000/trimum.sock`
+- `trm status` 回到 **`source: rpc`**（RPC 通道恢复，之前静默降级成 http）
+- smoke 全绿：`health` / `agent list` / `workflow list` / `mcp list` / `version` / `log audit --json`（90 行）/ `exec`（exit=0、输出回显、审计落盘）
+- `/opt/trimum` 也补齐了：`src/agent-sdk/` 到位、`pyproject.toml` 含 `cryptography>=42`、`config/` 5 个 yaml
+
 ### 提交与分支
 - server `209c98e` / main `e0ad16f` / ubuntu `3040b00` / arch-linux `9925c19`（同一提交 cherry-pick）
