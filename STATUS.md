@@ -1,8 +1,10 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-20（P0/P1 收尾 + 真机 Ubuntu 验证通过 + 四分支已同步推送）
+> 最后更新：2026-09-20（文档一致性修订 + CLI-Anything / MCP 调研）
 >
-> 当前阶段：Phase 3 收尾**已完成** — **P0/P1 阻断项全部清零并在真机验证通过**；下一阶段 P0 = CLI-Anything 接入（`browser` / `browser-cdp` / `clibrowser`），仅余 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）
+> 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
+> 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
+> 新的下一阶段方向：**MCP 接入**（见 `docs/MCP-INTEGRATION-PLAN.md`），其余为 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）。
 
 ---
 
@@ -74,9 +76,10 @@
   - check_landlock() / get_landlock_ruleset() — Phase 4 实现
 - [x] **Event Bus 扩展**（event_bus.py）
   - Agent 消息类型常量：TASK_ASSIGNED / TASK_STARTED / TASK_COMPLETED / TASK_FAILED / AGENT_STATUS_CHANGED
-- [ ] Agent SDK 封装（openai-agents-python 集成）
+- [x] Agent SDK 封装（`src/agent-sdk/trimum_agent.py` 已实现；未走 openai-agents-python 路线，`planner_agent.py` 可选集成）
 - [ ] 预设 Agent + Workflow 模板
-- [ ] Tool + Agent 鉴权的全链路集成测试
+- [ ] Tool + Agent 鉴权的全链路集成测试（现有覆盖分散在 `test_jit_auth.py` / `test_tool_gateway_security_rule.py`）
+- [ ] `src/agent-sdk` 端到端测试与打包验证（P2，2026-09-20 核实 `tests/` 仍无覆盖）
 
 - [x] **TokenStatusPanel**（live_console.py）— Rich token/resource 实时面板（token/CPU/memory/calls 进度条 + `__all__` 导出）
 
@@ -94,8 +97,9 @@
   - 突发高频检测（按操作类型阈值）
   - 跨沙箱操作检测
   - 新操作类型检测
-- [ ] Security Agent ↔ Agent Router / Tool Gateway 的全链路集成
-- [ ] 弹窗确认的 UI / API 入口
+- [x] Security Agent ↔ Tool Gateway 集成（Layer 2.5 `SecurityRule.can_execute()`，2026-09-19 完成）
+- [ ] Security Agent ↔ Agent Router 全链路集成
+- [ ] 弹窗确认的 UI / API 入口（CLI `LiveConsole.confirm` 可用，缺桌面/WebSocket 通道）
 
 ### Phase 4 — Security Runtime（计划中）
 - [ ] Landlock LSM 集成（os.landlock / ctypes）
@@ -159,18 +163,22 @@
 
 ## 下一步（优先级排序）
 
-1. 🔴 **SafeMind 红蓝对抗安全加固** — 隔离实验室环境 (safe_lab.py) + 红队 agent (red_team.py) + 检测规则验证器 (scarecrow/verifier.py)
-2. 🔴 **Agent SDK 封装** — 集成 openai-agents-python 作为底层，在其上包装 Tool Gateway + Security Agent 权限层（当前 `src/agent-sdk/` 是空目录，是最关键的未完成项）
-3. 🔴 **全链路集成测试通过** — 当前 296/297 pass，修复 AuditEvent 导出 bug
-4. 🟡 **普通网络场景工具化** — OpenCLI 桥接适配器按需启用
-5. 🟡 **Policy Engine 升级（正则→LLM 混合）** — 当前纯正则，需要在可疑行为时调 LLM
-6. 🟡 **BehaviorMonitor 闭环** — 反馈闭环，动态调整行为基线
-7. 🟡 **DKMS 编译 AIC8800 网卡驱动** — 一劳永逸，不让内核锁死
-8. 🟡 **CLI 流式输出** — trm CLI 加 rich/typer 流式渲染
-9. 🟡 **弹窗确认的 API/UI 入口** — 用户如何收到弹窗、如何确认
-10. 🟢 **`D:\trimum\tmp\` 清理** — 68 个 codex 临时文件
-11. 🟢 **`src/trimum-mvp/` 清理** — 废弃的 MVP 代码
-12. 🟢 **SonarQube 重扫** — 确认修复效果，无回归
+> 2026-09-20 重写：此节原为 2026-09-01 的旧清单，多数项已完成或已废弃。历史遗留说明：
+> SafeMind 红蓝对抗（仓库内无 `safe_lab.py` / `red_team.py`，从未动工）、OpenCLI 桥接（已弃用）、
+> CLI 流式输出（已实现）、`tmp/` 清理（已完成）、`src/trimum-mvp/`（已删除）、
+> 「296/297 pass 修 AuditEvent 导出」（已被本地 482 passed 取代）。
+
+1. 🔴 **MCP 接入 M0** —— 见 `docs/MCP-INTEGRATION-PLAN.md`：先确认真实用例，再定「自研 client vs 复用 openai-agents MCP」
+2. 🔴 **桌面/WebSocket 确认通道**（P2）—— `SecurityAgent.confirm()` 目前只有 CLI 交付手段
+3. 🟡 **`trm security revoke <token_id>`** —— security 命令组最后一块缺口
+4. 🟡 **`trm ask -i` 中断处理** —— `ask.py` 无 `KeyboardInterrupt` / `EOFError` 处理
+5. 🟡 **`trm memory import|export`** —— 记忆迁移（CLI 进阶）
+6. 🟡 **`src/agent-sdk` 端到端测试与打包验证**（P2）—— `tests/` 无覆盖
+7. 🟡 **Policy Engine 升级（正则→LLM 混合）** —— `LlmPolicyEngine` 已有骨架，未接线
+8. 🟡 **3.5 confidence 三级分流** —— `transform_agent` 只有 confidence 字段，无「直接执行 / 确认 / 转 Planner」分流
+9. 🟢 **SonarQube 重扫** —— 确认修复效果，无回归
+10. 🟢 **daemon 部署形态二选一** —— `trmd.service`（root）或用户态路径
+
 ---
 
 ## Ubuntu Deploy 任务进度（2026-09-11）
@@ -237,7 +245,7 @@
 - [x] 真机 smoke test：parser-ok / main-quiet-ok / `/opt/trimum/trm version`、`status` 正常
 
 ### 待办与说明
-- [ ] Phase B：`status/health/doctor/memory` 命令增强
+- [x] Phase B：`status/health/doctor/memory` 命令增强（2026-09-19 已完成，见下文 Phase B 章节）
 - [ ] 真机 venv 尚未安装 pytest；如需远端跑 pytest 需先安装
 - [ ] `/opt/trimum/tests` 当前为 root:root 755，如需同步测试文件需要 sudo
 
@@ -282,8 +290,8 @@
 - `pytest tests/test_integration.py -q -k "event_bus or unsubscribe or workflow"`：10 passed / 1 已知失败（Windows `~/.trimum` cert 权限，非本轮改动）
 
 ### 待办
-- [ ] 子 Agent 进程真实 spawn 后，把 `apply_cgroup(pid)` 接到真实 PID（当前仍为 Phase 3 stub）
-- [ ] `trm ask` 的 SSE 流式在 `--json/--quiet` 下自动关闭（已实现，需真机 TTY 验证）
+- [x] 子 Agent 进程真实 spawn 后，把 `apply_cgroup(pid)` 接到真实 PID（2026-09-19 完成：`agent_launcher.py` 真实 `create_subprocess_exec` + 真实 PID 绑定）
+- [ ] `trm ask` 的 SSE 流式在 `--json/--quiet` 下自动关闭（已实现，**待 Ubuntu 开机后 TTY 验证**）
 - [ ] `trm security revoke` 等 Phase C 后续命令
 
 
@@ -410,3 +418,73 @@
 - [ ] P2：桌面/WebSocket 确认通道、`src/agent-sdk` 端到端测试与打包验证、SonarQube 重扫
 
 > 本轮改动**已 commit 并 push**：`server` `3af9e07`、`main` `26d52f5`、`ubuntu` `4768820`、`arch-linux` `b540f36`（cherry-pick 同一提交，均已推 origin）。文档收尾（本文件与 `TODO.md`）随后同批同步到四分支。
+
+---
+
+## 2026-09-20 文档一致性修订 + CLI-Anything / MCP 调研
+
+### 文档修订
+- [x] `STATUS.md`：重写过期的「下一步（优先级排序）」（原为 2026-09-01 清单）；修正 Phase 3 清单与 Phase A/C 待办中与实际实现矛盾的勾选状态
+- [x] `TODO.md`：修正 F1 勾选与 Phase 3 审计表中 CLI-Anything 的表述，新增「MCP 接入」章节
+- [x] `docs/INTEGRATION-PLAN-BROWSER.md`：顶部加调研修正（`browser-cdp` 不存在、`browser` 依赖 Node）
+- [x] `HANDOFF.md`：加过期提示（该文件含 `trinum` 错拼，仅存历史价值）
+- [x] 校验：tracked 文件无 `trinum` / `trumim` 错拼（仅 `AGENTS.md` 的规则句本身命中）
+
+### 调研产物
+- [x] `docs/CLI-ANYTHING-RESEARCH.md` —— `HKUDS/CLI-Anything`（49.6k★ / Apache-2.0）核实结果
+- [x] `docs/MCP-INTEGRATION-PLAN.md` —— MCP 接入方案（基于 `punkpeye/awesome-mcp-servers` 快照）
+- [x] 原始件落 `tmp/research/`（已 gitignore）：仓库元数据、文件树、`registry.json`、浏览器 harness 文档、awesome 列表 README
+
+### 关键结论
+
+| 结论 | 依据 |
+|---|---|
+| `browser-cdp` 在 CLI-Anything 中不存在 | `registry.json` web 分类仅有 `browser` / `clibrowser` |
+| CLI-Anything `browser` 依赖 Node.js + npx + DOMShell 扩展 | 官方 README / HARNESS.md；与本项目「去 Node」决策冲突 |
+| trimum 已有等价自研 CDP 工具 | `~/.trimum/tools/browser/`：19 个 action，纯 Python CDP |
+| trimum 目前无任何真实 MCP 能力 | `MCPDispatcher` 为占位，固定返回 `MCP bridging not yet available` |
+| MCP 生态 TS/npx 占比高（2,271 / 626） | awesome-mcp-servers 快照统计；策展需限定 Python / 单二进制 |
+| **CLI-Anything 不是生态最优解** | Omarchy 靠「拥有环境 + 自描述命令面 + skills 分发」，Warp 靠「低门槛 YAML 目录 + 社区 PR」；CLI-Anything 只是 79 个逐应用包装器 |
+| Agent Skills 才是最大生态 | nthropics/skills 177,179★，零运行时依赖；长尾适配应写文档而非写包装器 |
+
+### 生态战略（`docs/ECOSYSTEM-STRATEGY.md`）
+- [x] 调研 Omarchy（`omacom/omarchy`，42,147★，MIT，分支 `quattro`）：459 个 `bin/omarchy-*` 脚本 + `commands --json --check` 自描述命令面 + 命令元数据注释 + `agents/skills` 符号链接分发到各宿主 + mise 懒加载启动器
+- [x] 调研 Warp（`warpdotdev/warp`，65,103★）：`warpdotdev/workflows`（853★，Apache-2.0）用 `specs/**/*.yaml` 极简格式 + 社区 PR 分发
+- [x] 结论：**做「生态集成器」而非「生态复制品」**，四层 = L0 环境清单（包管理器）/ L1 MCP / L2 Agent Skills / L3 workflow 目录；统一底座 = 生态注册表 + ToolGateway 分层 + 审计
+- [ ] E0-E7 路线图见 `TODO.md` 的「🌐 生态战略」章节（E1 已完成；E5 官方分发 / E6 选装与首启引导 / E7 自研 coding Agent 为本轮新增）
+### E1 实现（2026-09-20）
+- [x] `src/trimum_core/cli/registry.py`：命令元数据契约（`__command_meta__`）+ 从 argparse 树推导命令面 + `check_commands()` 校验规则
+- [x] `trm commands [--all] [--json] [--check]`：49 条命令 / 9 个组；argparse 别名折叠（`ask` ↔ `run`）
+- [x] `src/trimum_core/skill_sync.py`：Agent Skills 发现 + 分发（symlink → Windows junction → copy 回退）、冲突检测、`--prune` 清理悬空链接
+- [x] `trm skill list / sync / paths`；官方技能 `skills/trm-cli/SKILL.md`（教外部 agent 正确使用 trm）
+- [x] 测试：`tests/test_cli_commands_meta.py`（15）+ `tests/test_skill_sync.py`（22）
+
+**验证结果**
+- 全量：`pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider` → **519 passed / 8 failed / 4 skipped**；
+  8 项失败与 `git archive HEAD` 纯净副本逐条一致（Windows `~/.trimum` 权限 + LLM 断网），**无回归**（基线 482 passed，+37 为新增用例）
+- smoke：`trm commands --check` → `ok: 49 commands checked, no problems`；`trm skill list` / `paths` / `sync --dry-run` 输出正常
+- `--check` 首跑即抓出真问题：`ask` 的 argparse 别名 `run` 在 `_choices_actions` 中无摘要 → 已用「别名折叠 + 校验规则」修复
+
+### 待办
+- [ ] 生态战略 M0/E0：确认四层定位 + 首批 3 个用例
+- [ ] MCP 接入 M0：确认真实用例 +「自研 client vs 复用 openai-agents MCP」取舍
+- [ ] 待 Ubuntu 开机：`/opt/trimum/{tests,scripts}` 的 sudo 同步、`trm ask` 真机 TTY 验证、Arch Linux smoke、SonarQube 重扫
+
+### 文档修正（2026-09-20，用户两点提示）
+
+> 提示一：这些软件以后是**用户选装**的；将来要集成**全套开发者工具链**（大部分选装，第一次安装引导会问）；
+> trimum 将来可能参考 ECC 自研 coding Agent，所以**实际可能一个第三方 agent 都没装、也没用**。
+> 提示二：证书会包含安全相关内容（比如**可以动用哪些工具**）；**自签证书只有自己能用，别人想用需再次自签**，
+> 因此未来会有**用户体系 / 多用户体系**（`agent_cert.py` 的机器指纹绑定就是雏形）。
+
+- [x] `docs/ECOSYSTEM-STRATEGY.md`：新增 §1.3 ECC 调研（262,999★，903 个 `SKILL.md` / 68 agent / 94 command / 30+ 宿主目录）；
+  §2 加 ECC 对照行；§7 改名「官方分发渠道与信任模型」并新增 §7.1 证书 = 来源 + 身份 + 能力、§7.2 多用户前瞻、§7.3 选装模型与 `trm setup`；
+  §4 缺口加第 8/9 项；§5 路线图加 E6/E7；§6 风险加第 7/8 项；§8 原始件表补 `ecc-*`
+- [x] `PRD.md`：官方分发渠道条目拆细（来源 / 身份 / 能力、自签仅本机本用户、多用户前瞻、选装 + 首启引导、不得假设预装第三方 agent）
+- [x] `ARCH.md`：新增「身份、证书能力与多用户（规划）」章节（三层职责、`agent_cert.py` 雏形、证书 capability 与 `security_rule.py` 取交集、
+  `~/.trimum` vs `/etc/trimum` 边界、`skill_sync` 目标根改为按探测决定）
+- [x] `TODO.md`：E5 补三个子项；新增 E6（选装模型 + 首次安装引导 + 宿主探测）、E7（自研 coding Agent，参考 ECC）；
+  章节标题改为 E0-E7 并补灵感源说明
+
+**本轮结论**：证书从「来源证明」升级为**来源 + 身份 + 能力**三层；「选装 + 首启引导 + 零预装可跑」写进 L0/L2 与硬约束；
+ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其代码）。

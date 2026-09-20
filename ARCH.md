@@ -140,3 +140,93 @@
 - 无脚本时保持旧语义（`INITIALIZED`，不报错），便于渐进接入。
 - 部署模板见 `scripts/agent-template/main.py`。
 
+
+## MCP 接入（规划，2026-09-20）
+
+> 完整方案见 `docs/MCP-INTEGRATION-PLAN.md`。现状核实：`MCPDispatcher`
+> （`src/trimum_core/tool_dispatchers.py:716`）为占位实现，固定返回 `MCP bridging not yet available`。
+
+- **模块**：`mcp_client.py`（`stdio` / `streamable-http` 传输）、`mcp_registry.py`
+  （`~/.trimum/mcp/<name>.json5` 定义 + 懒启动/空闲回收）、`mcp_bridge.py`
+  （远端工具映射进 `ToolRegistry`，命名 `<server>__<tool>`）。
+- **鉴权**：MCP 调用统一走 `ToolGateway.execute()` 既有分层（Layer 1 Policy → Layer 2 Agent 权限 →
+  Layer 2.5 SecurityRule → Layer 3 JIT），不新开旁路；`trust: cloud` 的 server 默认对写类工具强制 confirm。
+- **审计**：每次调用记 `mcp.call` 事件（server / tool / 耗时 / 状态）入 `audit.jsonl`，
+  并广播 `task.audit.mcp_call`。
+- **约束**：deny-by-default（server 定义默认 `enabled: false`）；子进程输出落日志文件而非 PIPE
+  （沿用 `agent_launcher.py` 的既有约定）；Linux 上 `apply_cgroup(pid)`；返回内容经 `ContextCompactor` 限长。
+- **策展**：`awesome-mcp-servers` 仅作目录参考，经导入器生成 `config/mcp-catalog.yaml` 候选清单，
+  人工审核后才写入 `~/.trimum/mcp/`；优先 `uvx` / `pip install` / 单二进制，`npx` 派系默认不收。
+
+## 浏览器工具（2026-09-20 调研结论）
+
+- `~/.trimum/tools/browser/`（`main.py` + `_cdp.py`）是**自研纯 Python CDP 实现**，19 个 action，
+  默认 CDP 后端（连 `--remote-debugging-port=9222` 的 Chrome，保留登录态），DOMShell 仅作可选后端。
+- CLI-Anything 的 `browser`（`cli-anything-browser`）依赖 Node.js + npx + DOMShell 扩展，**不引入**；
+  `browser-cdp` 在该仓库中并不存在。证据见 `docs/CLI-ANYTHING-RESEARCH.md`。
+- 仅借鉴其约定：工具自带 SKILL.md、registry 的 `requires` 依赖前置声明字段、能力矩阵（`cli-hub can <task>`）
+  与 Workflow TARL 匹配的同构关系。
+## 生态四层（规划，2026-09-20）
+
+> 完整战略见 `docs/ECOSYSTEM-STRATEGY.md`。核心判断：**做生态集成器，不做生态复制品**。
+
+| 层 | 内容 | 对接现有代码 |
+|---|---|---|
+| **L0 环境清单** | `trm env inventory`（pacman/apt/mise/winget/PATH 探测）、`trm env install` 调系统包管理器 | 新模块，不自建包仓库 |
+| **L1 协议（MCP）** | MCP client + `~/.trimum/mcp/*.json5` + 工具聚合 | 见上一节与 `docs/MCP-INTEGRATION-PLAN.md` |
+| **L2 知识（Agent Skills）** | `trm skill list/import`；技能符号链接进 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills` | 复用 `~/.trimum/skills/` |
+| **L3 目录（workflow）** | `workflows/*.yaml`（Warp 式低门槛格式）→ 编译进 Workflow / TARL 引擎 | 复用 `workflow_engine.py` |
+
+- **统一底座**：四层产出的能力注册进同一张生态表，带 `trust` / `risk` / `requires` / `source_url` 元数据，
+  一律经 ToolGateway 分层与审计；第三方来源默认 `enabled: false`。
+- **自描述能力面**：`trm commands --all/--json/--check`（对照 Omarchy 的 `# omarchy:` 注释契约），
+  让 Agent 运行时枚举全部能力。
+- **第三方 harness（如 CLI-Anything）** 只作为可选导入源，不写进默认安装，不改技术栈依赖。
+
+## 命令面契约与技能分发（E1，2026-09-20 已实现）
+
+### 命令元数据契约（`src/trimum_core/cli/registry.py`）
+
+- 命令面**从 argparse 树推导**（单一事实源，不会漂移），命令模块可选声明
+  `__command_meta__ = {"<group> <command>": {summary/args/examples/aliases/hidden/requires_sudo/risk/tags}}`
+  补充 argparse 表达不了的信息。
+- 别名折叠：`add_parser(name, aliases=[...])` 会把同一 parser 注册成多个 choice，
+  采集时按 parser 身份归并，别名只出现在 `aliases` 字段，不重复计入命令面。
+- `check_commands()` 校验：未知元数据键、元数据指向不存在的命令、leaf 缺摘要或缺 handler、
+  `risk` 取值非法、别名遮蔽既有命令。`trm commands --check` 退出码非零即失败，
+  测试 `tests/test_cli_commands_meta.py` 复用同一套规则，元数据无法腐化。
+
+### 技能分发（`src/trimum_core/skill_sync.py`）
+
+- 两层技能严格分离：**Agent Skills**（`SKILL.md`，给 Claude Code / Codex / Gemini CLI 等读）
+  会被分发；**trimum 技能**（`skill.yaml`，由 `SkillExecutor` 执行）只登记不分发。
+- 源根：`~/.trimum/skills` → `$TRIMUM_SKILLS_DIR` → 仓库 `skills/`（源码布局），先命中者胜。
+- 目标根：`~/.agents/skills`、`~/.claude/skills`、`~/.codex/skills`、`~/.pi/agent/skills`、
+  `~/.gemini/config/skills`、`~/.hermes/skills`、`~/.trimum/agent-skills`；可用 `$TRIMUM_SKILL_TARGETS` 覆盖。
+- 链接策略 `auto`：symlink → Windows junction（`mklink /J`，无需管理员）→ 目录复制；
+  冲突（目标已存在且不是指向本源的链接）默认拒绝，`--force` 才替换；`--prune` 清理悬空链接。
+- 判断链接需同时看 `is_symlink()` 与 `os.path.isjunction()`（Windows 上 junction 不是 symlink）。
+
+## 官方分发渠道（规划，2026-09-20）
+
+- 官网发布官方 Agent / Tool / Workflow；包格式 `.trmpkg` = `tar.gz` + `manifest.json5`
+  （含逐文件 sha256）+ `SIGNATURE` + `chain.pem`。
+- 校验链：解包 → 逐文件哈希 → **内置官方根证书**（`config/trust/trimum-root.crt`）验链 → 验签 → 检查 `requires`；
+  任一步失败即拒绝。等价于发行版软件源签名模型，用户无需选择信任自签证书。
+- `trm install <name>`（官方目录）与 `trm install --file <pkg>`（本地包）共用同一校验器；目录索引同样签名。
+- **安装 ≠ 授权**：官方包以 `trust: official` 注册，运行仍走 ToolGateway 分层与审计；
+  `--allow-untrusted` 仅在显式开启时使用，且标记 `trust: untrusted`、运行期强制 confirm。
+
+## 身份、证书能力与多用户（规划，2026-09-20）
+
+- **三层职责分离**：来源（官方根 + 逐文件哈希，E5）/ 身份（每用户密钥对 + `user_id` + `machine_id`）/
+  能力（证书内 capability 清单：`tools` 白名单 + `max_risk` + `expires_at` + `scope`）。
+- **现状雏形**：`src/trimum_core/agent_cert.py` 已实现 official / self_signed / none 三档信任，
+  自签证书带 `machine_id`，换机器降级为 `CONFIRM`；agent 文件夹自带 `cert.json`
+  （`~/.trimum/agents/<name>/cert.json`）把「代码 + 证书 + 记忆 + 经验」打成一体，是迁移 / 隔离的最小单位。
+- **合并规则**：证书 capability 与 `security_rule.py`、ToolGateway 分层**取交集**，证书只收紧不放宽；
+  `trust: official` 只影响来源判定，不跳过任何一层检查。
+- **多用户待决**：`~/.trimum/`（用户私有）vs `/etc/trimum/`（系统公共：根证书 + 公共工具）的边界；
+  审计日志补 `user_id` 字段；私钥保护（文件权限 / DPAPI / 系统 keyring）；官方证书多用户共用、自签证书每用户各一份。
+- **不假设预装**：`skill_sync.py` 当前硬编码 7 个目标根，需改为**按探测到的宿主动态决定**；
+  一个宿主都没有时只落 `~/.trimum/agent-skills`（首启引导 `trm setup` 负责选装 + 生成密钥 + 探测，见 ECOSYSTEM-STRATEGY §7.3）。
