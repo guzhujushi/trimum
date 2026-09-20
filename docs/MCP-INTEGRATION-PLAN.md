@@ -3,9 +3,11 @@
 > 日期：2026-09-20
 > 数据来源：`punkpeye/awesome-mcp-servers`（经 7993 代理抓取，原始件在 `tmp/research/awesome-README.md`）
 > 结论先行：引入 awesome-mcp-servers 的第一步不是「抄列表」，而是实现 MCP 客户端 + 文件化 server 注册 + 权限接入。
-> **2026-09-20 更新**：M0（设计冻结）/ M1（stdio 客户端）/ M2（注册 + 分发 + 审计）**已落地**，
-> 代码见 `src/trimum_core/mcp_client.py` / `mcp_registry.py` / `tool_dispatchers.MCPDispatcher`；
-> 剩余 M3（策展导入器）/ M4（HTTP/SSE + 生命周期）。
+> **2026-09-20 更新**：M0（设计冻结）/ M1（stdio 客户端）/ M2（注册 + 分发 + 审计）/ M3（策展导入器）
+> / M4（HTTP/SSE 传输 + 空闲回收 + cgroup 绑定 + 常驻池 + 运维文档）**均已落地**，
+> 代码见 `src/trimum_core/mcp_client.py` / `mcp_registry.py` / `tool_dispatchers.MCPDispatcher`
+> / `api_server.py`（daemon 接线）与 `cli/commands/mcp.py`（status / restart）。
+> 仍未做：③ 远端工具聚合进 `ToolRegistry`（见 §2.2 与 §6.1）。
 
 ## 1. 目标与范围
 
@@ -35,12 +37,13 @@
 | 差距 | 状态 | 落点 |
 |---|---|---|
 | ① 协议客户端（stdio） | ✅ | `mcp_client.py`：子进程 + JSON-RPC 2.0 换行分帧，`connect/initialize/list_tools/call_tool/ping/close` |
-| ① 协议客户端（HTTP/SSE） | ⏳ M4 | 现在遇到 `transport: http` 会明确报「M4 未实现」，不假装能用 |
-| ② 生命周期 | ✅ 基础 | `MCPServerPool`：懒启动、按名复用、坏连接丢弃重建、`close/close_all`；空闲回收与 cgroup 留 M4 |
+| ① 协议客户端（HTTP/SSE） | ✅ | `MCPHttpTransport`：POST + JSON/SSE 回包、`Mcp-Session-Id` 复用、404 会话过期、202 无回包、超时/断连分类；`parse_sse_messages()` 独立可测 |
+| ② 生命周期 | ✅ | `MCPServerPool`：懒启动、按名复用、坏连接丢弃重建、`close/close_all`；**M4 补齐**空闲回收（`idle_ttl` + 30s 后台回收器）与 `apply_cgroup(pid)` 绑定（读回确认，降级只记录不失败） |
 | ③ 工具聚合进 `ToolRegistry` | ⏳ M3 | `ToolRegistry` 目前是静态 `ToolDefinition`（`ToolType` 是枚举），动态工具需要新机制；M2 先由 `mcp.tools.list` 提供运行时枚举 |
 | ④ 授权接入 | ✅ 复用 | 调用与内置工具走同一层 ToolGateway 分层；MCP 已在 cwd jail 跳过表内（不碰工作目录） |
 | ⑤ 审计 | ✅ | 每次调用记 `mcp_call` 事件（server / tool / 耗时 / 结果 / 参数**键名**），`task.audit.mcp_call` 广播 |
-| ⑥ 策展白名单 | ⏳ M3 | `config/mcp-catalog.yaml` 与导入器未做 |
+| ⑥ 策展白名单 | ✅ M3 | `config/mcp-catalog.yaml` + `trm mcp catalog import/list`（见 §5.1） |
+| ⑦ 常驻池 + 可观测入口 | ✅ M4 | `api_server.start_mcp()` 把共享池交给 `MCP_TOOLS_LIST` / `MCP_TOOLS_CALL` 两个键上的**同一个** dispatcher，起后台回收器；IPC `mcp.status` / `mcp.restart`；`trm mcp status` / `restart` |
 
 ### 2.3 M0 决议（2026-09-20 冻结）
 
@@ -132,8 +135,9 @@ Security 234、Other Tools 211、Communication 161、Databases 138、Aggregators
 
 - 一个 server 一个子进程；沿用 `agent_launcher.py` 的既有约定：**输出落日志文件而非 PIPE**
   （避免 64KB 管道写满卡死 + 短命进程的 `Event loop is closed`）。
-- 懒启动：首次调用时拉起，空闲 `idle_ttl`（默认 300s）后回收；`trm mcp status/list/restart` 提供可观测入口。
-- Linux 上沿用 `apply_cgroup(pid)` 约束资源（与子 Agent 同一套，需 root / `trmd.service`）。
+- 懒启动：首次调用时拉起，空闲 `idle_ttl`（默认 300s，`0` = 常驻）后回收；`trm mcp status/list/restart` 提供可观测入口。
+- Linux 上沿用 `apply_cgroup(pid)` 约束资源（与子 Agent 同一套，需 root；非 root 时降级为
+  `unavailable (not bound: ...)` 状态，调用照常）。
 
 ### 4.4 安全边界（复用现有分层，不新开旁路）
 
@@ -214,7 +218,30 @@ trm mcp catalog list --unreviewed
 | **M1** ✅ | `mcp_client.py` stdio 客户端 + `initialize` / `tools/list` / `tools/call`（2026-09-20 完成） | `tests/test_mcp_client.py`（16 项，真实 fixture server + 超时/EOF/带外通知） |
 | **M2** ✅ | `mcp_registry.py` + `MCPDispatcher` 实装 + ToolGateway 审计回填 + `mcp_call` 事件（2026-09-20 完成） | `tests/test_mcp_registry.py`（27）/ `test_mcp_dispatcher.py`（30）；`trm mcp list/tools/call/paths` 可用 |
 | **M3** ✅ | 策展导入器（姿势 B）+ `config/mcp-catalog.yaml` + 审核流程文档（2026-09-20 完成，用法见 §5.1） | `tests/test_mcp_catalog.py`（52 项：离线 fixture + 真实快照）→ 232 条候选，红线逐条可解释 |
-| **M4** | HTTP/SSE 传输 + 空闲回收 + cgroup 绑定 + 运维文档 | 长跑测试 + `docs/OPERATIONS.md` 补 MCP 章节 |
+| **M4** ✅ | HTTP/SSE 传输 + 空闲回收 + cgroup 绑定 + 常驻池接线 + `trm mcp status/restart` + 运维文档（2026-09-20 完成，见 §6.1） | 新增 **71** 项测试（`test_mcp_http_transport.py` 29 / `test_mcp_lifecycle.py` 18 / `test_mcp_daemon.py` 24）；真机 Ubuntu 隔离 daemon 验收 **16 PASS / 0 FAIL**；全量 825 passed / 8 failed（本地，8 项为既有 Windows 沙箱基线）/ 827 passed / 11 failed（真机，11 项为既有宿主状态基线） |
+
+### 6.1 M4 落地（2026-09-20）
+
+| 子项 | 落点 |
+|---|---|
+| HTTP / SSE 传输 | `mcp_client.MCPHttpTransport`（`httpx` 可选导入）+ `parse_sse_messages()`；`MCPClient.start()` 按传输名分派，`initialize` 回写协商到的协议版本 |
+| 空闲回收 | `MCPServerPool.reap(now)` / `start_reaper(interval)` / `stop_reaper()`；`idle_ttl: 0` = 常驻；`clock` 可注入（测试不睡真实时间） |
+| cgroup 绑定 | `MCPServerPool._bind_cgroup()` + `_verify_cgroup()`（读回 `assigned_pids` 再报状态，不把「调用没报错」当成成功）；`ResourceController.assigned_pids()` 为非抽象默认实现 |
+| daemon 接线 | `api_server.build_mcp_pool()` / `wire_mcp_dispatchers()` / `start_mcp()`；`AppState.mcp_pool` + `mcp_reaper`；shutdown 时 `close_all()` |
+| 可观测 | IPC `mcp.status` / `mcp.restart`；CLI `trm mcp status`（有 daemon 走 IPC、否则本地读定义）/ `trm mcp restart <server>`（无 daemon 时「起一次证明可用再关掉」） |
+| 运维文档 | `docs/OPERATIONS.md` 新增「MCP server 运维（M4）」；`scripts/sync_opt_m4.sh`（sudo 安装，sha256 校验）；`scripts/accept_m4.py`（隔离 daemon 验收） |
+
+真机验收（Ubuntu，2026-09-20，`scripts/accept_m4.py`，**16 PASS / 0 FAIL**）：8323 端口隔离 daemon 接线后
+`mcp.status` 的 `source=daemon`；`mcp.restart` 停旧起新（pid 14091 → 14095）；`idle_ttl=5` 的 server 被后台
+回收器回收、`idle_ttl=300` 的不受影响；`streamable-http` 定义在真机上完成真实往返（列出 7 个工具）；
+不存在的 server 报 `not found` 而非静默成功。该轮同时暴露并修掉两个真缺陷：
+
+1. `trm --config X mcp status` 用的是默认 config（`Config()` 写死），会去问**另一个** socket 上的 daemon，
+   失败后静默退回本地一次性路径 —— 改为走 `load_config(args)`（`tests/test_mcp_daemon.py` 有回归用例）。
+2. daemon 长驻后 `MCPRegistry` 缓存不再失效，热插定义要等重启才可见（违背「放个文件就接入」的承诺）——
+   `MCPRegistry._ensure_fresh()` 按目录指纹（名字 / mtime / 大小）重读（`TestDropInDefinitions` 覆盖）。
+3. 定义被删掉 / 写坏后，已在跑的 client 要等 `DEFAULT_IDLE_TTL`（300s）才被收回，而此刻 dispatcher 已经查不到它，
+   进程纯属残留：`reap()` 改为对「定义已消失」直接回收（`test_a_deleted_definition_closes_the_running_client`）。
 
 ## 7. 风险与未决问题
 
