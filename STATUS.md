@@ -845,7 +845,7 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - **端口被占**：`trmd` → `exit=3`、`TCP 127.0.0.1:8321 已被占用（已有服务在监听）`（不再抛 `[Errno 98]`）
 - **socket 被占**：`trmd --port 8322` → `exit=3`、`IPC socket /run/user/1000/trimum.sock 已被其它进程监听`；生产 daemon socket 的 `stat`（inode/mtime/size）前后完全一致 → **没被抢占**，daemon PID 10429 存活，`trm status` 仍 `source: rpc`
 - **独立实例**：`8322 + 独立 socket/db` 正常启停；`/health` 的 HTTP 与 IPC 两条路都返回 `0.5.0`；SIGTERM 退出时清理自己的 socket
-- 提交：server `PENDING` / main `PENDING` / ubuntu `PENDING` / arch-linux `PENDING`
+- 提交：server `2f6adbb` / main `2a80fb9` / ubuntu `9ecf111` / arch-linux `fe05347`（同一提交 cherry-pick，四分支内容一致）
 
 **待用户执行（sudo）**：`sudo bash /tmp/sync_opt_singleton_fix.sh`（把修复补进 `/opt/trimum`，即 daemon 运行树），随后以 guzhujushi 身份跑 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`（不要用 sudo）→ `trm status` 的 `version` 应从 `0.2.1` 变成 `0.5.0`
 
