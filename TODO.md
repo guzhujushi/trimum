@@ -278,6 +278,7 @@ trm config set <key> <value>       # 设置配置项
 - [x] **幽灵聚合条目的语义**（2026-09-20 收口）：原护栏「目录读不到就不动缓存」把「一个 server 都没配」和「不知道有哪些 server」混成了一件事。新增 `mcp_registry.definitions_readable()`：**目录不存在 → 照清**，**目录在但列不出来 → 不动并记 `mcp_index.prune_skipped`**；`tests/test_mcp_bridge.py` 87 → 93 项，全量 921 passed 无回归
 - [x] **`trm env install` 真机跑通**（2026-09-20）：dry-run / 已装幂等 / 非 root 报错三条路径已在真机验证，并修掉两个真缺陷（管道里 `_confirm()` 永久挂死、失败时不打原因）；`ToolGateway._prompt_confirm()` 同样修成 fail closed
 - [ ] **`trm env install` 的 root 真执行路径待跑**：`sudo bash /tmp/trm_env_install_real.sh`（全是已装包，幂等）
+- [ ] **`/opt/trimum` 部署树待同步本轮修复**（2026-09-20 21:33）：`sudo bash /tmp/sync_opt_tree.sh`（tar 已就位，含幽灵条目/prune、env+网关确认、install 向导三项；开发树已单独同步，无需 `--fix-home`）
 - [x] **`install_fn.py` 安装向导非交互挂死已修**（2026-09-20）：拆出 `_interactive()` / `_read_yes_no()`，非 TTY 不提问，三个可选步骤（LLM key / 开机自启 / 立即启动）一律跳过并提示；新增 `tests/test_install_fn.py` 14 项（含「管道里 `input()` 绝不被调用」）；实测管道场景 1.1s 退出（修前挂死）
 - [ ] **daemon 单实例与 socket 加固（2026-09-20 真机发现，P1；运维侧已闭环）**：
   - [x] 运维处置：`trmd.service`（enabled + `Restart=always`）与手工 daemon 抢 `127.0.0.1:8321`，单元每 5s `exit 3`（`NRestarts` 到 117）→ `scripts/fix_trmd_loop.sh`；执行方案A后 `trmd` 为 disabled/inactive、`Errno 98` 归零、`trm status` 回到 `source: rpc`
