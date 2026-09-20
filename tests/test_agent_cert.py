@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import trimum_core.agent_cert as ac  # noqa: E402
 from trimum_core.agent_cert import (
     AgentCert,
     CertificateType,
@@ -229,3 +230,98 @@ class TestCertDirs:
             assert (base / "trusted").is_dir()
             assert (base / "pending").is_dir()
             ac.cert_dirs = orig
+
+class TestCapabilities:
+    """证书携带「可以动用哪些工具」——只收紧内置策略。"""
+
+    def test_capabilities_round_trip(self, tmp_path):
+        cert = AgentCert(
+            "a1",
+            CertificateType.OFFICIAL,
+            issued_by="trimum",
+            capabilities={"tools": ["shell"], "max_risk": "low"},
+        )
+        AgentCert("a1", CertificateType.OFFICIAL, issued_by="trimum").save(tmp_path)
+        cert.save(tmp_path)
+        loaded = AgentCert.load("a1", tmp_path)
+        assert loaded.capabilities == {"tools": ["shell"], "max_risk": "low"}
+
+    def test_missing_capabilities_default_to_empty(self, tmp_path):
+        cert = AgentCert("a2", CertificateType.SELF_SIGNED)
+        cert.save(tmp_path)
+        assert AgentCert.load("a2", tmp_path).capabilities == {}
+
+    def test_default_capabilities_scope(self):
+        assert ac.default_capabilities()["scope"] == ac.OFFICIAL_SCOPE
+        assert ac.default_capabilities(scope="local")["scope"] == "local"
+
+    def test_legacy_cert_without_capabilities_is_accepted(self, tmp_path):
+        (tmp_path / "old.cert.json").write_text(
+            json.dumps(
+                {
+                    "agent_name": "old",
+                    "cert_type": "official",
+                    "fingerprint": "",
+                    "issued_by": "trimum",
+                    "machine_id": "",
+                    "expires_at": "",
+                }
+            ),
+            encoding="utf-8",
+        )
+        loaded = AgentCert.load("old", tmp_path)
+        assert loaded.cert_type == CertificateType.OFFICIAL
+        assert loaded.capabilities == {}
+
+
+class TestOfficialAgents:
+    """trimum 自己开发的 Agent 一律是官方 Agent，免用户确认。"""
+
+    @pytest.fixture()
+    def bundled(self, tmp_path):
+        base = tmp_path / "agents"
+        for name, marker in (("maintenance", "agent.json"), ("fs-helper", "agent.yaml")):
+            (base / name).mkdir(parents=True)
+            (base / name / marker).write_text("{}", encoding="utf-8")
+        (base / "not-an-agent").mkdir()  # 没有清单文件 → 不算 Agent
+        (base / "loose.txt").write_text("x", encoding="utf-8")
+        return base
+
+    def test_discovery_requires_a_manifest(self, bundled):
+        assert ac.discover_bundled_agents([bundled]) == ["fs-helper", "maintenance"]
+
+    def test_discovery_ignores_missing_dirs(self, tmp_path):
+        assert ac.discover_bundled_agents([tmp_path / "nope"]) == []
+
+    def test_issue_official_cert_writes_official(self, tmp_path):
+        cert = ac.issue_official_cert("maintenance", directory=tmp_path, force=True)
+        assert cert.cert_type == CertificateType.OFFICIAL
+        assert cert.issued_by == "trimum"
+        stored = AgentCert.load("maintenance", tmp_path)
+        assert stored.capabilities["scope"] == ac.OFFICIAL_SCOPE
+        assert verify_cert("maintenance", stored) == CertTrustLevel.TRUSTED
+
+    def test_issue_is_idempotent_unless_forced(self, tmp_path):
+        assert ac.issue_official_cert("x", directory=tmp_path) is not None
+        assert ac.issue_official_cert("x", directory=tmp_path) is None
+        assert ac.issue_official_cert("x", directory=tmp_path, force=True) is not None
+
+    def test_ensure_official_certs_reports_issued_and_existing(
+        self, bundled, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(ac, "cert_dirs", lambda: {"official": tmp_path, "trusted": tmp_path, "pending": tmp_path})
+        first = ac.ensure_official_certs(dirs=[bundled])
+        assert first["bundled"] == ["fs-helper", "maintenance"]
+        assert first["issued"] == ["fs-helper", "maintenance"]
+        assert first["existing"] == []
+
+        second = ac.ensure_official_certs(dirs=[bundled])
+        assert second["issued"] == []
+        assert second["existing"] == ["fs-helper", "maintenance"]
+
+    def test_user_self_signed_cert_is_not_overwritten(self, bundled, tmp_path, monkeypatch):
+        monkeypatch.setattr(ac, "cert_dirs", lambda: {"official": tmp_path, "trusted": tmp_path, "pending": tmp_path})
+        ac.issue_official_cert("maintenance", directory=tmp_path)
+        ac.ensure_official_certs(dirs=[bundled])
+        stored = AgentCert.load("maintenance", tmp_path)
+        assert stored.cert_type == CertificateType.OFFICIAL

@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from trimum_core import agent_cert as agent_cert_mod  # noqa: E402
 from trimum_core import hosts as hosts_mod  # noqa: E402
 from trimum_core import identity as identity_mod  # noqa: E402
 from trimum_core import setup_wizard as wizard  # noqa: E402
@@ -269,7 +270,7 @@ class TestSetupCommand:
         assert "identity" not in out.split("next")[0]
         assert main(["--json", "setup", "--dry-run", "--yes", "--skip", "identity"]) == 0
         data = json.loads(capsys.readouterr().out)
-        assert data["steps_run"] == ["hosts", "toolchain", "skills"]
+        assert data["steps_run"] == ["hosts", "official", "toolchain", "skills"]
 
     def test_all_steps_skipped_fails(self, sandbox, capsys):
         args = ["setup", "--dry-run", "--yes"]
@@ -292,3 +293,43 @@ class TestSetupCommand:
         out = capsys.readouterr().out
         assert "hosts      : detected claude" in out
         assert "toolchain  : selected (none)" in out
+
+class TestOfficialStep:
+    def test_dry_run_reports_bundled_agents(self, sandbox, tmp_path, monkeypatch):
+        base = tmp_path / "agents"
+        (base / "maintenance").mkdir(parents=True)
+        (base / "maintenance" / "agent.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(agent_cert_mod, "bundled_agent_dirs", lambda: [base])
+
+        report = wizard.run_setup(steps=("official",), dry_run=True, interactive=False)
+        step = report["steps"]["official"]
+        assert step["bundled"] == ["maintenance"]
+        assert step["issued"] == []
+        assert not (sandbox.trimum / "certs").exists()
+
+    def test_run_issues_official_cert(self, sandbox, tmp_path, monkeypatch):
+        base = tmp_path / "agents"
+        (base / "maintenance").mkdir(parents=True)
+        (base / "maintenance" / "agent.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(agent_cert_mod, "bundled_agent_dirs", lambda: [base])
+
+        report = wizard.run_setup(steps=("official",), interactive=False)
+        step = report["steps"]["official"]
+        assert step["issued"] == ["maintenance"]
+        cert_path = sandbox.trimum / "certs" / "official" / "maintenance.cert.json"
+        assert cert_path.is_file()
+        assert json.loads(cert_path.read_text("utf-8"))["capabilities"]["scope"] == "official"
+
+    def test_no_bundled_agents_is_a_no_op(self, sandbox):
+        report = wizard.run_setup(steps=("official",), interactive=False)
+        assert report["steps"]["official"] == {
+            "bundled": [],
+            "issued": [],
+            "existing": [],
+            "dry_run": False,
+            "note": report["steps"]["official"]["note"],
+        }
+        assert not (sandbox.trimum / "certs").exists()
+
+    def test_step_is_listed_in_wizard_steps(self):
+        assert "official" in wizard.STEPS
