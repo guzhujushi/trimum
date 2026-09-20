@@ -1,7 +1,16 @@
 # 浏览器工具集成方案：CLI-Anything + Obscura 替代 OpenCLI
 
-> 状态：规划中
-> 日期：2026-09-18
+> 状态：**部分否决**（2026-09-20 调研核实，见 `docs/CLI-ANYTHING-RESEARCH.md`）
+> 日期：2026-09-18（2026-09-20 修订）
+>
+> **调研修正（必读）**：
+> 1. CLI-Anything 的 `browser-cdp` **不存在** —— `registry.json` 的 web 分类只有 `browser`（DOMShell MCP，
+>    依赖 Node.js + npx + Chrome 扩展）与 `clibrowser`（Rust/cargo）。
+> 2. `browser` harness 恰恰是 Node 依赖，与本项目「弃用 OpenCLI 因为要 Node」的理由冲突。
+> 3. trimum 已有等价自研实现：`~/.trimum/tools/browser/`（纯 Python CDP，19 个 action）。
+>    **浏览器能力继续自研，不引入 CLI-Anything `browser`。**
+> 4. 本文件其余内容仅作历史参考；可借鉴的部分（harness 方法论 / SKILL.md / registry 字段 / 能力矩阵）
+>    见 `docs/CLI-ANYTHING-RESEARCH.md` 第 5 节。
 
 ## 背景
 
