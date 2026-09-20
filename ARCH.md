@@ -307,6 +307,7 @@
 | `tool_gateway.ToolRegistry` | `load_mcp_tools()` 读缓存并把聚合条目注册成 `ToolType.MCP_TOOLS_CALL` 定义；`mcp_binding()` / `list_mcp_tools()` 给出处；`register()` / `unregister()` 会撤掉同名的聚合来源 |
 | `tool_dispatchers.MCPDispatcher` | 每次成功 `tools/list` 顺手 `record()`；`mcp.tools.call` 接受聚合名（`_split_call`） |
 | `api_server.start_mcp()` | **一个** `MCPToolIndex` 实例同时交给 dispatcher（写）与 `ToolRegistry`（读）；启动时 `prune_mcp_index()` 对一次账 |
+| `mcp_registry.definitions_readable()` | 清缓存前分清「目录不存在」（= 一个都没配，可清）与「目录在但列不出来」（= 不知道，别动） |
 | `cli/commands/tool.py` | `trm tool list [--mcp]` 标注 `source: local\|mcp` 与 `mcp.{server,tool,transport,trust}` |
 
 ### 关键设计
@@ -319,14 +320,15 @@
   解释，否则当聚合名 —— `mcp.tools.call a__b c` 不会把 `a__b` 误拆成 `a` + `b`。
 - **失效**：条目带定义指纹（transport / command / args / env **键名** / url / header 键名 / trust /
   allow_tools / deny_tools / enabled）。`record()` 整份替换该 server（撤掉的工具不会留成僵尸名字），
-  `forget()` 清一个 server，`prune()` 清「定义已经不存在」的 server。`reap()` 回收进程时**不动**缓存：
+  `forget()` 清一个 server，`prune()` 清「定义已经不存在」的 server。「不存在」包括**目录整个被删**（那时每一条都是幽灵条目）；只有目录
+  在、却列不出来（权限 / IO）才算「不知道有哪些 server」而不动缓存。`reap()` 回收进程时**不动**缓存：
   清单是信息不是许可证，调用仍然走 `mcp.tools.call` 的完整分层与审计。
 - **密钥不入盘**：指纹只取 `env` / `headers` 的**键名**，测试断言密钥值不出现在缓存文件里。
 - **名字冲突**：聚合名撞上本地工具时本地工具赢（显式注册 > 缓存条目），并记 `skipped` 计数；
   本地工具被一条缓存盖掉属于事故，远端工具少一个入口只是少一个入口。
 - **测试隔离**：`tests/conftest.py` 把 `TRIMUM_HOME` 指到临时目录，整套测试不再写真实 `~/.trimum`
   —— 顺带修掉了 3 个长期因沙箱拒绝写宿主 home 而失败的用例。
-- 测试：`tests/test_mcp_bridge.py`（87）。
+- 测试：`tests/test_mcp_bridge.py`（93）。
 
 ## 环境层与工具链安装（E3，2026-09-20 已实现）
 
