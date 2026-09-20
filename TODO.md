@@ -1,9 +1,9 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-20（E1 命令面 / Skills 分发 → E6 选装模型 + 首启引导 → E3 环境层 `trm env`）
-> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E3**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E2（MCP）/ E4 / E5 / E7 待做
-> 测试：本地 **614 passed / 8 failed / 4 skipped**（8 项为 Windows 沙箱写 `~/.trimum` 被拒 + LLM 断网，与既有基线逐条一致，无回归）；真机 Ubuntu 待开机后补跑
-> 当前工作分支：`server`；E1/E6/清理/E3 均已推送四分支（E3：server `4331437` / main `2b4e9b2` / ubuntu `a5c6ad5` / arch-linux `98c8ccd`）
+> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → **E2 MCP 接入 M0/M1/M2**）
+> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E4 / E5 / E7 与 MCP 的 M3/M4 待做
+> 测试：本地 **687 passed / 8 failed / 4 skipped**（8 项为 Windows 沙箱写 `~/.trimum` 被拒 + LLM 断网，与既有基线逐条一致，无回归）；真机 Ubuntu 待开机后补跑
+> 当前工作分支：`server`；E1/E6/清理/E3/E2 均已推送四分支（E3：server `4331437`；E2：见本节提交）
 
 ---
 
@@ -210,7 +210,7 @@ trm config set <key> <value>       # 设置配置项
 - [ ] **E0. 冻结战略**：确认四层定位（环境清单 / MCP / Skills / workflow 目录）+ 首批 3 个用例
 - [x] **E1. 自描述能力面**（2026-09-20 完成）：命令元数据契约（`cli/registry.py`）+ `trm commands [--all|--json|--check]`；`trm skill list/sync/paths` + `skill_sync.py`（symlink → Windows junction → copy 回退）
   - 测试：`tests/test_cli_commands_meta.py`（15）+ `tests/test_skill_sync.py`（22）；`trm commands --check` 检出并修掉 `ask` 的 `run` 别名无摘要问题
-- [ ] **E2. MCP**：见下方「MCP 接入」章节（M1/M2）
+- [x] **E2. MCP 接入**（2026-09-20 完成 M0/M1/M2）：`mcp_client.py` + `mcp_registry.py` + `MCPDispatcher` 实装 + `trm mcp`；见下方「MCP 接入」章节（M3/M4 待做）
 - [x] **E3. 环境层**（2026-09-20 完成）：`src/trimum_core/env_toolchain.py` + `trm env inventory|install`
   - [x] 9 个包管理器探测（pacman / apt / dnf / zypper / apk / brew / winget / scoop / mise）+ 已装包解析 + 目录覆盖清单
   - [x] 计划与执行分离：`plan_install` → `commands_for`（winget 一包一条）→ `run_install`；`--dry-run` 只打印
@@ -249,9 +249,10 @@ trm config set <key> <value>       # 设置配置项
 > 方案见 `docs/MCP-INTEGRATION-PLAN.md`。现状：`MCPDispatcher` 是占位实现（`src/trimum_core/tool_dispatchers.py:716`），
 > trimum 目前**无任何真实 MCP 能力**。
 
-- [ ] **M0. 冻结设计**：列 3 个「非 MCP 不可」的用例；定「自研 client vs 复用 openai-agents MCP」取舍
-- [ ] **M1. stdio 客户端**：`mcp_client.py`（initialize / tools/list / tools/call）+ mock 单测 + 真实 server 冒烟
-- [ ] **M2. 注册与鉴权**：`mcp_registry.py`（`~/.trimum/mcp/<name>.json5`）+ 实装 `MCPDispatcher` + ToolGateway 分层接入 + `mcp.call` 审计
+- [x] **M0. 冻结设计**（2026-09-20）：自研最小 stdio client（不引 SDK/Node）；3 个用例 = 本机能力接入 / 远程 SaaS 受管通道 / 一行文件零代码扩能力；决议见 `docs/MCP-INTEGRATION-PLAN.md` §2.3
+- [x] **M1. stdio 客户端**（2026-09-20）：`src/trimum_core/mcp_client.py`（JSON-RPC 2.0 换行分帧、stderr 落文件、超时/EOF 标记坏连接）+ `tests/test_mcp_client.py`（16 项，真协议 fixture server）
+- [x] **M2. 注册与鉴权**（2026-09-20）：`mcp_registry.py`（`~/.trimum/mcp/<name>.json5`，deny-by-default + glob 白黑名单 + 连接池）+ `MCPDispatcher` 实装 + `ToolGateway` 回填审计 + `mcp_call` 事件 + `trm mcp list/tools/call/paths`；`tests/test_mcp_registry.py`（27）/ `tests/test_mcp_dispatcher.py`（30）
+  - 顺带修掉：`trm --json` 的 stdout 被 INFO 日志污染（CLI 诊断改走 stderr）；连接池 `refresh` 泄漏旧客户端
 - [ ] **M3. 策展导入器**：awesome-mcp-servers README → `config/mcp-catalog.yaml` 候选清单（人工审核后才启用）
 - [ ] **M4. HTTP/SSE + 生命周期**：空闲回收、cgroup 绑定、`trm mcp list/status/restart`、运维文档
 
@@ -286,6 +287,7 @@ trm config set <key> <value>       # 设置配置项
 | **Phase 3 收尾 P0/P1 清零 + 真机 Ubuntu 验证** | ✅ 已提交并推送四分支（server `3af9e07` / main `26d52f5` / ubuntu `4768820` / arch-linux `b540f36`） |
 | **2026-09-20 文档一致性修订 + CLI-Anything / MCP 调研** | ✅ 新增 `docs/CLI-ANYTHING-RESEARCH.md` / `docs/MCP-INTEGRATION-PLAN.md`；修正 STATUS / TODO / browser 方案口径 |
 | **2026-09-20 生态四层 E1 / E6 / E3** | ✅ E1 命令面 + Skills 分发；E6 选装模型 + 首启引导（宿主探测 / 身份证书 / 官方 Agent 证书）；E3 环境层 `trm env`（详见 `STATUS.md`、`ARCH.md`） |
+| **2026-09-20 E2 MCP 接入（M0/M1/M2）** | ✅ stdio 客户端 + 文件化注册（deny-by-default）+ `MCPDispatcher` 实装 + `mcp_call` 审计 + `trm mcp`；73 项新测试 |
 
 ---
 
@@ -302,9 +304,9 @@ trm config set <key> <value>       # 设置配置项
 
 | 项目 | 状态 |
 |------|------|
-| 本地全量测试 | 614 passed / 8 failed / 4 skipped (2026-09-20，E3 后) |
+| 本地全量测试 | 687 passed / 8 failed / 4 skipped (2026-09-20，E2 后) |
 | 真机 Ubuntu 全量测试 | 483 passed / 11 failed (2026-09-20)，11 项与同机 `git archive HEAD` 基线逐条一致，无回归 |
-| 新增覆盖（2026-09-20 生态轮） | `test_cli_commands_meta.py`（15）、`test_skill_sync.py`（27）、`test_hosts.py`（13）、`test_setup_wizard.py`（33）、`test_agent_cert.py` 增补（11）、`test_env_toolchain.py`（34） |
+| 新增覆盖（2026-09-20 生态轮） | `test_cli_commands_meta.py`（15）、`test_skill_sync.py`（27）、`test_hosts.py`（13）、`test_setup_wizard.py`（33）、`test_agent_cert.py` 增补（11）、`test_env_toolchain.py`（34）、`test_mcp_client.py`（16）、`test_mcp_registry.py`（27）、`test_mcp_dispatcher.py`（30） |
 | 新增覆盖（Phase 3 收尾） | `test_tool_gateway_security_rule.py`（11）、`test_context_compactor.py`（13）、`test_audit_store.py`（15）、`test_source_type_flow.py`（6）、`test_learning_feedback.py`（11）、`test_agent_spawn.py`（12）、`test_api_server_startup.py`（3）、`test_ipc_listener.py`（3）、`test_cli_commands.py::TestSecurityLearningCommand`（3） |
 
 ---
