@@ -149,12 +149,12 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
 | # | 缺口 | 说明 |
 |---|---|---|
 | ~~1~~ | ~~`trm commands --all/--json/--check` + 命令元数据契约~~ | **已实现（2026-09-20，E1）**：命令面从 argparse 树推导（单一事实源）+ `cli/registry.py` 校验元数据 |
-| ~~2~~ | ~~Skills 分发（symlink 到各宿主）~~ | **已实现（2026-09-20，E1/E6）**：`skill_sync.py`，目标根按探测结果决定；`trm skill import`（拉外部生态）待做 |
+| ~~2~~ | ~~Skills 分发（symlink 到各宿主）~~ | **已实现（2026-09-20，E1/E6/E4）**：`skill_sync.py` 目标根按探测结果决定；**`trm skill import` 已补上**（`skill_import.py`，本地目录 / git 仓库 → `~/.trimum/skills/`） |
 | ~~3~~ | ~~MCP client（M1/M2）~~ | **已实现（2026-09-20，E2）**：stdio 客户端 + 文件化注册（deny-by-default）+ 分发 + `mcp_call` 审计；策展导入器见 M3 ✅；HTTP 见 M4 |
-| 4 | 通用 CLI 适配器（`--help` → 工具条目 + 风险分级） | 替代「逐应用写 harness」 |
+| ~~4~~ | ~~通用 CLI 适配器（`--help` → 工具条目 + 风险分级）~~ | **已实现（2026-09-20，E4）**：`cli_adapter.py` + `trm tool import-cli`；只跑 `--help` 探测，产物默认 `enabled: false`，运行时再兜一层白名单（`generic_executor`） |
 | ~~5~~ | ~~`trm env inventory/install`~~ | **已实现（2026-09-20，E3）**：9 个包管理器探测 + 已装清单 + 计划/执行分离（`env_toolchain.py`）；不自建包仓库 |
-| 6 | workflow 目录格式 + `trm workflow import` | Warp 式贡献入口 |
-| 7 | 生态统一注册表 schema（`trust`/`risk`/`requires`/`source_url`/`author`） | 借鉴 CLI-Anything registry + Warp FORMAT |
+| ~~6~~ | ~~workflow 目录格式 + `trm workflow import`~~ | **已实现（2026-09-20，E4）**：`workflow_catalog.py`；声明只能把 risk 调高、不能调低；编译到 `WorkflowDefV2` 落 `~/.trimum/workflows/<id>/workflow.yaml` |
+| ~~7~~ | ~~生态统一注册表 schema（`trust`/`risk`/`requires`/`source_url`/`author`）~~ | **已实现（2026-09-20，E4）**：`ecosystem.py` 的 `EcosystemEntry` + 风险分级器 + 校验器；三个导入器（tool / workflow / skill）产出同一种条目，共用一个 `ImportRefused` |
 | ~~8~~ | ~~skills 分发目标按已探测宿主动态决定~~ | **已实现（2026-09-20，E6）**：`src/trimum_core/hosts.py`；`--all-hosts` 保留全量模式 |
 | ~~9~~ | ~~首次安装引导 `trm setup`~~ | **已实现（2026-09-20，E6）**：`setup_wizard.py` + `trm setup`；选装清单见 `config/setup-catalog.yaml` |
 
@@ -168,7 +168,7 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
 | **E1** | 命令元数据契约 + `trm commands --json --check` + skills 分发 | 单测；`trm commands --json` 可被 Agent 直接消费 |
 | **E2** ✅ | MCP **M0/M1/M2**（stdio client + registry + ToolGateway 接线 + `mcp_call` 审计）（2026-09-20 完成） | `mcp_client.py` / `mcp_registry.py` / `MCPDispatcher` / `trm mcp`；73 项新测试（含真协议 fixture server）；`trm mcp list` 可用 —— M3 ✅ 策展导入器（`trm mcp catalog import/list`，232 条候选）；M4 HTTP 待做 |
 | **E3** ✅ | **环境层**：`trm env inventory` + `trm env install`（2026-09-20 完成） | `env_toolchain.py`；清单只读（risk: low）、安装必须确认、`--dry-run` 不执行、已装幂等；`tests/test_env_toolchain.py`（34）—— **`trm skill import` 未做，顺延到 E4** |
-| **E4** | 通用 CLI 适配器 + workflow 目录（Warp 式）+ 导入器 | 导入 dry-run；风险分级正确 |
+| **E4** ✅ | 通用 CLI 适配器 + workflow 目录（Warp 式）+ 导入器 + `trm skill import`（2026-09-20 完成） | `ecosystem.py` / `cli_adapter.py` / `workflow_catalog.py` / `skill_import.py`；三个导入器都是「dry-run 不落盘 / 第三方默认不启用（工具）/ 不覆盖已有 / 不执行导入物」；117 项新测试 |
 | **E5** | 官方分发渠道：官网目录 + 官方根证书 + `.trmpkg` 校验器 + `trm install` | 签名校验单测（内置根/坏签名/哈希不符）+ 离线安装 dry-run |
 | **E6** ✅ | 选装工具链模型 + 首次安装引导 `trm setup` + 宿主探测（2026-09-20 完成） | `hosts.py` / `setup_wizard.py` / `identity.py` / `config/setup-catalog.yaml`；47 项新测试；`trm commands --check` 50 条通过 |
 | **E7** | 身份与多用户：证书 = 身份 + 能力清单；每用户独立 keystore | 见 §7.1 / §7.2 |

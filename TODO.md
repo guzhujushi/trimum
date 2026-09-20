@@ -1,11 +1,11 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → **M4.5 远端工具聚合** → **M4.5 收口小项**）
-> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E4 / E5 / E7 待做
-> 测试：本地 **940 passed / 5 failed / 7 skipped**（5 项 = 既有基线：Windows 沙箱 + PATH 缺 `python.exe` + LLM 断网）。本轮新增 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录），基线由 8 项降到 5 项 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu **914 passed / 11 failed / 2 skipped**（同机对照 M4 终态基线 827/11/2，失败名单逐条相同，无回归）
+> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → **E4 广接入**）
+> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5 + E4**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；**E4 三个导入器（CLI / workflow / skill）已落地**；E5 / E7 待做
+> 测试：本地 **1099 passed / 5 failed / 7 skipped**（E4 前是 940 passed，本轮 +159 用例；5 项失败 = 既有基线：Windows 沙箱 + PATH 缺 `python.exe` + LLM 断网）。基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
 > 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固/M4 均已推送四分支（M4：server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）；**M4.5 收口小项提交号见 `STATUS.md` 的「提交与分支」表**（幽灵条目 `9e63a81` / env+网关确认 `d34054a` / install 向导 `bd00990`，四分支已同步）。
 > ✅ **真机部署已完成（2026-09-20 20:52）**：`sudo bash /tmp/sync_opt_tree.sh` 全树同步落地，`/opt/trimum` 三个关键文件与本地 HEAD 逐文件对上（`mcp_bridge.py` `f503f505…` / `mcp_registry.py` `86447a65…` / `tool_gateway.py` `47d8a205…`），部署树 `[4b/5]` 自检通过；daemon 20:52:27 启动 → 跑的就是新代码（`trm status` 的 `source: rpc`，PID 23850）。真机聚合实测 4 条 `source=mcp`（`echo__echo` / `echo__fail` / `echo__slow` / …），总数 17；幽灵缓存已清（备份 `/tmp/mcp-tools.json.bak-20260920`），清后 `tool list --mcp` 为 0 条、总数 13。
-> ▶ **下次继续从这里开始（2026-09-20 M4.5 收尾之后）**：M4 / M4.5 代码、测试、文档、真机部署全部闭环 → 下一步 = **E4 广接入**（通用 CLI 适配器 + workflow 目录导入，并顺带补 E3 遗留的 `trm skill import`），再往后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`。
+> ▶ **下次继续从这里开始（2026-09-20 E4 之后）**：E4 广接入（三个导入器）代码 + 测试 + 文档 + 真机验证已闭环 → 下一步 = **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`；E4 遗留：`WorkflowDefV2.to_workflow_definition()` 不搬运 `instruction`（见 STATUS「E4 遗留」）。
 
 ---
 
@@ -218,8 +218,22 @@ trm config set <key> <value>       # 设置配置项
   - [x] 计划与执行分离：`plan_install` → `commands_for`（winget 一包一条）→ `run_install`；`--dry-run` 只打印
   - [x] 红线：不自建包仓库 / 清单只读（risk: low）/ 安装必须显式确认（`--yes` 或交互）/ 已装幂等（退出码 0）
   - [x] 测试：`tests/test_env_toolchain.py`（34）；`trm commands --check` → 53 条通过
-  - 遗留：`trm skill import`（生态导入）未做，顺延到 E4；`trm env install` 已于 2026-09-20 在 Linux 真机跑通（dry-run / 幂等 / 非 root 报错，见「其他待办」末尾）
-- [ ] **E4. 广接入**：通用 CLI 适配器（`--help` → 工具条目 + 风险分级）、workflow 目录格式 + `trm workflow import`
+  - 遗留：`trm skill import`（生态导入）**已于 E4 补上**（`skill_import.py` + `trm skill import`，见下方 E4）；`trm env install` 已于 2026-09-20 在 Linux 真机跑通（dry-run / 幂等 / 非 root 报错，见「其他待办」末尾）
+- [x] **E4. 广接入**（2026-09-20 完成）：通用 CLI 适配器 + workflow 目录 + 统一 schema + `trm skill import`
+  - [x] `ecosystem.py`：`EcosystemEntry` 统一 schema（trust / risk / requires / source_url / author / origin / enabled）
+        + 分级器 `assess_risk`（动词表 + 理由，无证据兜底 medium）+ 校验器 + 三个导入器共用的 `ImportRefused`
+  - [x] `cli_adapter.py` + `trm tool import-cli`：只跑 `--help` 探测；产物落 `tool.json5` + 薄壳 `main.py`，
+        默认 `enabled: false`；`generic_executor` 运行时再兜一层白名单（子命令 / 旗标 / `which` 现算）
+  - [x] `workflow_catalog.py` + `trm workflow import`：Warp 式目录 YAML → 编译 `WorkflowDefV2`；
+        声明只能把 risk 调高不能调低；`steps[].execute[].instruction` 是命令原文
+  - [x] `skill_import.py` + `trm skill import`：本地目录 / git URL（`git clone --depth 1` 到临时目录）；
+        frontmatter 必填 `name`/`description`；`.git` / `node_modules` 不进副本
+  - [x] `enabled` 开关：`tool_file_loader.set_manifest_enabled`（逐行就地改）+ `trm tool enable|disable` +
+        `trm tool list --all`；`tool_gateway.load_all()` 只 import 启用的工具
+  - [x] 红线：导入不执行 / `--dry-run` 不落盘 / 非交互要 `--yes` / 第三方（工具）默认不启用 / 不覆盖已有（除非 `--force`）/ 不引入新依赖
+  - [x] 测试：`tests/test_ecosystem.py`(29) + `tests/test_cli_adapter.py`(42) + `tests/test_workflow_catalog.py`(48)
+        + `tests/test_skill_import.py`(40)；`trm commands --check` → 68 条通过
+  - 遗留：编译出的 workflow 在 `trm workflow run` 下不会真的执行命令（引擎 v2→v1 转换不搬运 `instruction`），见 STATUS「E4 遗留」
 
 > 排序理由：Skills 层近乎零成本 → MCP 成本中等 → CLI 适配器 → workflow 目录。
 

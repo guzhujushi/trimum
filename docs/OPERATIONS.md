@@ -182,6 +182,49 @@ CI step、包装脚本）会永久阻塞。统一口径：**非 TTY 一律不提
 | `tool_gateway.py::_prompt_confirm`（Layer 1 终端确认） | **fail closed**：直接拒绝，提示走 JIT 令牌 / 策略白名单 |
 | `install_fn.py`（`trm install` 向导） | **跳过**所有可选步骤（LLM key / 开机自启 / 立即启动），打一行「非交互模式，跳过」 |
 
+## 生态导入（`trm tool import-cli` / `trm workflow import` / `trm skill import`，E4）
+
+三个导入器共用一个口径：**只读文本、只写文本**，导入一条命令不会执行它；`--dry-run` 不落盘；
+非交互要 `--yes`；目标已存在时拒绝，除非 `--force`；先全量检查再写，不做半截导入。
+
+```bash
+# 把机器上已有的 CLI 登记成工具（只跑 --help 探测）
+trm tool import-cli gh --dry-run          # 先看：子命令 / 旗标 / 风险分级 + 理由
+trm tool import-cli gh --yes              # 落 ~/.trimum/tools/gh/，默认 enabled: false
+trm tool list --all                        # 看到它（disabled）
+trm tool enable gh                         # 显式启用：只翻转 manifest 的一个布尔值
+trm tool disable gh                        # 再关掉（不删除）
+
+trm workflow import ./my-workflows --dry-run
+trm workflow import docker-cleanup.yaml --yes   # → ~/.trimum/workflows/<id>/workflow.yaml
+trm workflow list
+
+trm skill import ./skills --dry-run
+trm skill import git@github.com:me/skills.git --yes   # → ~/.trimum/skills/
+trm skill list
+```
+
+要点：
+
+- **注册 ≠ 授权**：`import-cli` 写出的是 `enabled: false`；启用后运行时仍走 ToolGateway 六层 +
+  SecurityRule + 审计。生成的 `main.py` 是薄壳，真正的执行在 `cli_adapter.generic_executor`，
+  它自己再兜一层白名单（子命令 / 旗标 / `shutil.which` 现算）—— **手改 manifest 也绕不过**。
+- **风险分级可解释**：dry-run 会逐条打印「哪个词 → 什么级别」；workflow YAML 里声明的 `risk`
+  只能把级别**调高**，命令里有 `rm` 就是 `high`，声明的 `low` 不生效。
+- **git 源**：`trm skill import` 用系统 `git clone --depth 1` 克隆到临时目录，看完即删；
+  私有仓库要凭据时不会挂住（stdin 是 `DEVNULL`，直接失败并打印 stderr 末行）。
+- **导入后看不见？** 三个默认根都走 `TRIMUM_HOME`（`<TRIMUM_HOME>/tools`、`/workflows`、`/skills`）。
+  如果你自定义了 `TRIMUM_HOME` 或 `--root`，`list` 也要加同一个 `--root`（`skill list` 用
+  `TRIMUM_SKILLS_DIR` / `--source`）。
+- **回退**：`trm tool disable <name>` 只关不删；要彻底移除就删 `~/.trimum/tools/<name>/` 目录。
+
+排查经验（E4 踩过的两类坑，2026-09-20）：
+
+| 现象 | 真因 | 处置 |
+|---|---|---|
+| `trm tool import-cli <cli>` 永久卡住 | Windows 上 `subprocess.run(capture_output=True)` 超时后会**无超时地**再 `communicate()` 一次，而被探测 CLI 留下的后台孙进程仍持有管道写句柄 → 永不 EOF | 探测输出改走临时文件（`cli_adapter.default_runner`），`stdin=DEVNULL` 防分页器等输入 |
+| 导入成功但 `list` 里没有 | 某个默认根写死了 `Path.home()/".trimum"`，绕开了 `TRIMUM_HOME` | 三处（`tool_file_loader` / `WorkflowDefV2.load_from_dir` / `skill_sync.default_source_roots`）统一走 `paths.trimum_path(...)` |
+
 ## daemon 托管与重启（systemd）
 
 生产机 `/etc/systemd/system/trmd.service` 是 daemon 的**真正托管者**：
@@ -259,7 +302,9 @@ journalctl -u trmd -n 30 --no-pager               # 日志在这里，不在 /tm
 
 | 用途 | 路径 |
 |---|---|
-| 工具目录 | `~/.trimum/tools/<name>/{tool.json5,main.py}`（弃用 = 改名为 `tool.json5.disabled`） |
+| 工具目录 | `~/.trimum/tools/<name>/{tool.json5,main.py}`（弃用 = 改名为 `tool.json5.disabled`；`import-cli` 产物默认 `enabled: false`） |
+| Workflow 目录 | `~/.trimum/workflows/<id>/workflow.yaml`（`trm workflow import` 的落点） |
+| Skill 目录 | `~/.trimum/skills/<name>/SKILL.md`（`trm skill import` 的落点；`skill sync` 从这里分发） |
 | Agent 数据 | `~/.trimum/agents/<type>/{cert.json,memory/}` |
 | Agent 脚本 | `~/.local/share/trimum/agents/<type>/main.py` |
 | Agent 日志 | `~/.local/share/trimum/agent-logs/<agent_id>.log` |

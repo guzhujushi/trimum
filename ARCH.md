@@ -383,6 +383,78 @@
 
 - 测试：`tests/test_env_toolchain.py`（34 项：探测 / 解析 / 计划 / 执行 / 清单 / CLI）。
 
+## 广接入：生态导入器（E4，2026-09-20 已实现）
+
+> 生态四层的入口（`docs/ECOSYSTEM-STRATEGY.md` §4 缺口 4 / 6 / 7）。一句话：**生态的东西都从这三个
+> 导入器进来，但一律落到「同一张表 + 同一套策略 + 同一份审计」**，第三方默认不启用。
+> 计划与切分见 `docs/E4-PLAN.md`。
+
+### 模块
+
+| 模块 | 职责 |
+|---|---|
+| `src/trimum_core/ecosystem.py` | 统一条目 schema（`EcosystemEntry`：`trust` / `risk` / `requires` / `source_url` / `author` / `origin` / `enabled`）+ 分级器 `assess_risk` + 校验器 + 三个导入器共用的 `ImportRefused` |
+| `src/trimum_core/cli_adapter.py` | 通用 CLI 适配器：`--help` 探测 → 解析 → 定级 → 落 `tool.json5` + 薄壳 `main.py`；薄壳调 `generic_executor` |
+| `src/trimum_core/workflow_catalog.py` | Warp 式目录 YAML → 逐条校验 → 编译 `WorkflowDefV2` → `~/.trimum/workflows/<id>/workflow.yaml` |
+| `src/trimum_core/skill_import.py` | 技能导入：本地目录 / git URL → 校验 frontmatter → 复制进 `~/.trimum/skills/` |
+| `src/trimum_core/tool_file_loader.py`（改） | manifest 支持 `enabled`（缺省 true，兼容既有工具）；`set_manifest_enabled` 逐行就地改（保留 JSON5 注释）；`list_manifests`；`scan_tools(include_disabled=)` |
+| `src/trimum_core/tool_gateway.py`（改） | `load_all()` 只 import `enabled` 的 `main.py`，未启用记 `tool_file_loader.skipped_not_enabled` |
+| `src/trimum_core/cli/_ask.py` | 唯一的「问人」入口；非 TTY 直接取默认值（无人值守不挂死） |
+
+### 风险分级（`ecosystem.assess_risk`）
+
+输入是「命令里出现的词」，输出是 `(级别, 理由列表)` —— 每条理由写清是哪个词触发，**dry-run 直接展示，
+用户能反驳**：
+
+| 级别 | 触发 | 例 |
+|---|---|---|
+| `critical` | 破坏性形态（子串匹配整段文本） | `mkfs` / `dd if=` / `wipefs` / `rm -rf /` |
+| `high` | 变更系统或不可逆 | `install` / `remove` / `rm` / `kill` / `prune` / `push` / `format` / `sudo` |
+| `medium` | 有副作用但不破坏 | `run` / `start` / `create` / `set` / `clone` / `apply`；`--force` / `-y` 这类免确认旗标 |
+| `low` | 纯读 | `list` / `show` / `status` / `log` / `read` / `diff` |
+| 兜底 `medium` | 没有任何证据 —— **不猜低**（猜低会让第三方命令悄悄变成"低风险"），也不夸大成 high | 命令名不在任何动词表里 |
+
+**声明不能降级**：workflow YAML 里写 `risk: low`、命令里有 `prune` 时，导入按 `high` 处理并给出理由
+（`max_risk(声明值, 探测值)`）。
+
+### 三个导入器共有的红线（写进代码与测试）
+
+| 红线 | 落点 |
+|---|---|
+| 导入不执行 | 适配器只跑 `--help`；workflow / skill 只读文本、只写文本，**绝不 import、绝不执行**导入物 |
+| `--dry-run` 不落盘 | 三个导入器同一条规则，测试逐条断言目标目录没有新增 |
+| 非交互要 `--yes` | 与 `env` / `mcp` / `install` 一致：非 TTY 直接 abort（退出码 1） |
+| 第三方默认不启用 | CLI 导入产物 `enabled: false`，要显式 `trm tool enable`；workflow / skill 是**惰性文本**（不点 `run` / 不被 harness 读到就不发生任何事），故 `enabled: true` |
+| 不覆盖已有 | 目标已存在即拒绝，除非显式 `--force`；**先全量检查再写**，不做半截导入 |
+| 不引入新依赖 | YAML 用已有 PyYAML；git 源走系统 `git clone --depth 1`，失败即报错，不静默降级 |
+
+### 运行期仍然只有一条路
+
+导入进来的东西**不新增执行通道**：工具仍走 `main.py` 契约 → ToolGateway 六层 + SecurityRule + 审计；
+`generic_executor` 自己再兜一层白名单（子命令必须在探测集合里、旗标必须在 `allowed_flags` 里、二进制用
+`shutil.which` 现算）—— **手改 manifest 也绕不过这一层**。
+
+### 三个真实缺陷（本轮踩到并修掉）
+
+1. **`subprocess.run(capture_output=True)` 在 Windows 上会永久挂死**：被探测 CLI 可能留下仍持有继承写句柄的
+   后台孙进程（分页器 / 凭据助手），而 Windows 上 `subprocess.run` 超时后会 `kill()` 再**无超时地**
+   `communicate()` 一次，于是永不 EOF 的管道把探测卡死（实测 `trm tool import-cli git` 挂住）。
+   修法：输出走**临时文件**，不用管道；`stdin=DEVNULL` 防分页器等输入。
+2. **默认根写死 `Path.home()`**：`tool_file_loader.list_manifests` / `WorkflowDefV2.load_from_dir` /
+   `skill_sync.default_source_roots` 三处都从 `Path.home()/".trimum"` 起步，会绕开 `TRIMUM_HOME`
+   —— 表现为「导入了却看不见」。三处统一走 `paths.trimum_path(...)`。
+3. **`--help` 的输出只用来描述能力**：解析不到子命令就**不写**（而不是编一个）。宁可少登记。
+
+### 已知取舍
+
+- **不做 `--help` 的语义理解**：解析是启发式的；`Commands:` / `命令：` 类标题块里才取子命令。
+- **CLI 适配器不自动接进 ToolGateway 分发器**：生成的工具走既有 `main.py` 契约，不新增 `ToolType`。
+- **不做 workflow 的远程目录**：`import` 只接受本地路径或 git URL，不做「订阅 / 自动更新」（那是 E5 的事）。
+- **skill 导入不做依赖解析**：只搬文件 + 校验 frontmatter，技能之间的引用留给后续。
+- **`WorkflowDefV2.to_workflow_definition()` 不搬运 `instruction`**：它只把 `agent_type` 变成节点
+  `handler`、`config` 原样带走，所以编译出来的 workflow 在 `trm workflow run` 下不会真的执行命令。
+  本轮不改引擎（E4 的验收是「导入 + 校验 + 能被 `trm workflow list` 列出」）；这条记在 TODO 里。
+
 ## 官方分发渠道（规划，2026-09-20）
 
 - 官网发布官方 Agent / Tool / Workflow；包格式 `.trmpkg` = `tar.gz` + `manifest.json5`
