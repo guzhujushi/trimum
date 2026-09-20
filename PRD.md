@@ -37,6 +37,15 @@ Agent Registry 等能力，并通过 `~/.trimum/tools/<name>/` 的文件化工�
 - 「零预装可跑」已兑现并有测试：一个第三方 agent 都没有时，技能只落 `~/.trimum/agent-skills`；
   `cryptography` 缺失时身份步骤降级为 `skipped`，且不留下半初始化目录。
 
+### 已交付（2026-09-20，E3 环境层：`trm env`）
+
+- 环境层（生态四层的 **L0**）：`trm env inventory` 只读列出**机器上有什么**（9 个包管理器探测 + 已装包 +
+  目录覆盖 + 首启引导的选装记录）；`trm env install <name>...` 在**显式确认**后调系统包管理器安装。
+- **不自建包仓库**：软件生态交给发行版，trimum 只负责「知道有什么 / 要不要装 / 装的时候执行什么」。
+- 计划与执行分离：`--dry-run` 打印确切命令但**不执行**；非交互必须 `--yes`，否则 abort；
+  已装条目**幂等**（不重装、不弹确认、退出码 0）。
+- 覆盖 pacman / apt / dnf / zypper / apk / brew / winget / scoop 八个可代装管理器，外加 `mise`（只登记，不代装）。
+
 ### 规划中（下一阶段）
 
 - **官方分发渠道**：官网提供官方 Agent / Tool / Workflow，`trm install <name>` 下载即用；内置官方根证书
@@ -65,10 +74,15 @@ Agent Registry 等能力，并通过 `~/.trimum/tools/<name>/` 的文件化工�
 
 - 文档中每一项勾选状态都能对应到代码实现，或明确标注为缺口。
 - 调研结论可复现：`docs/CLI-ANYTHING-RESEARCH.md` 每条结论都附证据（registry / README / 本机检查）。
-- `python -m pytest tests/test_cli.py -v` 全部通过（既有基线，不受本轮文档改动影响）。
+- `python -m pytest tests/test_cli.py -v` 全部通过（既有基线）。
+- 生态四层每项交付都能用一条命令复现：`trm commands --json`、`trm env inventory --json`、`trm setup --dry-run --json`。
+- 安装类命令的安全红线可验证：`--dry-run` 不执行、非交互无 `--yes` 必 abort、已装幂等退出 0（见 `tests/test_env_toolchain.py`）。
+- 既有测试基线不回归（本地 8 项为沙箱环境性失败，与基线逐条一致）。
 
 ## 范围边界
 
-- 本轮**只改文档**，不动 `src/`、`tests/`、`scripts/`。
-- 不安装 CLI-Anything（需 Node 生态，且经调研已否决），不引入任何新依赖。
-- MCP 接入本轮只出方案，不写实现。
+- 生态四层**只在 trimum 自有模块内新增代码**（`src/trimum_core/`），不改既有对外接口语义、不引入 Node 生态依赖。
+- 不安装 / 不内嵌 CLI-Anything（需 Node，且经调研已否决）；第三方 harness 只作为**可选导入源**。
+- **不自建包仓库**：`trm env install` 只调机器上的系统包管理器（pacman / apt / dnf / zypper / apk / brew / winget / scoop）。
+- MCP 接入（E2）只出方案（`docs/MCP-INTEGRATION-PLAN.md`），不写实现。
+- 官方分发渠道（E5：官网 + 官方根证书 + `.trmpkg` 校验器）只出设计，不写实现。
