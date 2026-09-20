@@ -976,10 +976,25 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 
 ### 部署状态
 
-- `/opt/trimum`：本轮用**全树同步**（`sudo bash /tmp/sync_opt_tree.sh`），它一并补上 M4 遗留的
-  `reap()` 修复 —— 同步前 `/opt/trimum/src/trimum_core/mcp_registry.py` 是 `fe0166cd…`，开发树是
-  `86447a65…`，两者不同即证明那处修复还没进部署树。
+- `/opt/trimum`：已用**全树同步**（`sudo bash /tmp/sync_opt_tree.sh`，2026-09-20 20:52）落地并**逐文件核对**：
+  `mcp_bridge.py` = `f503f505…`、`mcp_registry.py` = `86447a65…`、`tool_gateway.py` = `47d8a205…`，
+  三者与本地 HEAD 全部一致 —— M4 遗留的 `reap()` 修复（同步前部署树是 `fe0166cd…`）随全树同步进树。
+  部署树的 `[4b/5]` 自检通过。`/opt/trimum/venv` 是 editable 安装
+  （`__editable__.trimum_core-0.5.0.pth`），加载的正是 `/opt/trimum/src/trimum_core/`；
+  文件 20:52:17 落盘、daemon 20:52:27 启动 → 运行中的就是新代码。
+- 真机聚合实测：`trm --json tool list --mcp` 返回 4 条 `source=mcp` 的聚合条目
+  （`echo__echo` / `echo__fail` / `echo__slow` / …），日志 `tool_registry.mcp_tools_loaded count=4`，
+  `trm tool list` 总数 17 条（13 本地 + 4 远端）。
 - `/home/guzhujushi/trimum`（开发树）：本轮已同步，复测结果见上。
+- **「8321 已被占用」的真因**：生产 daemon 由 systemd 单元 `trmd.service` 托管
+  （`Restart=always` / `RestartSec=5`，单元 `disabled` 但 `active`）。`restart_trmd.sh` 的 `kill` 让 systemd
+  在 5 秒后把它复活并先绑上 8321，脚本自己起的实例反而失败 —— 日志里只留 `[Errno 98]`，看起来像端口被外人占了。
+  判断依据：`ss -ltnp` 里占端口的 PID 其 `fd1`/`fd2` 指向 `/run/systemd/journal/stdout`（日志进 journal，
+  不写 `/tmp/trmd.out`）。已给脚本加守卫，并在 `docs/OPERATIONS.md` 新增「daemon 托管与重启（systemd）」。
+- **遗留待定**：`/home/guzhujushi/.trimum/mcp-tools.json` 里留着上一轮冒烟的 4 条条目，而 `~/.trimum/mcp/`
+  目录已不存在。`prune_mcp_index()` 对「目录读不到」按设计**不动作**（怕误清整份缓存），于是这 4 条成了
+  调用必然失败的幽灵条目。二选一：删掉这份缓存（`rm ~/.trimum/mcp-tools.json`，下次成功 `tools/list` 会重建），
+  或让「缺目录」也算「一个 server 都没有」。
 
 ### 提交与分支
 
