@@ -1,10 +1,11 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-20（M3 策展导入器完成）
+> 最后更新：2026-09-20（M3 策展导入器完成 + M3 真机验证与两处真实缺陷修复）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
 > 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3**（E2 + M3，2026-09-20，见文末 §M3），下一项 **M4**（HTTP/SSE + 生命周期）；其余为 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）。
+> 真机：M2/M3 的代码路径已在 Ubuntu 真机跑通测试（2026-09-20，739 passed / 11 failed / 2 skipped，无回归，见文末「M3 真机验证 + 两处真实缺陷修复」）。
 
 ---
 
@@ -246,7 +247,7 @@
 
 ### 待办与说明
 - [x] Phase B：`status/health/doctor/memory` 命令增强（2026-09-19 已完成，见下文 Phase B 章节）
-- [ ] 真机 venv 尚未安装 pytest；如需远端跑 pytest 需先安装
+- [x] 真机 venv 依赖已齐（2026-09-20：`pytest` / `pytest-asyncio` / `rich` 已在；补装包依赖 `cryptography-50.0.1`，两份 venv 均属 guzhujushi，无需 sudo）
 - [ ] `/opt/trimum/tests` 当前为 root:root 755，如需同步测试文件需要 sudo
 
 
@@ -468,7 +469,7 @@
 ### 待办
 - [ ] 生态战略 M0/E0：确认四层定位 + 首批 3 个用例
 - [ ] MCP 接入 M0：确认真实用例 +「自研 client vs 复用 openai-agents MCP」取舍
-- [ ] 待 Ubuntu 开机：`/opt/trimum/{tests,scripts}` 的 sudo 同步、`trm ask` 真机 TTY 验证、Arch Linux smoke、SonarQube 重扫
+- [ ] 待办：`/opt/trimum` 的 sudo 同步（脚本 `scripts/sync_opt_tree.sh` 已投送到真机 `/tmp`，等用户执行）、`trm ask` 真机 TTY 验证、Arch Linux smoke、SonarQube 重扫
 
 ### 文档修正（2026-09-20，用户两点提示）
 
@@ -530,7 +531,7 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - [ ] 证书 `capabilities` 与 ToolGateway / `security_rule.py` 的**运行时合并尚未接线**：当前身份证书只作身份锚点 + 登记，
   不参与执行判定（属 E5 范畴，接线前不要对外宣称「证书限制工具」已生效）
 - [ ] `trm env inventory` / `trm env install`（E3）仍缺：目录已备好，但「探测已装软件 + 调包管理器装」未实现
-- [ ] `trm setup` 尚未在 Linux 真机上跑过（等 Ubuntu 开机）
+- [x] `trm setup` 已在 Linux 真机跑通（2026-09-20：33 项测试全绿，含真实 Ed25519 keystore 生成）；手工交互式首启仍未做过
 
 ---
 
@@ -694,7 +695,7 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - [ ] **真实第三方 server 冒烟未做**：本轮用自建 fixture server 覆盖协议；沙箱内无法 `uvx`/联网，未对发布版
   `mcp-server-*` 做端到端验证（等能联网的环境）
 - [ ] **工具聚合**（`<server>__<tool>` 注册进 `ToolRegistry`）未做：Agent 目前需先 `mcp.tools.list` 再 `mcp.tools.call`
-- [ ] `trm mcp` 未在 Linux 真机验证（等 Ubuntu 开机）；MCP 服务器进程的 cgroup 归属尚无约束
+- [x] `trm mcp` 已在 Linux 真机跑通测试（2026-09-20：client / registry / dispatcher 共 73 项全绿）；手工 `trm mcp call` 真机冒烟未做；MCP 服务器进程的 cgroup 归属尚无约束
 
 ### 文档同步
 
@@ -768,7 +769,7 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - [ ] **M4**：HTTP/SSE 传输、`idle_ttl` 空闲回收、`apply_cgroup(pid)`、`trm mcp status/restart`、`docs/OPERATIONS.md` 补 MCP 章节
 - [ ] **工具聚合**：远端工具注册进 `ToolRegistry`（`<server>__<tool>`），Agent 不必先 `mcp.tools.list` 再 `mcp.tools.call`
 - [ ] **人工审核尚未开始**：232 条候选 `reviewed` 全为 false（设计如此，不是缺陷）；§2.3 的首批「非它不可」用例还没落到 `~/.trimum/mcp/`
-- [ ] 真机未跑（M3 全离线，无此需要；M4 的 HTTP 部分需要联网 / 真机）
+- [x] 真机已跑（2026-09-20：739 passed / 11 failed / 2 skipped，11 项为宿主状态基线，无回归；见文末「M3 真机验证 + 两处真实缺陷修复」）
 
 ### 文档同步
 
@@ -777,3 +778,38 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - `PRD.md`：新增「已交付（M3）」；修正范围边界里过期的「MCP 只出方案不写实现」
 - `TODO.md`：M3 勾选 + 继续指针改为 M4 + 测试状态 739 + 覆盖清单
 - `docs/ECOSYSTEM-STRATEGY.md`：L1 与路线图 E2 行补 M3 ✅
+---
+
+## M3 真机验证 + 两处真实缺陷修复（2026-09-20）
+
+### 同步与验证
+- 打包：`git archive HEAD -o tmp/trimum-sync.tar`（2,078,720 B）→ `scp` 到真机 `/tmp/` →
+  `cd /home/guzhujushi/trimum && tar -xf /tmp/trimum-sync.tar`（`src/` 为 root 属主，报 `utime` / 改模式
+  的非致命错，内容已逐文件校验落地）
+- 真机全量：**739 passed / 11 failed / 2 skipped**（27s）
+  - 对照同步前真机 **483 passed / 11 failed**：用例总数 494 → 752 的增量来自补进真机的 E 系列 / M3 测试文件，不是回归
+  - 11 项失败与同步前**同一批**宿主状态缺失：`test_depends_on`(1)、`test_llm_integration`(1，无 Key)、
+    `test_other_dispatchers::TestEnvDispatcher::test_env_list_sorted`(1，宿主 env 有非 `KEY=VALUE` 行)、
+    `test_skill_integration`(7，缺 `~/.trimum/skills/hello-world`)、
+    `test_tool_file_loading::test_get_executor_exists`(1，缺 `~/.trimum/tools/mcp`) → **无回归**
+- 意义：M2 的 MCP stdio 路径（client / registry / dispatcher 共 73 项）与 M3 导入器（52 项）在 Linux 上全绿；
+  `trm setup` 的 33 项（含真实 Ed25519 keystore 生成）也在真机跑通
+
+### 真机暴露并修掉的两个真缺陷
+
+| 现象 | 根因 | 修法 |
+|---|---|---|
+| `test_setup_wizard::test_dry_run_json` 报 `JSONDecodeError: Extra data` | `cli/commands/setup.py:182` 把「身份步骤被跳过」提示打到 **stdout**，JSON 之后多一行 | 改 `file=sys.stderr`（与 M2「`--json` 只输出 JSON」同一契约）；补回归测试 `test_skipped_identity_note_keeps_stdout_json_clean` |
+| `test_mcp_dispatcher::TestAudit` 的「参数值不入审计」断言失败 | 测试拿 `"hi"` 当哨兵，而审计事件里的 `config_path`（tmp_path）含用户名 `guzhujushi` —— `s…h-i` 撞串 | 哨兵改为 `argument-value-must-not-be-audited`（不会撞路径） |
+| 另有 6 项 `TestIdentity` 失败 | 包依赖 `cryptography`（`pyproject.toml` 已声明）在真机 venv 缺失，身份步骤返回 `skipped` | 两份 venv（`.venv`、`/opt/trimum/venv`）补装 `cryptography-50.0.1`（属主是 guzhujushi，无需 sudo） |
+
+### 待用户执行（sudo，脚本已投送）
+- `/tmp/sync_opt_tree.sh`（仓库副本 `scripts/sync_opt_tree.sh`）：把 `src/ config/ tests/ scripts/` 与顶层文档
+  装进 `/opt/trimum`。现状（2026-09-20 实测）：`src/trimum_core` 缺 9 个模块、`cli/commands` 缺 5 个、`config/` 缺 5 个 yaml、`tests/` 少 9 个文件；
+  `/opt/trimum/{config,tests,scripts}`、`src/trimum_core` 为 root:root，`tar` 直解会被拒
+- 同步后以 guzhujushi 身份跑 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`
+  （**不要**用 sudo 起 daemon，否则 `~/.trimum` 会被 root 写脏）
+- daemon 现状：PID 1359 以 guzhujushi 运行，`/run/trimum` 不存在 → IPC / `apply_cgroup` 降级（P2 项，未变）
+
+### 提交与分支
+- server `209c98e` / main `e0ad16f` / ubuntu `3040b00` / arch-linux `9925c19`（同一提交 cherry-pick）
