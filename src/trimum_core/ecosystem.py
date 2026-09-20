@@ -158,6 +158,15 @@ def assess_risk(
     return level, reasons
 
 
+
+class ImportRefused(RuntimeError):
+    """导入被拒绝（目标已存在且没有 ``--force``，或没有可导入的东西）。
+
+    三个导入器（CLI 适配器 / workflow 目录 / skill）共用这一个类型，调用方不必
+    按导入器的种类分别 catch。
+    """
+
+
 @dataclass
 class EcosystemEntry:
     """One imported thing, described the same way regardless of its layer."""
@@ -264,6 +273,7 @@ __all__ = [
     "ESCALATING_FLAGS",
     "EcosystemEntry",
     "HIGH_WORDS",
+    "ImportRefused",
     "LEVEL_LABELS",
     "LOW_WORDS",
     "MEDIUM_WORDS",

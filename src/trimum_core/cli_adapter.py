@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
-from .ecosystem import ESCALATING_FLAGS, EcosystemEntry, assess_risk
+from .ecosystem import ESCALATING_FLAGS, EcosystemEntry, ImportRefused, assess_risk
 
 #: 探测 ``--help`` 的候选旗标（按顺序试）。
 HELP_FLAGS: tuple[str, ...] = ("--help", "-h")
@@ -81,10 +81,6 @@ _SUBCOMMAND_LINE_RE = re.compile(r"^(\s+)([A-Za-z][A-Za-z0-9._-]*):?(\s{2,}|$)")
 _LONG_FLAG_RE = re.compile(r"(?<![\w-])(--[A-Za-z][A-Za-z0-9-]{0,30})(?![\w-])")
 _SHORT_FLAG_RE = re.compile(r"(?:^|[\s,(\[])(-[A-Za-z])(?=[\s,)\[\]=]|$)")
 _UNKNOWN_COMMAND_RE = re.compile(r"unknown (command|subcommand)|not a .*command|no such command", re.I)
-
-
-class ImportRefused(Exception):
-    """导入被拒绝（目标已存在且没有 ``--force``，或探测失败）。"""
 
 
 @dataclass

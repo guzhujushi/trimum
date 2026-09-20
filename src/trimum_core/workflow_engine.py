@@ -1054,7 +1054,9 @@ class WorkflowDefV2(BaseModel):
             加载成功的 WorkflowDefV2 列表。加载失败的会打印警告但不会中断。
         """
         if base_path is None:
-            base_path = str(Path.home() / ".trimum" / "workflows")
+            from .paths import trimum_path
+
+            base_path = str(trimum_path("workflows"))
 
         workflows_dir = Path(base_path)
         if not workflows_dir.is_dir():
