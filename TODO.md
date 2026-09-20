@@ -1,7 +1,7 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-20（真机 Ubuntu 验证通过）
-> 当前阶段：Phase 3 收尾 — **P0/P1 阻断项已清零并通过真机验证**；下一阶段 P0 为 CLI-Anything 接入，剩余 P2（桌面确认通道 / SDK 测试 / SonarQube 重扫）
+> 最后更新：2026-09-20（文档一致性修订 + CLI-Anything / MCP 调研）
+> 当前阶段：Phase 3 收尾已完成。**生态战略立项**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源
 > 测试：本地 **482 passed**；真机 Ubuntu **483 passed**（11 failed 与同机 `git archive HEAD` 基线逐条一致，均为宿主环境缺失，无回归）
 > 当前工作分支：`server`；Phase 3 P0/P1 提交已推送四分支（server `3af9e07` / main `26d52f5` / ubuntu `4768820` / arch-linux `b540f36`）
 
@@ -48,13 +48,14 @@
 | ~~**P1**~~ ✅ | ~~**AI/人类流量标记未统一**~~ | 已完成：`trm exec` → `SourceType.HUMAN`，`SecurityRule.can_execute` 透传 `source_type` |
 | ~~**P1**~~ ✅ | ~~**Policy 学习模式未接线**~~ | 已完成：`BehaviorMonitor.record_command` 喂数 + deny 计数 + 周期 analyze + `PolicyEngine` 注入（含置信度归一化修复） |
 | ~~**P1**~~ ✅ | ~~**Layer 1 confirm 被工具默认值吞掉**~~ | 已完成：`_merge_decision` 让网关决策优先于工具自报的 `allowed/AUTO` |
-| **P0**（下一阶段） | **OpenCLI 弃用 → CLI-Anything 接入** | opencli 引入 Node.js，不符合轻量化初衷，已在宿主改名 `tool.json5.disabled`；CLI-Anything 为 Python 编写、生态完善、可拓展 | 落地 `browser` / `browser-cdp` / `clibrowser` 工具（`docs/INTEGRATION-PLAN-BROWSER.md`），补集成测试 |
+| ~~**P0**~~ ❌ | ~~**OpenCLI 弃用 → CLI-Anything 接入**~~ | **2026-09-20 调研否决**（`docs/CLI-ANYTHING-RESEARCH.md`）：`browser-cdp` 在 CLI-Anything 中不存在；其 `browser` 依赖 Node.js + npx + DOMShell 扩展，与「去 Node」初衷冲突；trimum 已有自研 CDP 工具（`~/.trimum/tools/browser/`，19 个 action） | 浏览器能力继续自研；只借鉴其 harness / SKILL.md / registry 约定（生态定位见 `docs/ECOSYSTEM-STRATEGY.md`） |
+| **P1**（新立项） | **MCP 接入** | `MCPDispatcher` 为占位实现，固定返回 `MCP bridging not yet available`；无 server 定义、无鉴权接线、无审计 | 按 `docs/MCP-INTEGRATION-PLAN.md` 推进 M0→M4 |
 | **P2** | **daemon 部署形态未定** | 普通用户手工起 daemon：IPC 绑定 `/run/trimum/trimum.sock` 失败（退回 HTTP）、`apply_cgroup` 无权限降级 | 用 `trmd.service` 以 root/系统权限运行，或改用户态路径 |
 | **P2** | **确认 UI 只有 CLI，无桌面/WebSocket 通道** | `LiveConsole.confirm` 可用，`SecurityAgent.confirm` 无桌面交付 | WebSocket 通知 / 桌面弹窗 |
 | **P2** | **Agent SDK 无端到端测试与打包验证** | `src/agent-sdk` 已写代码但 `tests/` 无覆盖 | 补 SDK 测试 + `pyproject` 打包验证 |
 | **P2** | **SonarQube 重扫 / 真机 Arch Linux 验证** | docs P3-19/P3-20，仓库内无结果 | 收尾执行一次重扫 + 真机 smoke |
 
-> 说明：P0/P1 已全部闭环（2026-09-19），并于 2026-09-20 在真机 Ubuntu 上验证通过；下一阶段 P0 为 CLI-Anything 接入，剩余 P2 可随 Phase 4 启动并行推进。
+> 说明：P0/P1 已全部闭环（2026-09-19），并于 2026-09-20 在真机 Ubuntu 上验证通过；「CLI-Anything 接入」经调研否决，新方向为 **MCP 接入**（见 `docs/MCP-INTEGRATION-PLAN.md`）。
 
 ---
 
@@ -187,10 +188,11 @@ trm config set <key> <value>       # 设置配置项
   - 美化 banner/help 输出
 
 #### Phase F：测试与发布（P4）
-- [ ] **F1. CLI 单元测试**
+- [x] **F1. CLI 单元测试**（2026-09-20 核实已完成：`tests/test_cli.py` 32 项 + `tests/test_cli_commands.py`）
   - `tests/test_cli.py`：每个子命令的参数解析、返回值
   - Mock daemon/RPC 层，不依赖真实服务
-- [ ] **F2. 集成测试**
+- [ ] **F2. 集成测试**（待补 CLI↔daemon 端到端）
+  - `tests/test_integration.py` 目前只覆盖 gateway / workflow / event_bus，无 CLI 侧用例
   - 真实起 daemon 后 `trm status` / `trm health` 连通性
   - `trm ask` 端到端流程
 - [x] **F3. 打包验证**（`pyproject.toml` 入口 `trm = trimum_core.cli:main` 正确）
@@ -198,6 +200,51 @@ trm config set <key> <value>       # 设置配置项
   - 编写 README 完整 CLI 使用文档
 
 ---
+
+## 🌐 生态战略（E0-E7，2026-09-20 立项）
+
+> 方案见 `docs/ECOSYSTEM-STRATEGY.md`。结论：**不做「生态复制品」，做「生态集成器」**；
+> CLI-Anything 降级为可选导入源，主通道是 Agent Skills（长尾）+ MCP（服务）。
+> 灵感源：Omarchy（拥有环境 + 自描述命令面 + skills 分发）、Warp（低门槛目录 + 社区 PR）、ECC（一套技能分发进 30+ 宿主）。
+
+- [ ] **E0. 冻结战略**：确认四层定位（环境清单 / MCP / Skills / workflow 目录）+ 首批 3 个用例
+- [x] **E1. 自描述能力面**（2026-09-20 完成）：命令元数据契约（`cli/registry.py`）+ `trm commands [--all|--json|--check]`；`trm skill list/sync/paths` + `skill_sync.py`（symlink → Windows junction → copy 回退）
+  - 测试：`tests/test_cli_commands_meta.py`（15）+ `tests/test_skill_sync.py`（22）；`trm commands --check` 检出并修掉 `ask` 的 `run` 别名无摘要问题
+- [ ] **E2. MCP**：见下方「MCP 接入」章节（M1/M2）
+- [ ] **E3. 生态导入**：`trm skill list/import`、`trm env inventory`（pacman / apt / mise / winget 探测）
+- [ ] **E4. 广接入**：通用 CLI 适配器（`--help` → 工具条目 + 风险分级）、workflow 目录格式 + `trm workflow import`
+
+> 排序理由：Skills 层近乎零成本 → MCP 成本中等 → CLI 适配器 → workflow 目录。
+
+- [ ] **E5. 官方分发渠道**（2026-09-20 需求确认）：官网提供官方 Agent / Tool / Workflow，下载即用；
+  官方根证书内置（`config/trust/trimum-root.crt`），用户无需信任自签证书；
+  `.trmpkg` 包（manifest + 逐文件 sha256 + 签名 + 证书链）→ 内置根验证 → `trm install <name>` / `--file <pkg>`
+  设计见 `docs/ECOSYSTEM-STRATEGY.md` 第 7 节；安装 ≠ 授权，运行时仍走 ToolGateway 分层
+  - 子项：身份与能力模型 —— 证书携带**能力清单**（可动用工具 / 风险上限 / 有效期），运行期与内置策略取交集（只收紧）
+  - 子项：自签证书**仅本机本用户**可用（绑 `machine_id` + 用户 keystore）；他人使用需重新自签（`agent_cert.py` 已有雏形）
+  - 子项：多用户前瞻 —— `~/.trimum/`（用户私有）vs `/etc/trimum/`（系统公共）边界、审计日志 `user_id` 归属、私钥保护方案
+- [ ] **E6. 选装模型 + 首次安装引导**（2026-09-20 需求确认）：全套开发者工具链大部分为**选装**，第一次安装引导逐项询问，默认全不装
+  - `trm setup`：① 选装工具链清单（分组 + 逐项确认）② 生成用户密钥对 / 自签身份证书 ③ 探测已存在宿主
+  - `skill_sync` 的 7 个硬编码目标根 → **按探测到的宿主动态决定**；一个宿主都没有时只落 `~/.trimum/agent-skills`
+  - 硬约束：**零预装可跑** —— 不依赖 `claude` / `codex` / `opencode` 等第三方 coding agent，也不假设它们会被实际使用
+- [ ] **E7. 自研 coding Agent（候选）**：参考 `affaan-m/ECC`（262,999★，agent harness operating system，903 个 `SKILL.md` / 30+ 宿主目录）
+  设计 trimum 自己的 coding Agent；调研原始件 `tmp/research/ecosystem/ecc-*`（已 gitignore）
+
+> 统一底座：四层产出的能力都注册进同一张表，一律经 ToolGateway 分层 + 审计。
+
+## 🔌 MCP 接入（P1，2026-09-20 立项）
+
+> 方案见 `docs/MCP-INTEGRATION-PLAN.md`。现状：`MCPDispatcher` 是占位实现（`src/trimum_core/tool_dispatchers.py:716`），
+> trimum 目前**无任何真实 MCP 能力**。
+
+- [ ] **M0. 冻结设计**：列 3 个「非 MCP 不可」的用例；定「自研 client vs 复用 openai-agents MCP」取舍
+- [ ] **M1. stdio 客户端**：`mcp_client.py`（initialize / tools/list / tools/call）+ mock 单测 + 真实 server 冒烟
+- [ ] **M2. 注册与鉴权**：`mcp_registry.py`（`~/.trimum/mcp/<name>.json5`）+ 实装 `MCPDispatcher` + ToolGateway 分层接入 + `mcp.call` 审计
+- [ ] **M3. 策展导入器**：awesome-mcp-servers README → `config/mcp-catalog.yaml` 候选清单（人工审核后才启用）
+- [ ] **M4. HTTP/SSE + 生命周期**：空闲回收、cgroup 绑定、`trm mcp list/status/restart`、运维文档
+
+策展红线：优先 `uvx` / `pip install` / 单二进制（Go/Rust），`npx` 派系默认不收。
+（2026-09-20 快照：awesome 列表 4,117 条中 `npx` 626、`pip install` 127、`uvx` 108。）
 
 ## 🟡 后续方向（CLI 完成后）
 
@@ -208,6 +255,7 @@ trm config set <key> <value>       # 设置配置项
 - [ ] 自动补全脚本（bash/zsh/fish）
 
 ### 其他待办（承接之前）
+- [ ] **浏览器工具备选（2026-09-20 调研）**：`epiral/bb-browser`（6,222★，CLI + MCP，用本机登录态控制 Chrome）已获用户认可，可作为自研 CDP 工具的补充/对照，待评估接入
 - [x] **#3.8 Browser Tool 后端收尾**：opencli 已真正弃用（`tool.json5.disabled` + 加载器只认 manifest，2026-09-19 验证不再报 module_failed）
 - [ ] **真机 `/opt/trimum/tests` 与 `/opt/trimum/scripts` 仍为旧内容**（root 属主）：有空时在真机执行 `sudo bash /tmp/sync_opt_tests.sh`；不影响已部署的 `/opt/trimum/src` 运行
 - [ ] **daemon 部署形态**（P2）：普通用户手工起 daemon 时 `/run/trimum/trimum.sock` 绑定失败退回 HTTP、`apply_cgroup` 无权限降级；改为 `trmd.service` 以 root 运行，或改用用户态路径
@@ -224,6 +272,7 @@ trm config set <key> <value>       # 设置配置项
 | **#3.8 Browser Tool (CLI-Anything) 集成** | ✅ General → Browser 路由问题已修复，355 tests pass |
 | **CLI-Anything 排查（Chrome/CDP/Python）** | ✅ 所有 4 个问题已解决 |
 | **Phase 3 收尾 P0/P1 清零 + 真机 Ubuntu 验证** | ✅ 已提交并推送四分支（server `3af9e07` / main `26d52f5` / ubuntu `4768820` / arch-linux `b540f36`） |
+| **2026-09-20 文档一致性修订 + CLI-Anything / MCP 调研** | ✅ 新增 `docs/CLI-ANYTHING-RESEARCH.md` / `docs/MCP-INTEGRATION-PLAN.md`；修正 STATUS / TODO / browser 方案口径 |
 
 ---
 

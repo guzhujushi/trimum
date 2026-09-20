@@ -35,6 +35,10 @@
     trm config show              # 显示当前配置
     trm config set <key> <val>   # 设置配置项
     trm install                  # 交互式首次安装向导
+
+    trm commands                 # 枚举全部命令（--json 机器可读 / --check 校验契约）
+    trm skill list               # 列出技能及其分发状态
+    trm skill sync               # 把 Agent Skills 链接进各宿主技能目录
 """
 
 from __future__ import annotations
