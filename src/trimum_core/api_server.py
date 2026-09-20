@@ -113,13 +113,27 @@ async def _learning_loop(state: AppState) -> None:
             logger.warning("learning_loop_failed", error=str(e))
 
 
+def _core_version() -> str:
+    """包版本号 —— `/health`（HTTP 与 IPC 两条路）统一取这里。
+
+    原先 HTTP 路径写死 `0.2.0`、IPC 路径写死 `0.2.1`，与
+    `trimum_core.__version__` 三处各说各话。
+    """
+    try:
+        from . import __version__
+
+        return __version__
+    except Exception:  # pragma: no cover - 仅防御性兜底
+        return "unknown"
+
+
 def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
     """Register all JSON-RPC methods for the IPC handler."""
     router = ipc.router
 
     @router.register("health")
     async def rpc_health(params: dict) -> dict:
-        return {"status": "ok", "version": "0.2.1"}
+        return {"status": "ok", "version": _core_version()}
 
     @router.register("execute")
     async def rpc_execute(params: dict) -> dict:
@@ -188,7 +202,7 @@ def create_app(config: Config) -> FastAPI:
 
     app = FastAPI(
         title="trimum Core",
-        version="0.2.0",
+        version=_core_version(),
         description="trimum AI Runtime - system-level agent execution engine",
     )
 
@@ -200,7 +214,7 @@ def create_app(config: Config) -> FastAPI:
     @app.get("/health")
     async def health():
         """Health check endpoint."""
-        return {"status": "ok", "version": "0.2.0"}
+        return {"status": "ok", "version": _core_version()}
 
     @app.post("/api/execute", response_model=ExecuteResponse)
     async def execute(request: ExecuteRequest):

@@ -58,6 +58,27 @@ METHOD_TIMEOUT = -32001
 
 # ── RPC request/response helpers ────────────────────────────────
 
+def socket_is_live(path: str) -> bool:
+    """探测 `path` 上是否真有进程在监听。
+
+    socket 文件存在 ≠ 有服务：进程被 SIGKILL 后会留下无人监听的 stale
+    文件。只有 `connect()` 成功才说明有 listener。Windows 无 AF_UNIX，
+    恒返回 False。
+    """
+    if os.name == "nt":
+        return False
+
+    probe = stdlib_socket.socket(stdlib_socket.AF_UNIX, stdlib_socket.SOCK_STREAM)
+    try:
+        probe.settimeout(0.5)
+        probe.connect(path)
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
 def make_response(id: int | None, result: Any = None, error: dict | None = None) -> str:
     """Build a JSON-RPC 2.0 response string."""
     resp: dict[str, Any] = {"jsonrpc": "2.0"}
@@ -128,6 +149,9 @@ class IpcHandler:
         self.tcp_fallback_port = tcp_fallback_port
 
         self.router = RpcRouter()
+
+        # 启动时发现 socket 已被别的实例监听 → True（本实例退让，不抢）
+        self.socket_held_by_other = False
         self._server: stdlib_socket.socket | None = None
         self._tcp_server: stdlib_socket.socket | None = None
 
@@ -146,6 +170,18 @@ class IpcHandler:
 
         path = self.socket_path
         if os.path.exists(path):
+            if socket_is_live(path):
+                # 已有实例在监听：无脑 unlink 会把它的 RPC 通道抢走
+                # （短命进程 unlink+bind 后自杀 → 客户端静默降级成 HTTP）。
+                self.socket_held_by_other = True
+                logger.warning(
+                    "unix_socket_in_use",
+                    path=path,
+                    detail="已有进程在监听，本实例拒绝抢占",
+                )
+                return
+            # 无人监听的 stale 文件（进程被 kill 后残留），清理重建
+            logger.info("unix_socket_stale_removed", path=path)
             os.unlink(path)
 
         try:

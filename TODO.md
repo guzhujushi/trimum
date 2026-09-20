@@ -277,10 +277,12 @@ trm config set <key> <value>       # 设置配置项
 - [ ] **daemon 部署形态**（P2）：`apply_cgroup` 仍需 root，普通用户跑时降级；**2026-09-20 已二选一：走「纯手工 daemon」** —— `trmd.service` 已 `disable --now`，daemon 由 `scripts/restart_trmd.sh` 以 guzhujushi 身份管理；要改回 systemd 托管用 `sudo bash scripts/fix_trmd_loop.sh --use-systemd`
 - [ ] **daemon 单实例与 socket 加固（2026-09-20 真机发现，P1；运维侧已闭环）**：
   - [x] 运维处置：`trmd.service`（enabled + `Restart=always`）与手工 daemon 抢 `127.0.0.1:8321`，单元每 5s `exit 3`（`NRestarts` 到 117）→ `scripts/fix_trmd_loop.sh`；执行方案A后 `trmd` 为 disabled/inactive、`Errno 98` 归零、`trm status` 回到 `source: rpc`
-  - [ ] 端口冲突应 fail-fast：端口/socket 被占时在触碰 socket 之前退出，并提示「已有 daemon 在跑」（现在只会抛 uvicorn 的 `[Errno 98]`）
-  - [ ] `ipc_handler._start_unix_socket()` 先 `unlink` 再 `bind`：短命进程会**抢走运行中 daemon 的 unix socket**，死后留下无人监听的 socket 文件 —— 这是 RPC 静默降级成 HTTP 的根因；应先探测是否有人监听再决定 unlink
-  - [ ] `config.py:24` 把 socket 路径写死 `/run/user/1000/trimum.sock`（假设 uid=1000），而客户端 `trimum_client.discover_socket()` 走 `XDG_RUNTIME_DIR` → 换 uid 就客户端/服务端对不上
-  - [ ] `api_server.py` 的 `/health` 版本号自相矛盾：IPC 路径 `"0.2.1"`（L122）vs HTTP 路径 `"0.2.0"`（L203），应统一取 `trimum_core.__version__`（0.5.0）
+  - [x] 端口冲突应 fail-fast：端口/socket 被占时在触碰 socket 之前退出，并提示「已有 daemon 在跑」（现在只会抛 uvicorn 的 `[Errno 98]`）
+  - [x] `ipc_handler._start_unix_socket()` 先 `unlink` 再 `bind`：短命进程会**抢走运行中 daemon 的 unix socket**，死后留下无人监听的 socket 文件 —— 这是 RPC 静默降级成 HTTP 的根因；应先探测是否有人监听再决定 unlink
+  - [x] `config.py:24` 把 socket 路径写死 `/run/user/1000/trimum.sock`（假设 uid=1000），而客户端 `trimum_client.discover_socket()` 走 `XDG_RUNTIME_DIR` → 换 uid 就客户端/服务端对不上
+  - [x] `api_server.py` 的 `/health` 版本号自相矛盾：IPC 路径 `"0.2.1"`（L122）vs HTTP 路径 `"0.2.0"`（L203），应统一取 `trimum_core.__version__`（0.5.0）
+  - **代码侧闭环（2026-09-20，server `PENDING`）**：启动预检 fail-fast（`main.check_tcp_port()` connect+bind 双探测 → 端口被占 `exit 3`；`ipc_handler.socket_is_live()` 探到别人在听也 `exit 3`）；`_start_unix_socket()` 改为「先探测再决定 unlink」，有人在听则退让（`socket_held_by_other`）、只有 stale 文件才清理，`stop()` 不再 unlink 别人的 socket；`config.default_socket_path()` 跟随 `XDG_RUNTIME_DIR` → `/run/user/<uid>` → 数据目录（客户端 `socket_candidates()` 同序）；`/health` 统一取 `trimum_core.__version__`；顺带修 `Config.__init__` 浅拷贝污染全局 `DEFAULT_CONFIG`。回归测试：`tests/test_daemon_singleton.py`、`tests/test_socket_path_consistency.py`、`test_ipc_listener.py::TestSocketTakeoverGuard`、`test_api_server_startup.py::TestHealthVersion`
+  - **待用户执行（sudo）**：`sudo bash /tmp/sync_opt_singleton_fix.sh` —— 把 5 个 src + 4 个 tests 补进 `/opt/trimum`（daemon 运行树），随后以 guzhujushi 身份跑 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`，`trm status` 的 `version` 应从 `0.2.1` 变 `0.5.0`
   - 运维侧已备 `scripts/fix_trmd_loop.sh`（`--check` / 默认停用单元 / `--use-systemd` 改 systemd 托管）
 - [ ] **Safety**: Landlock / Seccomp 沙箱（Phase 4）
 - [ ] **3.5 确定性字段 confidence 分级**：三级分流（直接执行 / 确认窗口 / 转 Planner）
