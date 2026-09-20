@@ -170,6 +170,18 @@ trm mcp call echo__echo '{"text": "hi"}'  # 与 `trm mcp call echo echo '...'` �
   `ToolGateway` 的 Layer 1 终端确认同样 fail closed（非 TTY 直接拒绝，提示走 JIT 令牌）。
 - 已装条目是幂等的：`already installed: x` + 退出码 0，不弹确认、不执行命令。
 
+### 同一类挂死的三处（2026-09-20 全修）
+
+`input()` 只在 stdin **被关闭**时抛 `EOFError`；管道**开着但不给数据**（`ssh host 'trm …'`、
+CI step、包装脚本）会永久阻塞。统一口径：**非 TTY 一律不提问**。
+
+| 位置 | 非交互时的行为 |
+|---|---|
+| `cli/commands/env.py::_confirm` | 按「没确认」处理，提示 `--yes`，退出码 1 |
+| `cli/commands/mcp.py::_confirm` | 同上，`trm mcp call` 需 `--yes` |
+| `tool_gateway.py::_prompt_confirm`（Layer 1 终端确认） | **fail closed**：直接拒绝，提示走 JIT 令牌 / 策略白名单 |
+| `install_fn.py`（`trm install` 向导） | **跳过**所有可选步骤（LLM key / 开机自启 / 立即启动），打一行「非交互模式，跳过」 |
+
 ## daemon 托管与重启（systemd）
 
 生产机 `/etc/systemd/system/trmd.service` 是 daemon 的**真正托管者**：
