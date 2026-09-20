@@ -2,8 +2,10 @@
 
 > 日期：2026-09-20
 > 数据来源：`punkpeye/awesome-mcp-servers`（经 7993 代理抓取，原始件在 `tmp/research/awesome-README.md`）
-> 结论先行：trimum 目前**没有任何真实 MCP 能力**（`MCPDispatcher` 是占位）。引入 awesome-mcp-servers 的第一步
-> 不是「抄列表」，而是实现 MCP 客户端 + 文件化 server 注册 + 权限接入。
+> 结论先行：引入 awesome-mcp-servers 的第一步不是「抄列表」，而是实现 MCP 客户端 + 文件化 server 注册 + 权限接入。
+> **2026-09-20 更新**：M0（设计冻结）/ M1（stdio 客户端）/ M2（注册 + 分发 + 审计）**已落地**，
+> 代码见 `src/trimum_core/mcp_client.py` / `mcp_registry.py` / `tool_dispatchers.MCPDispatcher`；
+> 剩余 M3（策展导入器）/ M4（HTTP/SSE + 生命周期）。
 
 ## 1. 目标与范围
 
@@ -12,20 +14,50 @@
 - 非目标：不把 awesome-mcp-servers 的 4,117 个条目全量引入；不做 MCP server 的托管与市场分发。
 - 生态定位：MCP 是四层生态战略中的「服务层」，见 docs/ECOSYSTEM-STRATEGY.md。
 
-## 2. 现状（代码核实，2026-09-20）
+## 2. 现状
 
-| 位置 | 现状 |
+### 2.1 E2 前（2026-09-20 立项时的占位状态）
+
+| 位置 | 立项时现状 |
 |---|---|
-| `src/trimum_core/tool_dispatchers.py:716` | `class MCPDispatcher` 是占位类，`execute()` 直接返回 `MCP bridging not yet available` |
-| `src/trimum_core/tool_dispatchers.py:763` | `DispatcherRegistry.TOOLTYPE_MAP["mcp"] = [MCP_TOOLS_LIST, MCP_TOOLS_CALL]` |
-| `src/trimum_core/models.py:408` | `ToolType.MCP_TOOLS_CALL = "mcp.tools.call"` 已定义（`MCP_TOOLS_LIST` 同理） |
+| `tool_dispatchers.py`（原 716 行） | `class MCPDispatcher` 是占位类，`execute()` 直接返回 `MCP bridging not yet available` |
+| `tool_dispatchers.py` | `DispatcherRegistry.TOOLTYPE_MAP["mcp"] = [MCP_TOOLS_LIST, MCP_TOOLS_CALL]` |
+| `models.py` | `ToolType.MCP_TOOLS_CALL = "mcp.tools.call"` 已定义（`MCP_TOOLS_LIST` 同理） |
 | `~/.trimum/tools/mcp/main.py` | 只是把请求转给 `MCPDispatcher()`，无实际协议实现 |
-| `src/trimum_core/tool_gateway.py:1014` | MCP 类型已在 ToolGateway 的类型表内 |
+| `tool_gateway.py` | MCP 类型已在 ToolGateway 的类型表内 |
 | `config/*.yaml` | 无任何 `mcp_servers` / MCP 相关配置项 |
 
-**差距清单**：① 无 MCP 协议客户端（stdio + streamable HTTP/SSE）；② 无 server 生命周期管理；
-③ 远端工具未聚合进 `ToolRegistry`，Agent 无从感知；④ 未接入 Policy/SecurityRule/JIT 授权；
-⑤ 无审计事件；⑥ 无策展白名单。
+立项时差距清单：① 无 MCP 协议客户端；② 无 server 生命周期管理；③ 远端工具未聚合进 `ToolRegistry`；
+④ 未接入 Policy/SecurityRule/JIT 授权；⑤ 无审计事件；⑥ 无策展白名单。
+
+### 2.2 E2 后（本次实现，M0+M1+M2）
+
+| 差距 | 状态 | 落点 |
+|---|---|---|
+| ① 协议客户端（stdio） | ✅ | `mcp_client.py`：子进程 + JSON-RPC 2.0 换行分帧，`connect/initialize/list_tools/call_tool/ping/close` |
+| ① 协议客户端（HTTP/SSE） | ⏳ M4 | 现在遇到 `transport: http` 会明确报「M4 未实现」，不假装能用 |
+| ② 生命周期 | ✅ 基础 | `MCPServerPool`：懒启动、按名复用、坏连接丢弃重建、`close/close_all`；空闲回收与 cgroup 留 M4 |
+| ③ 工具聚合进 `ToolRegistry` | ⏳ M3 | `ToolRegistry` 目前是静态 `ToolDefinition`（`ToolType` 是枚举），动态工具需要新机制；M2 先由 `mcp.tools.list` 提供运行时枚举 |
+| ④ 授权接入 | ✅ 复用 | 调用与内置工具走同一层 ToolGateway 分层；MCP 已在 cwd jail 跳过表内（不碰工作目录） |
+| ⑤ 审计 | ✅ | 每次调用记 `mcp_call` 事件（server / tool / 耗时 / 结果 / 参数**键名**），`task.audit.mcp_call` 广播 |
+| ⑥ 策展白名单 | ⏳ M3 | `config/mcp-catalog.yaml` 与导入器未做 |
+
+### 2.3 M0 决议（2026-09-20 冻结）
+
+1. **自研最小 client，不复用 openai-agents 的 MCP transport**：stdio 分帧就是「一行一个 JSON-RPC 2.0」（LSP 同款），
+   `asyncio` 直接够用；把 SDK 引进来等于把 Agent SDK 的取舍绑进协议层。将来若自研 coding Agent 走 openai-agents，
+   可在 transport 层替换，`MCPClient` 对外接口（`connect/list_tools/call_tool`）不变。
+2. **首批 3 个「非它不可」用例**（M2 验收依据）：
+   ① 本机能力接入（`uvx mcp-server-filesystem` 之类本地 server，Agent 不必逐软件写适配器）；
+   ② 远程 SaaS 走受管通道（`trust: cloud`，带分层 + 审计 + 确认，避免把 API key 摊在脚本里）；
+   ③ 零代码扩能力（用户放一个 `<name>.json5` 即接入，trimum 代码不动一行）。
+3. **传输范围**：M2 只做 stdio；HTTP/SSE 留 M4。
+4. **调用面约定**：`mcp.tools.list [server]`（空 = 所有已启用）、`mcp.tools.call <server> <tool> [json-arguments]`；
+   输出一律 JSON，供 Agent 直接消费。
+5. **安全默认**：deny-by-default（`enabled` 缺省 false）；`allow_tools` / `deny_tools` glob（deny 优先）；
+   `trust: cloud` 额外继承破坏性工具默认黑名单；参数值不入审计。
+6. **测试策略**：`tests/fixtures/mcp_echo_server.py` 是**真协议** stdio server（不是 mock），
+   因此分帧、超时、带外通知、进程退出都被真实覆盖；沙箱内不联网、不依赖 Node。
 
 ## 3. 生态数据（awesome-mcp-servers 快照）
 
@@ -140,9 +172,9 @@ Security 234、Other Tools 211、Communication 161、Databases 138、Aggregators
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **M0** | 冻结本方案；确认真实需求场景（先列 3 个「非它不可」的用例） | 本文档评审通过 |
-| **M1** | `mcp_client.py` stdio 客户端 + `initialize` / `tools/list` / `tools/call` | 单测（mock server）+ 真实 server 冒烟各 1 例 |
-| **M2** | `mcp_registry.py` + `MCPDispatcher` 实装 + ToolGateway 分层接入 + 审计事件 | `tests/test_mcp_client.py` / `test_mcp_registry.py`；`trm mcp list` 可用 |
+| **M0** ✅ | 冻结本方案；确认真实需求场景（3 个「非它不可」用例）（2026-09-20 完成） | 决议见 §2.3 |
+| **M1** ✅ | `mcp_client.py` stdio 客户端 + `initialize` / `tools/list` / `tools/call`（2026-09-20 完成） | `tests/test_mcp_client.py`（16 项，真实 fixture server + 超时/EOF/带外通知） |
+| **M2** ✅ | `mcp_registry.py` + `MCPDispatcher` 实装 + ToolGateway 审计回填 + `mcp_call` 事件（2026-09-20 完成） | `tests/test_mcp_registry.py`（27）/ `test_mcp_dispatcher.py`（30）；`trm mcp list/tools/call/paths` 可用 |
 | **M3** | 策展导入器（姿势 B）+ `config/mcp-catalog.yaml` + 用户文档 | 导入器单测（离线 fixture：`tmp/research/awesome-README.md`） |
 | **M4** | HTTP/SSE 传输 + 空闲回收 + cgroup 绑定 + 运维文档 | 长跑测试 + `docs/OPERATIONS.md` 补 MCP 章节 |
 

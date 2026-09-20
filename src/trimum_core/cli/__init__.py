@@ -75,10 +75,22 @@ def _print_default_status(args: argparse.Namespace) -> None:
         pass
 
 
+def _route_diagnostics() -> None:
+    """Keep stdout clean: CLI diagnostics go to stderr（`--json` 才可被机器直接消费）。"""
+    try:
+        from trimum_core.logger import setup_cli_logging
+
+        setup_cli_logging()
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     """`trm` 命令主入口。"""
     if argv is None:
         argv = sys.argv[1:]
+
+    _route_diagnostics()
 
     parser = build_parser()
     args = parser.parse_args(argv)

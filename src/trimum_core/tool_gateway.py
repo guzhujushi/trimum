@@ -408,6 +408,13 @@ class ToolGateway:
         self.learning_engine = learning_engine
         self._audit_tasks: set[asyncio.Task] = set()
 
+        # MCP 分发器需要审计下沉 + EventBus 来做 `mcp.call` 事件（其余分发器不需要）：
+        # 审计对象在网关里才存在，所以在这里回填，而不是在 DispatcherRegistry 构造时。
+        for tool_type in (ToolType.MCP_TOOLS_LIST, ToolType.MCP_TOOLS_CALL):
+            binder = getattr(self.dispatchers.get(tool_type), "bind_audit", None)
+            if callable(binder):
+                binder(audit_store=self.audit_store, event_bus=self.event_bus)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
