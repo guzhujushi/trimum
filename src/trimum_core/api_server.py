@@ -98,6 +98,9 @@ class AppState:
         # 和 cgroup 绑定都要在事件循环里跑，构造点必须和运行点重合。
         self.mcp_pool: Optional[Any] = None
         self.mcp_reaper: Optional[asyncio.Task] = None
+        # MCP 聚合工具索引（M4.5）：远端工具在注册表里的名字是
+        # `<server>__<tool>`，缓存落在 ~/.trimum/mcp-tools.json
+        self.mcp_index: Optional[Any] = None
 
 
 async def _learning_loop(state: AppState) -> None:
@@ -166,17 +169,69 @@ def wire_mcp_dispatchers(state: AppState, pool: Any) -> list[Any]:
     return wired
 
 
+def build_mcp_tool_index() -> Any:
+    """聚合工具的缓存索引（远端工具并进 ToolRegistry，M4.5）。
+
+    daemon 全程只用**一个**实例：`MCPDispatcher` 往里写（每次成功的
+    ``tools/list`` 顺手落盘），`ToolGateway` 的注册表从里读。两条路必须是
+    同一份缓存，否则刚列过的工具在 `trm tool list` 里依然看不见。
+    """
+    from .mcp_bridge import MCPToolIndex
+
+    return MCPToolIndex()
+
+
+def prune_mcp_index(index: Any, registry: Any) -> int:
+    """把「定义已经不存在」的 server 从缓存里剔掉，返回剔掉的数量。
+
+    目录读不到时什么都不做 —— 那说明「不知道有哪些 server」，而不是「一个
+    server 都没有」；按后者处理会把整份缓存清空。
+    """
+    directory = getattr(registry, "directory", None)
+    if directory is None or not Path(directory).is_dir():
+        return 0
+    return index.prune(registry.names())
+
+
+def wire_mcp_index(state: AppState, index: Any) -> list[Any]:
+    """把索引交给所有 MCP 分发器，并让注册表按它登记聚合条目。"""
+    wired: list[Any] = []
+    seen: set[int] = set()
+    for tool_type in (ToolType.MCP_TOOLS_LIST, ToolType.MCP_TOOLS_CALL):
+        dispatcher = state.tool_gateway.dispatchers.get(tool_type)
+        if dispatcher is None or id(dispatcher) in seen:
+            continue
+        seen.add(id(dispatcher))
+        setter = getattr(dispatcher, "set_tool_index", None)
+        if callable(setter):
+            setter(index)
+            wired.append(dispatcher)
+
+    registry = getattr(state.tool_gateway, "tools", None)
+    if registry is not None and hasattr(registry, "load_mcp_tools"):
+        registry.load_mcp_tools(index)
+    return wired
+
+
 async def start_mcp(state: AppState) -> None:
-    """startup 期接线：建池 → 交给所有 MCP 分发器 → 起空闲回收器。"""
+    """startup 期接线：建池 → 建索引 → 交给分发器 → 起空闲回收器。"""
     pool = build_mcp_pool(state.config)
     state.mcp_pool = pool
+    index = build_mcp_tool_index()
+    state.mcp_index = index
+    # 定义被删掉之后，缓存里那些 `a__b` 不该继续冒充可用工具。daemon 起来
+    # 时对一次账（运行期删定义由 `reap()` + 调用时的 not-found 兜住）。
+    pruned = prune_mcp_index(index, pool.registry)
     wired = wire_mcp_dispatchers(state, pool)
+    wire_mcp_index(state, index)
     # 回收器必须和池子同寿：daemon 关掉时由 close_all() 一起收摊
     state.mcp_reaper = pool.start_reaper(interval=MCP_REAPER_INTERVAL_SECONDS)
     logger.info(
         "mcp_pool_started",
         servers=len(pool.registry.servers()),
         wired=len(wired),
+        tools=len(index.entries()),
+        pruned=pruned,
         reaper_interval=MCP_REAPER_INTERVAL_SECONDS,
     )
 
