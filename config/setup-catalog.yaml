@@ -1,0 +1,142 @@
+# trimum 选装工具链目录（首次安装引导 `trm setup` 使用）
+#
+# 设计原则（见 docs/ECOSYSTEM-STRATEGY.md §7.3）：
+#   * 全部为「选装」，默认一个都不装；引导逐项询问，用户勾选后才登记；
+#   * 本文件只描述「装什么、用什么包名」，不负责安装 —— 实际安装交给
+#     系统包管理器（E3 的 `trm env install`），trimum 不自建包仓库；
+#   * 第三方 coding agent 一律标注 kind: agent，提醒用户它们是外部工具，
+#     不是 trimum 的依赖（trimum 将来可能自带 coding Agent，见 E7）。
+version: 1
+
+groups:
+  - id: runtimes
+    label: 语言运行时
+    entries:
+      - name: python
+        label: Python 3
+        note: trimum 本体与大量工具链的基础
+        packages: {pacman: python, apt: python3, winget: Python.Python.3.12}
+      - name: node
+        label: Node.js (LTS)
+        note: 前端工具链与部分 MCP server 需要（trimum 本身不依赖 Node）
+        packages: {pacman: nodejs, apt: nodejs, winget: OpenJS.NodeJS.LTS}
+      - name: rust
+        label: Rust (rustup)
+        note: 编译 Rust 工具与单二进制 CLI
+        packages: {pacman: rustup, apt: rustup, winget: Rustlang.Rustup}
+      - name: go
+        label: Go
+        note: 编译 Go 工具（含不少 MCP server）
+        packages: {pacman: go, apt: golang, winget: GoLang.Go}
+      - name: java
+        label: OpenJDK
+        note: JVM 工具链
+        packages: {pacman: jdk-openjdk, apt: default-jdk, winget: EclipseAdoptium.Temurin.21.JDK}
+
+  - id: version-managers
+    label: 版本管理器
+    entries:
+      - name: mise
+        label: mise
+        note: 多语言运行时版本管理（Omarchy 用它做懒加载 stub）
+        packages: {pacman: mise, apt: mise, winget: jdx.mise}
+      - name: uv
+        label: uv
+        note: 极快的 Python 环境 / 工具安装器
+        packages: {pacman: uv, apt: uv, winget: astral-sh.uv}
+
+  - id: coding-agents
+    label: 第三方 coding agent（选装，trimum 不依赖）
+    entries:
+      - name: claude-code
+        label: Claude Code
+        note: 外部 coding agent；装了 trimum 会把 Agent Skills 分发进 ~/.claude/skills
+        kind: agent
+        packages: {pacman: claude-code, apt: null, winget: null}
+      - name: codex
+        label: Codex CLI
+        note: 外部 coding agent；对应宿主目录 ~/.codex/skills
+        kind: agent
+        packages: {pacman: null, apt: null, winget: null}
+      - name: opencode
+        label: OpenCode
+        note: 外部 coding agent；对应宿主目录 ~/.opencode/skills
+        kind: agent
+        packages: {pacman: opencode, apt: null, winget: null}
+      - name: gemini-cli
+        label: Gemini CLI
+        note: 外部 coding agent；对应宿主目录 ~/.gemini/config/skills
+        kind: agent
+        packages: {pacman: null, apt: null, winget: null}
+
+  - id: containers
+    label: 容器与虚拟化
+    entries:
+      - name: docker
+        label: Docker
+        note: 构建 / 运行容器
+        packages: {pacman: docker, apt: docker.io, winget: Docker.DockerDesktop}
+      - name: podman
+        label: Podman
+        note: 无守护进程的容器运行时
+        packages: {pacman: podman, apt: podman, winget: RedHat.Podman}
+
+  - id: editors
+    label: 编辑器
+    entries:
+      - name: neovim
+        label: Neovim
+        note: 终端编辑器
+        packages: {pacman: neovim, apt: neovim, winget: Neovim.Neovim}
+      - name: vscode
+        label: VS Code
+        note: 图形编辑器
+        packages: {pacman: code, apt: code, winget: Microsoft.VisualStudioCode}
+      - name: zed
+        label: Zed
+        note: 图形编辑器；对应宿主目录 ~/.zed/skills
+        packages: {pacman: zed, apt: null, winget: Zed.Zed}
+
+  - id: cli-tools
+    label: 命令行工具
+    entries:
+      - name: ripgrep
+        label: ripgrep
+        note: 快速文本搜索（Agent 最常用）
+        packages: {pacman: ripgrep, apt: ripgrep, winget: BurntSushi.ripgrep.MSVC}
+      - name: fd
+        label: fd
+        note: 更友好的 find
+        packages: {pacman: fd, apt: fd-find, winget: sharkdp.fd}
+      - name: jq
+        label: jq
+        note: JSON 处理（MCP / 审计日志常用）
+        packages: {pacman: jq, apt: jq, winget: jqlang.jq}
+      - name: gh
+        label: GitHub CLI
+        note: 仓库操作与 PR 流程
+        packages: {pacman: github-cli, apt: gh, winget: GitHub.cli}
+      - name: tmux
+        label: tmux
+        note: 长任务会话保持
+        packages: {pacman: tmux, apt: tmux, winget: null}
+      - name: lazygit
+        label: lazygit
+        note: 终端 Git 界面
+        packages: {pacman: lazygit, apt: null, winget: JesseDuffield.lazygit}
+
+  - id: data
+    label: 数据与存储
+    entries:
+      - name: postgresql
+        label: PostgreSQL
+        note: 关系型数据库
+        packages: {pacman: postgresql, apt: postgresql, winget: PostgreSQL.PostgreSQL.16}
+      - name: sqlite
+        label: SQLite
+        note: 单文件数据库（trimum 审计 / 记忆可用）
+        packages: {pacman: sqlite, apt: sqlite3, winget: SQLite.SQLite}
+      - name: redis
+        label: Redis
+        note: 缓存 / 队列
+        packages: {pacman: redis, apt: redis-server, winget: taizod1024.redis-windows-fork}

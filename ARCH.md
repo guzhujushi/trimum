@@ -207,6 +207,26 @@
   冲突（目标已存在且不是指向本源的链接）默认拒绝，`--force` 才替换；`--prune` 清理悬空链接。
 - 判断链接需同时看 `is_symlink()` 与 `os.path.isjunction()`（Windows 上 junction 不是 symlink）。
 
+## 宿主探测与首启引导（E6，2026-09-20 已实现）
+
+- **不假设预装**：`src/trimum_core/hosts.py` 维护 14 个已知宿主（`.agents` / `.claude` / `.codex` / `.pi` /
+  `.gemini` / `.hermes` / `.cursor` / `.opencode` / `.kimi` / `.qwen` / `.zed` / `.kiro` / `.trae` / `.openclaw`），
+  证据三路：`TRIMUM_HOSTS` 强制、配置目录存在、PATH 上的 CLI（`TRIMUM_HOSTS_DISABLE` 反向排除）。
+- **分发目标由探测决定**：`skill_sync.default_target_roots()` 默认只返回「已存在宿主」的技能根 + trimum 自己的
+  `~/.trimum/agent-skills`（永远存在，保证零预装可跑）；`all_hosts=True` / `--all-hosts` 恢复全量预置模式。
+- **数据根单一入口**：`src/trimum_core/paths.py` 的 `trimum_home()`（`TRIMUM_HOME` 可覆盖）为将来多用户
+  「每用户一份 root」与 `/etc/trimum` 系统公共层预留唯一改点；本轮只在新模块使用，不重构既有调用点。
+- **身份**：`src/trimum_core/identity.py` 生成 Ed25519 密钥对（`~/.trimum/identity/identity-ed25519.key`，POSIX 下 0600）
+  与自签身份文档 `identity.json`（`schema` / `user` / `machine_id` / `public_key_fingerprint` /
+  `capabilities: {tools, max_risk, expires_at, scope}`）。`cryptography` 为**可选依赖**：缺失时状态 `skipped`，
+  不写半成品；`max_risk` 非法值直接报错（能力只收紧）。
+- **向导**：`src/trimum_core/setup_wizard.py`（步骤 `hosts` / `identity` / `toolchain` / `skills`，可 `--skip`）
+  + `trm setup` 命令；选装清单 `config/setup-catalog.yaml`（7 组 25 项，含 pacman / apt / winget 包名，
+  **只登记不安装**，实际安装留给 E3 的 `trm env install`）。状态落 `~/.trimum/config/setup.json5`。
+- **与旧向导的关系**：`trm install` 保持原有 systemd / API Key 引导，`trm install --setup` 复用新向导；
+  `trm install <name>`（官方包安装，E5）留给将来，不与向导抢名称。
+- 测试：`tests/test_hosts.py`、`tests/test_setup_wizard.py`、`tests/test_skill_sync.py::TestDynamicTargets`。
+
 ## 官方分发渠道（规划，2026-09-20）
 
 - 官网发布官方 Agent / Tool / Workflow；包格式 `.trmpkg` = `tar.gz` + `manifest.json5`

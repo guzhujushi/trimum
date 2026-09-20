@@ -153,8 +153,8 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
 | 5 | `trm env inventory/install` | 包管理器集成 |
 | 6 | workflow 目录格式 + `trm workflow import` | Warp 式贡献入口 |
 | 7 | 生态统一注册表 schema（`trust`/`risk`/`requires`/`source_url`/`author`） | 借鉴 CLI-Anything registry + Warp FORMAT |
-| 8 | skills 分发目标**按已探测宿主动态决定**（当前硬编码 7 个根） | 软件是「用户选装」→ 不能假设机器上装了什么 agent |
-| 9 | 首次安装引导 `trm setup`（选装工具链清单 + 生成身份密钥 + 探测宿主） | 见 §7.3；默认全不装，逐项确认 |
+| ~~8~~ | ~~skills 分发目标按已探测宿主动态决定~~ | **已实现（2026-09-20，E6）**：`src/trimum_core/hosts.py`；`--all-hosts` 保留全量模式 |
+| ~~9~~ | ~~首次安装引导 `trm setup`~~ | **已实现（2026-09-20，E6）**：`setup_wizard.py` + `trm setup`；选装清单见 `config/setup-catalog.yaml` |
 
 ---
 
@@ -168,7 +168,7 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
 | **E3** | `trm skill import` + `trm env inventory` | 离线可跑；导入支持 dry-run |
 | **E4** | 通用 CLI 适配器 + workflow 目录（Warp 式）+ 导入器 | 导入 dry-run；风险分级正确 |
 | **E5** | 官方分发渠道：官网目录 + 官方根证书 + `.trmpkg` 校验器 + `trm install` | 签名校验单测（内置根/坏签名/哈希不符）+ 离线安装 dry-run |
-| **E6** | 选装工具链模型 + 首次安装引导 `trm setup` + 宿主探测 | 全新机器零预装可跑；引导可跳过、可重跑 |
+| **E6** ✅ | 选装工具链模型 + 首次安装引导 `trm setup` + 宿主探测（2026-09-20 完成） | `hosts.py` / `setup_wizard.py` / `identity.py` / `config/setup-catalog.yaml`；47 项新测试；`trm commands --check` 50 条通过 |
 | **E7** | 身份与多用户：证书 = 身份 + 能力清单；每用户独立 keystore | 见 §7.1 / §7.2 |
 
 ---
@@ -245,11 +245,14 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
 > **第一次安装引导会问**；而且 trimum 将来可能自己做一个 coding Agent（参考 ECC），
 > 所以**不能假设机器上装了 `claude` / `codex` / `opencode` 之类**，也不能假设它们会被实际使用。
 
-- `trm setup`（规划，E6）：首次运行引导 —— ① 选装工具链（分组清单，默认全不装，逐项确认）；
-  ② 生成用户密钥对 + 自签身份证书；③ 探测已存在的宿主，按探测结果决定 skills 分发目标。
+- `trm setup`（**已实现，2026-09-20**）：首次运行引导 ——
+  ① 选装工具链（`config/setup-catalog.yaml`，7 组 25 项，默认全不装，逐项确认，**只登记不安装**）；
+  ② 生成用户密钥对 + 自签身份证书（`~/.trimum/identity/`，Ed25519）；
+  ③ 探测已存在的宿主，按探测结果决定 skills 分发目标；④ 结果写入 `~/.trimum/config/setup.json5`。
+  非交互（无 TTY 或 `--yes`）不提示，`--dry-run` 不落盘，`--skip STEP` 跳过单项。
 - L0 因此从「扫描已装软件」升级为「**清单 = 可选装 + 已装**」：`trm env inventory` 回答「有什么」，
   `trm setup` 回答「要不要装」，两者共用同一份能力目录。
-- **零预装可跑**：trimum 本体不依赖任何第三方 coding agent；一个宿主都没有时，skills 只落到 `~/.trimum/agent-skills`。
+- **零预装可跑**（已实现且有测试）：trimum 本体不依赖任何第三方 coding agent；一个宿主都没有时，skills 只落到 `~/.trimum/agent-skills`。
 
 ---
 

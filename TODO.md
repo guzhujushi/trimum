@@ -223,10 +223,15 @@ trm config set <key> <value>       # 设置配置项
   - 子项：身份与能力模型 —— 证书携带**能力清单**（可动用工具 / 风险上限 / 有效期），运行期与内置策略取交集（只收紧）
   - 子项：自签证书**仅本机本用户**可用（绑 `machine_id` + 用户 keystore）；他人使用需重新自签（`agent_cert.py` 已有雏形）
   - 子项：多用户前瞻 —— `~/.trimum/`（用户私有）vs `/etc/trimum/`（系统公共）边界、审计日志 `user_id` 归属、私钥保护方案
-- [ ] **E6. 选装模型 + 首次安装引导**（2026-09-20 需求确认）：全套开发者工具链大部分为**选装**，第一次安装引导逐项询问，默认全不装
-  - `trm setup`：① 选装工具链清单（分组 + 逐项确认）② 生成用户密钥对 / 自签身份证书 ③ 探测已存在宿主
-  - `skill_sync` 的 7 个硬编码目标根 → **按探测到的宿主动态决定**；一个宿主都没有时只落 `~/.trimum/agent-skills`
-  - 硬约束：**零预装可跑** —— 不依赖 `claude` / `codex` / `opencode` 等第三方 coding agent，也不假设它们会被实际使用
+- [x] **E6. 选装模型 + 首次安装引导**（2026-09-20 完成）：全套开发者工具链大部分为**选装**，引导逐项询问，默认全不装
+  - [x] `src/trimum_core/hosts.py`：14 个已知宿主 + 三路探测（`TRIMUM_HOSTS*` 环境变量 / 配置目录 / PATH 上的 CLI）
+  - [x] `src/trimum_core/paths.py`：`TRIMUM_HOME` 统一数据根（给多用户 / `/etc/trimum` 预留单一改点）
+  - [x] `src/trimum_core/identity.py`：Ed25519 用户密钥对 + 自签身份证书（绑 `machine_id` + user；`max_risk` 只能收紧）
+  - [x] `src/trimum_core/setup_wizard.py` + `config/setup-catalog.yaml`（7 组 25 项）+ `trm setup [--dry-run|--yes|--tools|--all-hosts|--skip|--max-risk]`
+  - [x] `skill_sync.default_target_roots()` 改为**按探测结果决定**，`--all-hosts` 保留全量模式；`trm install --setup` 复用同一向导
+  - [x] 测试：`tests/test_hosts.py`（13）+ `tests/test_setup_wizard.py`（29）+ `TestDynamicTargets`（5）
+  - 硬约束（已满足）：**零预装可跑** —— 不依赖 `claude` / `codex` / `opencode` 等第三方 coding agent，也不假设它们会被实际使用
+  - 遗留：证书 capability 与 ToolGateway / `security_rule.py` 的**运行时合并尚未接线**（当前身份证书只是身份锚点 + 登记，不参与执行判定）
 - [ ] **E7. 自研 coding Agent（候选）**：参考 `affaan-m/ECC`（262,999★，agent harness operating system，903 个 `SKILL.md` / 30+ 宿主目录）
   设计 trimum 自己的 coding Agent；调研原始件 `tmp/research/ecosystem/ecc-*`（已 gitignore）
 

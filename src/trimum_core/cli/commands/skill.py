@@ -30,14 +30,14 @@ __command_meta__ = {
     },
     "skill list": {
         "summary": "Show skills and where they are distributed",
-        "args": "[--all]",
+        "args": "[--all] [--all-hosts]",
         "examples": ["trm skill list --json"],
         "tags": ["skills"],
         "risk": "low",
     },
     "skill sync": {
-        "summary": "Link Agent Skills into every agent harness skill root",
-        "args": "[--dry-run] [--force] [--prune] [--mode M]",
+        "summary": "Link Agent Skills into the detected agent harness skill roots",
+        "args": "[--dry-run] [--force] [--prune] [--mode M] [--all-hosts]",
         "examples": [
             "trm skill sync --dry-run",
             "trm skill sync",
@@ -47,7 +47,7 @@ __command_meta__ = {
     },
     "skill paths": {
         "summary": "Show skill source and target roots",
-        "args": "[--create]",
+        "args": "[--create] [--all-hosts]",
         "tags": ["skills"],
         "risk": "low",
     },
@@ -67,6 +67,11 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     )
     list_parser.add_argument(
         "--target", action="append", default=[], metavar="DIR", help="target root override"
+    )
+    list_parser.add_argument(
+        "--all-hosts",
+        action="store_true",
+        help="target every known harness, not only the detected ones",
     )
     list_parser.set_defaults(handler=handler)
 
@@ -91,6 +96,11 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     sync_parser.add_argument(
         "--target", action="append", default=[], metavar="DIR", help="target root override"
     )
+    sync_parser.add_argument(
+        "--all-hosts",
+        action="store_true",
+        help="target every known harness, not only the detected ones",
+    )
     sync_parser.set_defaults(handler=handler)
 
     paths_parser = nested.add_parser("paths", help="show skill source and target roots")
@@ -99,6 +109,11 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     )
     paths_parser.add_argument(
         "--target", action="append", default=[], metavar="DIR", help="target root override"
+    )
+    paths_parser.add_argument(
+        "--all-hosts",
+        action="store_true",
+        help="target every known harness, not only the detected ones",
     )
     paths_parser.set_defaults(handler=handler)
 
@@ -121,7 +136,7 @@ def _target_roots(args: argparse.Namespace) -> list[Path]:
     override = getattr(args, "target", [])
     if override:
         return [Path(item).expanduser() for item in override]
-    return default_target_roots()
+    return default_target_roots(all_hosts=bool(getattr(args, "all_hosts", False)))
 
 
 def _target_state(entry, root: Path) -> str:

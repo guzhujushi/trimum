@@ -34,7 +34,8 @@
     trm workflow status <run_id> # 查看 workflow 运行状态
     trm config show              # 显示当前配置
     trm config set <key> <val>   # 设置配置项
-    trm install                  # 交互式首次安装向导
+    trm install                  # 交互式首次安装向导（--setup 走新版结构化向导）
+    trm setup                    # 首启引导：宿主探测 / 身份证书 / 选装工具链 / 技能分发
 
     trm commands                 # 枚举全部命令（--json 机器可读 / --check 校验契约）
     trm skill list               # 列出技能及其分发状态
