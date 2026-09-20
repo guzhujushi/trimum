@@ -109,6 +109,7 @@ fi
 echo "== [4/5] 校验 =="
 status=0
 for f in \
+    src/trimum_core/mcp_bridge.py \
     src/trimum_core/mcp_catalog.py \
     src/trimum_core/mcp_client.py \
     src/trimum_core/mcp_registry.py \
@@ -129,6 +130,25 @@ echo "  tests/*.py          : $(find "$APP_DIR/tests" -maxdepth 1 -name '*.py' |
 echo "  src/trimum_core/*.py: $(find "$APP_DIR/src/trimum_core" -maxdepth 1 -name '*.py' | wc -l)"
 echo "  属主分布："
 find "$APP_DIR/src/trimum_core" -maxdepth 1 -printf '    %u:%g\n' 2>/dev/null | sort | uniq -c
+
+# ---------------------------------------------------------------------------
+# 4b. M4.5 自检：聚合模块真的能被部署树的 venv 导入
+# ---------------------------------------------------------------------------
+if [[ $DRY_RUN -eq 0 ]]; then
+    echo "== [4b/5] M4.5 自检（$APP_DIR/venv）=="
+    "$APP_DIR/venv/bin/python" - <<'PYEOF'
+from trimum_core.mcp_bridge import MCPToolIndex, flat_name, split_name
+from trimum_core.tool_gateway import ToolRegistry
+
+print("  flat / split       =", flat_name("echo", "echo"), split_name("a__b__c"))
+registry = ToolRegistry()
+print("  load_mcp_tools     =", callable(registry.load_mcp_tools), callable(registry.list_mcp_tools))
+print("  聚合条目           =", len(registry.list_mcp_tools()), "条（读缓存，不启动 server）")
+print("  index 路径         =", MCPToolIndex().path)
+PYEOF
+else
+    echo "== [4b/5] 跳过 M4.5 自检（--dry-run）=="
+fi
 
 # ---------------------------------------------------------------------------
 # 5. 可选：修开发树 src 属主，并把源里缺的文件补回去
