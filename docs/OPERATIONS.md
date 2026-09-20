@@ -28,13 +28,37 @@
 - 开发目录：`/home/guzhujushi/trimum`
 - 部署目录：`/opt/trimum`
 - 同步源码到两个目录；`tests/` 优先同步到 home。
-- `/opt/trimum/tests` 当前为 root:root 755，需 sudo。
+
+### 属主现状（2026-09-20 实测）
+- `root:root`：`/opt/trimum/config`、`/opt/trimum/tests`、`/opt/trimum/scripts`、
+  `/opt/trimum/src/trimum_core`（44 个文件里 12 个是 `guzhujushi`，早期失败解包留下 → 重装即归一）
+- `guzhujushi:guzhujushi`：`/opt/trimum`、`/opt/trimum/src`、`/opt/trimum/venv`
+  （**venv 属主是用户，装依赖不需要 sudo**）
+- `/home/guzhujushi/trimum/src` 也是 `root:root` → `tar -xf` 无法新建 `src/agent-sdk`（内容照旧落地，只是该目录缺失）
+
+## 部署树同步（`/opt/trimum`）
+
+`scripts/sync_opt_tree.sh` 是唯一入口：以 root 把开发树的 `src/ config/ tests/ scripts/`
+与顶层文档（`AGENTS/ARCH/PRD/STATUS/TODO.md`、`docs/OPERATIONS.md`）装进 `/opt/trimum`，
+逐文件 `install -D -o root -g root`（**不做递归 chown**），末尾打印关键文件与属主校验。
+
+```bash
+scp scripts/sync_opt_tree.sh guzhujushi@100.115.86.48:/tmp/
+ssh guzhujushi@100.115.86.48 'sudo bash /tmp/sync_opt_tree.sh --dry-run'   # 先看要做什么
+ssh guzhujushi@100.115.86.48 'sudo bash /tmp/sync_opt_tree.sh'             # 真同步
+ssh guzhujushi@100.115.86.48 'sudo bash /tmp/sync_opt_tree.sh --fix-home'  # 顺带修 /home/.../src 属主
+```
+
+- 脚本**不重启 daemon**：daemon 必须以 `guzhujushi` 运行，root 跑会把 `~/.trimum` 写脏；
+  同步后自己执行 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`。
+- `config/mcp-catalog.yaml` 的默认路径按包位置解析（`REPO_ROOT/config/`），部署树对应
+  `/opt/trimum/config/mcp-catalog.yaml`，所以 `config/` 必须一起同步。
 
 ## sudo 脚本规范
 - 需要 sudo 的操作写成可执行脚本。
-- 用 `scp` 放到远端 `/tmp/`，例如 `/tmp/sync_opt_tests.sh`。
-- 告诉用户在真机执行：`sudo bash /tmp/sync_opt_tests.sh`。
-- 仓库内保留副本：`scripts/sync_opt_tests.sh`。
+- 用 `scp` 放到远端 `/tmp/`，例如 `/tmp/sync_opt_tree.sh`。
+- 告诉用户在真机执行：`sudo bash /tmp/sync_opt_tree.sh`。
+- 仓库内保留副本：`scripts/sync_opt_tree.sh`（全树）、`scripts/sync_opt_tests.sh`（仅 tests 与 scripts，旧）。
 
 ## 收尾清单
 - 发布前跑 CLI 测试：`pytest tests/test_cli.py -q`
@@ -48,8 +72,8 @@
    - 只同步改动文件时，先比对哈希确认宿主基线未被改动（本次宿主 `src/` 与本地 HEAD 逐文件一致）。
 2. **解压**：
    - 开发目录：`cd /home/guzhujushi/trimum && tar -xf /tmp/<pkg>.tar`
-   - 部署目录：`cd /opt/trimum && tar -xf /tmp/<pkg>.tar --exclude='tests/*' --exclude='tests'`
-     （`/opt/trimum/tests` 与 `/opt/trimum/scripts` 属 root，需走 `sudo bash /tmp/sync_opt_tests.sh`）
+   - 部署目录：改用 `sudo bash /tmp/sync_opt_tree.sh`（见「部署树同步」）。`config/`、`tests/`、
+     `scripts/`、`src/trimum_core` 都是 root 属主，`tar -xf` 直解会被拒或只写一半。
 3. **重启 daemon（必做）**：常驻 `trimum_core.main` 进程里是**旧代码**，不同步重启会出现
    「代码已更新但行为还是旧的」（本次 `agent spawn` 返回 stub 消息就是这个原因）。
    仓库里备好脚本：`scripts/restart_trmd.sh`（等旧进程完全退出后再起，避免旧进程
@@ -63,6 +87,10 @@
    `unix_socket_start_failed` → 自动退回 HTTP（功能可用，RPC 不可用）；cgroup 同理需 root。
 5. **跑测试**：`cd /home/guzhujushi/trimum && .venv/bin/python -m pytest tests -q`
    - 宿主 venv 需要 `pytest pytest-asyncio rich`（`pip install -i https://pypi.tuna.tsinghua.edu.cn/simple`）。
+   - **`cryptography` 是包依赖（`pyproject.toml` 已声明），但真机两份 venv 都可能缺**：缺它时
+     `trm setup` 身份步骤返回 `status=skipped`，`tests/test_setup_wizard.py` 的 6 项身份用例失败。
+     两份 venv 都属 `guzhujushi`，装依赖**不需要 sudo**：`.venv/bin/python -m pip install "cryptography>=42"`，
+     `/opt/trimum/venv` 同理（2026-09-20 补装 `cryptography-50.0.1`）。
    - 对照基线：`git archive HEAD -o baseline.tar` → 解到 `/tmp/trimum_baseline` →
      `PYTHONPATH=/tmp/trimum_baseline/src .venv/bin/python -m pytest tests -q`，
      与工作副本对比失败集合，区分「既有环境失败」与「回归」。
