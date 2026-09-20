@@ -5,6 +5,29 @@ import subprocess
 import sys
 
 
+def _interactive() -> bool:
+    """Return whether stdin can actually answer a question."""
+    stream = sys.stdin
+    return bool(stream is not None and getattr(stream, "isatty", lambda: False)())
+
+
+def _read_yes_no(question: str, default: str = "Y") -> bool:
+    """Read one yes/no answer from the terminal.
+
+    The caller must check :func:`_interactive` first: ``input()`` only raises
+    ``EOFError`` when stdin is *closed*, but a pipe that stays open
+    (``ssh host 'trm install'``, a CI step, a wrapper script) blocks forever.
+    """
+    suffix = " [Y/n]" if default.upper() == "Y" else " [y/N]"
+    try:
+        answer = input(f"  {question}{suffix} ").strip().lower()
+    except (EOFError, KeyboardInterrupt, OSError):
+        answer = ""
+    if not answer:
+        return default.upper() == "Y"
+    return answer in ("y", "yes")
+
+
 def install() -> None:
     """Interactive 'trm install' — guide user through first-time setup.
 
@@ -20,15 +43,16 @@ def install() -> None:
     """
 
     def prompt(question: str, default: str = "Y") -> bool:
-        """Ask a yes/no question on terminal."""
-        suffix = " [Y/n]" if default.upper() == "Y" else " [y/N]"
-        try:
-            answer = input(f"  {question}{suffix} ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            answer = ""
-        if not answer:
-            return default.upper() == "Y"
-        return answer in ("y", "yes")
+        """Ask a yes/no question; skip optional steps when unattended.
+
+        An unattended run (CI, ``ssh host 'trm install'``, a wrapper script)
+        must not block on a pipe that never closes, so every optional step is
+        skipped instead of asked — the same guard as ``cli/commands/env.py``.
+        """
+        if not _interactive():
+            info(f"{question}（非交互模式，跳过）")
+            return False
+        return _read_yes_no(question, default)
 
     def info(msg: str) -> None:
         print(f"  [i] {msg}")
