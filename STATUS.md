@@ -811,5 +811,16 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
   （**不要**用 sudo 起 daemon，否则 `~/.trimum` 会被 root 写脏）
 - daemon 现状：PID 1359 以 guzhujushi 运行，`/run/trimum` 不存在 → IPC / `apply_cgroup` 降级（P2 项，未变）
 
+### 部署期发现的运维问题（sudo 修复脚本已投送）
+- `trmd.service` 处于崩溃重启循环：与手工 daemon 抢 `127.0.0.1:8321` → 每 5s 一次 `exit 3`（`[Errno 98] address already in use`），
+  journal `NRestarts` 到 97；`pgrep` 因此会间歇看到第二个 `trimum_core.main` 进程。
+- 连带的隐性故障：短命进程启动时会 unlink+bind `/run/user/1000/trimum.sock`，把运行中 daemon 的 RPC socket
+  抢走再自杀 → `trm` 静默退回 HTTP（`trm status` 的 `source: http` 就是它）。
+- 修复入口：`scripts/fix_trmd_loop.sh`（已 scp 到真机 `/tmp`）
+  - `sudo bash /tmp/fix_trmd_loop.sh --check` 只看现状
+  - `sudo bash /tmp/fix_trmd_loop.sh` 停用 systemd 单元、保留手工 daemon（之后以 guzhujushi 身份
+    跑 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh` 拿回 socket）
+  - `sudo bash /tmp/fix_trmd_loop.sh --use-systemd` 反过来：停手工 daemon，改由 systemd 托管
+
 ### 提交与分支
 - server `209c98e` / main `e0ad16f` / ubuntu `3040b00` / arch-linux `9925c19`（同一提交 cherry-pick）
