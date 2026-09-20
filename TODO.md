@@ -231,7 +231,9 @@ trm config set <key> <value>       # 设置配置项
   - [x] `skill_sync.default_target_roots()` 改为**按探测结果决定**，`--all-hosts` 保留全量模式；`trm install --setup` 复用同一向导
   - [x] 测试：`tests/test_hosts.py`（13）+ `tests/test_setup_wizard.py`（29）+ `TestDynamicTargets`（5）
   - 硬约束（已满足）：**零预装可跑** —— 不依赖 `claude` / `codex` / `opencode` 等第三方 coding agent，也不假设它们会被实际使用
-  - 遗留：证书 capability 与 ToolGateway / `security_rule.py` 的**运行时合并尚未接线**（当前身份证书只是身份锚点 + 登记，不参与执行判定）
+  - [x] 官方 Agent 证书：`cert_type=official` + `capabilities` 能力块；`discover_bundled_agents()` / `ensure_official_certs()`；
+    向导新增 `official` 步骤（trimum 自研 Agent 全部免确认；用户自签 `scope=local` 不被覆盖）
+  - 遗留：证书 `capabilities` 与 ToolGateway / `security_rule.py` 的**运行时合并尚未接线**（当前证书只是身份锚点 + 登记，不参与执行判定）
 - [ ] **E7. 自研 coding Agent（候选）**：参考 `affaan-m/ECC`（262,999★，agent harness operating system，903 个 `SKILL.md` / 30+ 宿主目录）
   设计 trimum 自己的 coding Agent；调研原始件 `tmp/research/ecosystem/ecc-*`（已 gitignore）
 

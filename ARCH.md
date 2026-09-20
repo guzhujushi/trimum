@@ -7,7 +7,7 @@
 - 数据模型：Pydantic v2
 - 工具插件：`~/.trimum/tools/<name>/{tool.json5,main.py}`
 
-完整架构文档见 `docs/ARCHITECTURE.md` 与 `docs/ARCH.md`。
+本文档即完整架构说明（旧版 `docs/ARCHITECTURE.md` 与 `docs/ARCH.md` 属重复副本，已于 2026-09-20 清除，历史见 `git log`）。
 
 ## browser 路由设计
 
@@ -241,6 +241,14 @@
 
 - **三层职责分离**：来源（官方根 + 逐文件哈希，E5）/ 身份（每用户密钥对 + `user_id` + `machine_id`）/
   能力（证书内 capability 清单：`tools` 白名单 + `max_risk` + `expires_at` + `scope`）。
+- **官方 Agent**：**trimum 自己开发的 Agent 一律是官方 Agent**，走 `cert_type=official` 证书（`issued_by: trimum`、
+  `scope: official`），因此**不需要用户确认**；`agent_cert.discover_bundled_agents()` 从 `<repo>/agents` 与
+  `/opt/trimum/agents` 发现随发行包分发的官方 Agent（刻意排除 `~/.trimum/agents`，那里放的是用户拷进来的、
+  可能是第三方的 Agent），`ensure_official_certs()` 幂等签发。用户自签证书是 `scope: local`，与官方证书互不覆盖。
+- **能力块**：`AgentCert.capabilities = {tools, max_risk, expires_at, scope}`（旧证书缺该字段时按空处理，
+  向后兼容）。向导步骤顺序 `hosts → identity → official → toolchain → skills`。
+- **数据根**：`agent_cert` 的 `certs/` 与 `agents/` 目录改走 `paths.trimum_home()`（`TRIMUM_HOME` 可覆盖，
+  默认仍是 `~/.trimum`），与 E6 的多用户预留保持同一入口。
 - **现状雏形**：`src/trimum_core/agent_cert.py` 已实现 official / self_signed / none 三档信任，
   自签证书带 `machine_id`，换机器降级为 `CONFIRM`；agent 文件夹自带 `cert.json`
   （`~/.trimum/agents/<name>/cert.json`）把「代码 + 证书 + 记忆 + 经验」打成一体，是迁移 / 隔离的最小单位。
