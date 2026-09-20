@@ -1256,6 +1256,10 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 
 - 本地全量：**1156 passed / 5 failed / 7 skipped**（W1 前 1099 / 5 / 7；+57 = 本轮新用例，
   5 项失败与 W1 前同名同数，无回归）。
+- 真机（`guzhujushi@100.115.86.48`, Ubuntu, `/home/guzhujushi/trimum`）：`scripts/accept_w1.py`
+  → **48 passed / 0 failed**；`pytest tests/test_workflow_runtime.py tests/test_workflow_files.py`
+  → **69 passed**。
+- 提交：`62ae2f8 feat(workflow): W1 workflow 执行语义 —— 监听 Event Bus 并驱动执行`（已推 `origin/server`）。
 - 冒烟（本机 Windows）：
   - `trm workflow list --all` → 18 条（2 文件 + 16 内置），内置全部 `disabled`；
   - `trm workflow run demo --root tmp/w1root --dry-run` → 只打印节点，不执行；
