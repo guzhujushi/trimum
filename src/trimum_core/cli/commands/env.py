@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from .._utils import emit, fail
 from trimum_core.env_toolchain import (
@@ -130,6 +131,12 @@ def _human_inventory(data: dict) -> None:
         print(f"selected by trm setup: {', '.join(data['selected'])}")
 
 
+def _last_line(text: str) -> str:
+    """stderr 里最有信息量的那一行（sudo 之类会先说一堆闲话）。"""
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
 def _human_install(data: dict) -> None:
     plan = data["plan"]
     if plan["already_installed"]:
@@ -150,10 +157,25 @@ def _human_install(data: dict) -> None:
         if item.get("error"):
             state = f"error: {item['error']}"
         print(f"  [{state}] {' '.join(item['command'])}")
+        if item.get("returncode") not in (0, None):
+            # 只打一行 `[exit=1] sudo apt-get install ...` 是不够的：
+            # 失败原因（sudo 要密码 / 包不存在 / 网络）都在 stderr 里。
+            detail = _last_line(item.get("stderr") or "")
+            if detail:
+                print(f"          {detail[:300]}")
 
 
 def _confirm(question: str) -> bool:
-    """Ask before running a high-risk command; never prompt in a piped run."""
+    """Ask before installing system packages; never prompt in a piped run.
+
+    ``input()`` only raises ``EOFError`` when stdin is *closed*: a pipe that is
+    still open (``ssh host 'trm env install ripgrep'``, a CI step, a wrapper
+    script) just blocks forever.  The docstring always promised not to prompt
+    when nobody is watching, so check the TTY and let ``--yes`` be the only way
+    to confirm an unattended install.
+    """
+    if not sys.stdin.isatty():
+        return False
     try:
         answer = input(f"{question} [y/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt, OSError):
