@@ -9,7 +9,7 @@ import json
 import os
 import socket as stdlib_socket
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import json
 import uvicorn
@@ -25,6 +25,7 @@ from .models import (
     AgentInfo,
     SystemEvent,
     ContextEntry,
+    ToolType,
 )
 from .tool_gateway import ToolGateway
 from .behavior_monitor import BehaviorMonitor
@@ -43,6 +44,9 @@ logger = get_logger("api_server")
 
 # 策略学习分析间隔（秒）
 LEARNING_INTERVAL_SECONDS = 60
+
+# MCP 空闲回收扫描间隔（秒）；每个 server 自己的 idle_ttl 决定回收时点
+MCP_REAPER_INTERVAL_SECONDS = 30.0
 
 
 class AppState:
@@ -90,6 +94,10 @@ class AppState:
         self.ipc: Optional[IpcHandler] = None
         self.driver: Optional[WorkflowEventDriver] = None
         self.learning_task: Optional[asyncio.Task] = None
+        # MCP 连接池（M4）。在 startup() 里构造而不是这里：池子的空闲回收器
+        # 和 cgroup 绑定都要在事件循环里跑，构造点必须和运行点重合。
+        self.mcp_pool: Optional[Any] = None
+        self.mcp_reaper: Optional[asyncio.Task] = None
 
 
 async def _learning_loop(state: AppState) -> None:
@@ -111,6 +119,66 @@ async def _learning_loop(state: AppState) -> None:
             raise
         except Exception as e:
             logger.warning("learning_loop_failed", error=str(e))
+
+
+def build_mcp_pool(config: Config):
+    """构造 daemon 共享的 MCP 连接池（M4）。
+
+    池子是常驻的，这正是 M4 的意义所在：`trm mcp call` 那种一次性进程每次都得
+    重新拉起 server，而 daemon 可以复用、可以空闲回收、可以把子进程交出去做
+    资源约束。日志落在 `config.log_path` 同级目录（子进程 stderr 不用管道）。
+    """
+    from .mcp_registry import MCPServerPool
+    from .resource_controller import create_resource_controller
+
+    cgroup = None
+    try:
+        cgroup = create_resource_controller()
+    except Exception as e:  # 配额是尽力而为：拿不到控制器不该拖垮 daemon
+        logger.warning("mcp_cgroup_controller_unavailable", error=str(e))
+
+    log_dir = None
+    try:
+        log_dir = Path(config.log_path).expanduser().parent
+    except Exception:  # pragma: no cover - 仅防御性兜底
+        log_dir = None
+
+    return MCPServerPool(log_dir=log_dir, cgroup=cgroup)
+
+
+def wire_mcp_dispatchers(state: AppState, pool: Any) -> list[Any]:
+    """把共享池交给所有 MCP 分发器，返回真正接上线的那些。
+
+    `mcp.tools.list` 与 `mcp.tools.call` 在 DispatcherRegistry 里指向同一个
+    `MCPDispatcher` 实例，所以按 id 去重；`set_pool` 自己也幂等。
+    """
+    wired: list[Any] = []
+    seen: set[int] = set()
+    for tool_type in (ToolType.MCP_TOOLS_LIST, ToolType.MCP_TOOLS_CALL):
+        dispatcher = state.tool_gateway.dispatchers.get(tool_type)
+        if dispatcher is None or id(dispatcher) in seen:
+            continue
+        seen.add(id(dispatcher))
+        setter = getattr(dispatcher, "set_pool", None)
+        if callable(setter):
+            setter(pool)
+            wired.append(dispatcher)
+    return wired
+
+
+async def start_mcp(state: AppState) -> None:
+    """startup 期接线：建池 → 交给所有 MCP 分发器 → 起空闲回收器。"""
+    pool = build_mcp_pool(state.config)
+    state.mcp_pool = pool
+    wired = wire_mcp_dispatchers(state, pool)
+    # 回收器必须和池子同寿：daemon 关掉时由 close_all() 一起收摊
+    state.mcp_reaper = pool.start_reaper(interval=MCP_REAPER_INTERVAL_SECONDS)
+    logger.info(
+        "mcp_pool_started",
+        servers=len(pool.registry.servers()),
+        wired=len(wired),
+        reaper_interval=MCP_REAPER_INTERVAL_SECONDS,
+    )
 
 
 def _core_version() -> str:
@@ -194,6 +262,30 @@ def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
             ttl_seconds=params.get("ttl_seconds"),
         )
         return {"status": "ok"}
+
+    @router.register("mcp.status")
+    async def rpc_mcp_status(params: dict) -> list:
+        """运行中的 MCP server 状态（只是读状态，不启动任何进程）。"""
+        del params
+        if state.mcp_pool is None:
+            return []
+        return await state.mcp_pool.status()
+
+    @router.register("mcp.restart")
+    async def rpc_mcp_restart(params: dict) -> dict:
+        """重启一个 MCP server（先关再拉），其它 server 不受影响。"""
+        from .mcp_client import MCPError
+
+        name = str(params.get("server", "")).strip()
+        if not name:
+            return {"success": False, "error": "server is required"}
+        if state.mcp_pool is None:
+            return {"success": False, "server": name, "error": "MCP pool is not initialized"}
+        try:
+            await state.mcp_pool.restart(name)
+        except MCPError as exc:
+            return {"success": False, "server": name, "error": str(exc)}
+        return {"success": True, "server": name}
 
 
 def create_app(config: Config) -> FastAPI:
@@ -338,6 +430,13 @@ def create_app(config: Config) -> FastAPI:
         # 周期性策略学习（BehaviorMonitor → LearningEngine）
         state.learning_task = asyncio.create_task(_learning_loop(state))
 
+        # MCP 连接池（M4）：共享池 + 空闲回收器。接线放在 IPC 之前，这样
+        # `trm mcp status` 一连上看到的就是真实状态。接不上也不拦启动。
+        try:
+            await start_mcp(state)
+        except Exception as e:
+            logger.warning("mcp_pool_start_failed", error=str(e))
+
         # Start IPC handler (JSON-RPC over Unix Socket)
         ipc = IpcHandler(
             socket_path=config.socket_path,
@@ -468,6 +567,9 @@ def create_app(config: Config) -> FastAPI:
         await state.agent_manager.stop_health_check()
         if state.learning_task:
             state.learning_task.cancel()
+        if state.mcp_pool is not None:
+            # 池子先停回收器，再逐个关掉 server 子进程
+            await state.mcp_pool.close_all()
         if state.driver:
             await state.driver.stop()
         if state.ipc:
