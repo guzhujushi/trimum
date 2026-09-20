@@ -367,3 +367,65 @@ class TestEnvCommand:
     def test_inventory_rejects_unknown_manager(self, capsys):
         assert main(["env", "inventory", "--manager", "nope"]) == 1
         assert "unknown manager" in capsys.readouterr().err
+
+    def test_a_failed_command_shows_the_reason(self, fake_env, monkeypatch, capsys):
+        """`[exit=1] sudo apt-get ...` 单独一行没用，要把 stderr 里的原因带出来。"""
+
+        def fake_run(commands, **kwargs):
+            return {
+                "dry_run": False,
+                "ok": False,
+                "results": [
+                    {
+                        "command": commands[0],
+                        "executed": True,
+                        "returncode": 1,
+                        "stderr": "preamble\nsudo: a terminal is required to read the password\n",
+                    }
+                ],
+            }
+
+        monkeypatch.setattr(env_cmd, "run_install", fake_run)
+        assert main(["env", "install", "node", "--yes"]) == 1
+        out = capsys.readouterr().out
+        assert "[exit=1]" in out
+        assert "sudo: a terminal is required to read the password" in out
+
+    def test_a_piped_run_never_waits_for_input(self, fake_env, monkeypatch, capsys):
+        """stdin 不是 tty 时不能等人：直接按「没确认」处理，并提示 --yes。"""
+
+        class NotATty:
+            def isatty(self):
+                return False
+
+            def readline(self, *args):
+                return ""
+
+        monkeypatch.setattr(env_cmd.sys, "stdin", NotATty())
+        assert main(["env", "install", "node"]) == 1
+        assert "use --yes" in capsys.readouterr().err
+
+    def test_an_interactive_run_still_asks(self, fake_env, monkeypatch, capsys):
+        """真正的终端里该问还是要问："n" 不跑命令，"y" 才跑。"""
+        executed: list = []
+
+        class Tty:
+            def isatty(self):
+                return True
+
+        def fake_run(commands, **kwargs):
+            executed.append([list(item) for item in commands])
+            return {"dry_run": False, "ok": True, "results": []}
+
+        monkeypatch.setattr(env_cmd.sys, "stdin", Tty())
+        monkeypatch.setattr(env_cmd, "run_install", fake_run)
+
+        monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+        assert main(["env", "install", "node"]) == 1
+        assert "aborted" in capsys.readouterr().err
+        assert executed == []
+
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+        assert main(["--json", "env", "install", "node"]) == 0
+        capsys.readouterr()
+        assert executed == [[["sudo", "pacman", "-S", "--noconfirm", "nodejs"]]]
