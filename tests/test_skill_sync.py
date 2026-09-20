@@ -186,7 +186,9 @@ class TestSkillCommand:
     def _isolate_roots(self, monkeypatch, layout):
         source, target = layout
         monkeypatch.setattr(skill_mod, "default_source_roots", lambda: [source])
-        monkeypatch.setattr(skill_mod, "default_target_roots", lambda: [target])
+        monkeypatch.setattr(
+            skill_mod, "default_target_roots", lambda *, all_hosts=False: [target]
+        )
         self.source, self.target = source, target
 
     def test_list_json(self, capsys):
@@ -228,3 +230,46 @@ class TestSkillCommand:
         data = json.loads(capsys.readouterr().out)
         assert data["sources"][0]["path"] == str(self.source)
         assert data["targets"][0]["exists"] is True
+
+class TestDynamicTargets:
+    """Targets follow host detection instead of a hardcoded list (E6)."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, tmp_path, monkeypatch):
+        self.home = tmp_path / "fakehome"
+        self.home.mkdir()
+        self.trimum = tmp_path / "trimum"
+        monkeypatch.setenv("TRIMUM_HOME", str(self.trimum))
+        monkeypatch.setenv("TRIMUM_HOSTS_HOME", str(self.home))
+        monkeypatch.delenv("TRIMUM_SKILL_TARGETS", raising=False)
+        monkeypatch.delenv("TRIMUM_HOSTS", raising=False)
+        monkeypatch.delenv("TRIMUM_HOSTS_DISABLE", raising=False)
+        from trimum_core import hosts as hosts_mod
+
+        monkeypatch.setattr(hosts_mod.shutil, "which", lambda name: None)
+
+    def test_bare_machine_only_gets_own_root(self):
+        assert skill_sync.default_target_roots() == [self.trimum / "agent-skills"]
+
+    def test_detected_host_becomes_a_target(self):
+        (self.home / ".claude").mkdir()
+        targets = skill_sync.default_target_roots()
+        assert targets[0] == self.home / ".claude" / "skills"
+        assert targets[-1] == self.trimum / "agent-skills"
+
+    def test_all_hosts_ignores_detection(self):
+        targets = skill_sync.default_target_roots(all_hosts=True)
+        from trimum_core.hosts import KNOWN_HOSTS
+
+        assert len(targets) == len(KNOWN_HOSTS) + 1
+
+    def test_env_override_still_wins(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TRIMUM_SKILL_TARGETS", str(tmp_path / "only"))
+        assert skill_sync.default_target_roots() == [tmp_path / "only"]
+
+    def test_cli_paths_all_hosts(self, capsys):
+        assert main(["--json", "skill", "paths", "--all-hosts"]) == 0
+        data = json.loads(capsys.readouterr().out)
+        from trimum_core.hosts import KNOWN_HOSTS
+
+        assert len(data["targets"]) == len(KNOWN_HOSTS) + 1

@@ -10,6 +10,12 @@ trimum keeps two skill layers apart on purpose:
 
 The distribution model follows Omarchy: one source of truth, symlinked into
 ``~/.agents/skills``, ``~/.claude/skills``, ``~/.codex/skills`` and friends,
+
+Targets are *detected*, never assumed: the toolchain is opt-in, so trimum only
+links into harnesses that exist on this machine (see :mod:`trimum_core.hosts`);
+``~/.trimum/agent-skills`` is always a target, so a machine with no third-party
+agent at all still gets a working skill root.  ``TRIMUM_SKILL_TARGETS`` overrides
+the whole list, ``all_hosts=True`` restores the pre-provisioning behaviour.
 with a junction/copy fallback on Windows where symlinks need extra privileges.
 """
 
@@ -19,6 +25,8 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
+
+from . import hosts as hosts_mod
 from pathlib import Path
 
 AGENT_SKILL_FILE = "SKILL.md"
@@ -87,8 +95,13 @@ def default_source_roots() -> list[Path]:
     return roots
 
 
-def default_target_roots() -> list[Path]:
-    """Return the agent harness skill roots to distribute into."""
+def default_target_roots(*, all_hosts: bool = False) -> list[Path]:
+    """Return the agent harness skill roots to distribute into.
+
+    With *all_hosts* false (the default) only harnesses actually present on this
+    machine are targeted; trimum's own root is always appended so a bare install
+    still has somewhere to put its skills.
+    """
     override = os.environ.get(TARGET_ENV)
     if override:
         return [
@@ -97,16 +110,9 @@ def default_target_roots() -> list[Path]:
             if part.strip()
         ]
 
-    home = Path.home()
-    return [
-        home / ".agents" / "skills",
-        home / ".claude" / "skills",
-        home / ".codex" / "skills",
-        home / ".pi" / "agent" / "skills",
-        home / ".gemini" / "config" / "skills",
-        home / ".hermes" / "skills",
-        home / ".trimum" / "agent-skills",
-    ]
+    if all_hosts:
+        return hosts_mod.all_skill_targets()
+    return hosts_mod.detected_skill_targets()
 
 
 def read_agent_skill(skill_dir: Path) -> dict[str, str]:

@@ -488,3 +488,46 @@
 
 **本轮结论**：证书从「来源证明」升级为**来源 + 身份 + 能力**三层；「选装 + 首启引导 + 零预装可跑」写进 L0/L2 与硬约束；
 ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其代码）。
+
+---
+
+## 2026-09-20 E6：选装模型 + 首次安装引导（宿主探测 / 身份证书 / 工具链目录）
+
+> 承接同日两点提示：软件是**用户选装**（首次引导询问）、证书要携带**安全内容**（可动用哪些工具）、
+> 自签证书**只有自己能用**（他人需再次自签）、未来有**多用户体系**。E6 把这三条落成可跑的代码。
+
+### 交付
+
+- [x] `src/trimum_core/paths.py`：数据根单一入口 `trimum_home()`（`TRIMUM_HOME` 可覆盖），
+  子目录清单含 `identity` / `agent-skills`；为多用户「每用户一份 root」与 `/etc/trimum` 预留改点
+- [x] `src/trimum_core/hosts.py`：14 个已知宿主 + 三路探测（`TRIMUM_HOSTS` / `TRIMUM_HOSTS_DISABLE` 强制与排除、
+  配置目录 `~/.claude` 等存在、PATH 上的 CLI）；`TRIMUM_HOSTS_HOME` 可重定向扫描根（测试 / 镜像构建用）
+- [x] `src/trimum_core/identity.py`：Ed25519 用户密钥对 + 自签身份文档（绑 `machine_id` + user，
+  `capabilities = {tools, max_risk, expires_at, scope}`，`max_risk` 只能收紧）；`cryptography` 缺失时
+  `status=skipped` 且不写半成品；`agent_cert.machine_id()` 作为公开取用口
+- [x] `src/trimum_core/setup_wizard.py`：四步向导 `hosts / identity / toolchain / skills`，
+  `--dry-run` 不落盘、非交互不提示、状态写 `~/.trimum/config/setup.json5`
+- [x] `config/setup-catalog.yaml`：选装工具链目录（7 组 25 项，含 pacman / apt / winget 包名；
+  第三方 coding agent 标 `kind: agent`，注明「trimum 不依赖」）；**只登记不安装**，安装留给 E3
+- [x] `trm setup` 命令（`--dry-run|--yes|--tools a,b|--all-hosts|--skip STEP|--max-risk|--catalog|--force-identity`）；
+  `trm install --setup` 复用同一向导，`trm install <name>` 的官方包语义留给 E5
+- [x] `skill_sync.default_target_roots()`：目标根**按探测结果决定**（不再硬编码 7 个），
+  `~/.trimum/agent-skills` 恒为兜底；`trm skill list/sync/paths` 新增 `--all-hosts`（全量预置模式）
+- [x] 测试：`tests/test_hosts.py`（13）+ `tests/test_setup_wizard.py`（29）+ `TestDynamicTargets`（5）
+
+### 验证
+
+- 全量：`pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider` → **566 passed / 8 failed / 4 skipped**；
+  8 项失败与既有基线逐条一致（Windows `~/.trimum` 权限 + LLM 断网），**无回归**（上一轮 519 passed，+47 为本轮新增）
+- smoke：`trm commands --check` → `ok: 50 commands checked, no problems`（新增 `setup`）；
+  `trm setup --dry-run --yes --json` 各步输出正常且**未落盘**；沙箱真实跑（`TRIMUM_HOME` + `TRIMUM_HOSTS_HOME` 指向临时目录）
+  生成身份密钥对 / 身份文档 / 状态文件，并把技能链接进「探测到的宿主 + 自己的根」
+- 本机实测探测结果：`agents, claude, codex, gemini, cursor, openclaw` 六个宿主存在
+  （`~/.pi`、`~/.hermes`、`~/.opencode` 等未装 → 不再被写入）
+
+### 遗留
+
+- [ ] 证书 `capabilities` 与 ToolGateway / `security_rule.py` 的**运行时合并尚未接线**：当前身份证书只作身份锚点 + 登记，
+  不参与执行判定（属 E5 范畴，接线前不要对外宣称「证书限制工具」已生效）
+- [ ] `trm env inventory` / `trm env install`（E3）仍缺：目录已备好，但「探测已装软件 + 调包管理器装」未实现
+- [ ] `trm setup` 尚未在 Linux 真机上跑过（等 Ubuntu 开机）

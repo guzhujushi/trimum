@@ -26,6 +26,16 @@ Agent Registry 等能力，并通过 `~/.trimum/tools/<name>/` 的文件化工�
 - 自描述命令面：命令元数据契约 + `trm commands [--all|--json|--check]`（Agent 可运行时枚举全部能力）。
 - Agent Skills 分发：`trm skill list/sync/paths`，把 `SKILL.md` 技能链接进 `~/.agents/skills`、`~/.codex/skills`、`~/.claude/skills` 等宿主目录。
 
+### 已交付（2026-09-20，E6 选装模型与首启引导）
+
+- 宿主探测：`trimum_core/hosts.py` —— 14 个已知 agent 宿主，三路证据（环境变量强制 / 配置目录 / PATH 上的 CLI），
+  输出「本机装了哪些宿主」，skills 分发目标由它决定（`--all-hosts` 可回到全量模式）。
+- 首启引导 `trm setup`：宿主探测 → 身份证书（Ed25519 密钥对 + 自签身份文档，绑 `machine_id` + user）→
+  选装工具链（`config/setup-catalog.yaml`，7 组 25 项，**只登记不安装**）→ Agent Skills 分发；
+  结果写 `~/.trimum/config/setup.json5`，支持 `--dry-run` / `--yes` / `--tools a,b` / `--skip STEP` / `--max-risk`。
+- 「零预装可跑」已兑现并有测试：一个第三方 agent 都没有时，技能只落 `~/.trimum/agent-skills`；
+  `cryptography` 缺失时身份步骤降级为 `skipped`，且不留下半初始化目录。
+
 ### 规划中（下一阶段）
 
 - **官方分发渠道**：官网提供官方 Agent / Tool / Workflow，`trm install <name>` 下载即用；内置官方根证书
