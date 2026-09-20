@@ -51,6 +51,8 @@ ssh guzhujushi@100.115.86.48 'sudo bash /tmp/sync_opt_tree.sh --fix-home'  # 顺
 
 - 脚本**不重启 daemon**：daemon 必须以 `guzhujushi` 运行，root 跑会把 `~/.trimum` 写脏；
   同步后自己执行 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`。
+  生产机上 daemon 由 systemd 单元 `trmd.service` 托管，那种情况下改用 `sudo systemctl restart trmd`，
+  原因见「daemon 托管与重启（systemd）」。
 - `config/mcp-catalog.yaml` 的默认路径按包位置解析（`REPO_ROOT/config/`），部署树对应
   `/opt/trimum/config/mcp-catalog.yaml`，所以 `config/` 必须一起同步。
 - 同步源顺序：**默认优先 `/tmp/trimum-sync.tar`**（`git archive` 全量、权威），只有 tar 不存在或显式
@@ -143,9 +145,42 @@ trm mcp call echo__echo '{"text": "hi"}'  # 与 `trm mcp call echo echo '...'` �
   取代：M4 遗留的 `reap()` 修复随全树同步一起进部署树。判断依据 ——
   `sha256sum /opt/trimum/src/trimum_core/mcp_registry.py` 应等于开发树同名文件（2026-09-20 实测未同步前
   是 `fe0166cd…`，开发树 `86447a65…`）。
-- 装完以 guzhujushi 身份重启 daemon：`bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`。
+- 装完重启 daemon：systemd 托管时 `sudo systemctl restart trmd`，否则以 guzhujushi 身份跑
+  `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`（脚本会自己识别并让位）。
 - 无人值守验收：`scripts/accept_m4.py`（起 8323 端口的隔离 daemon，跑 16 项断言，
   不碰生产 daemon；本机 `python scripts/accept_m4.py` 亦可）。
+
+## daemon 托管与重启（systemd）
+
+生产机 `/etc/systemd/system/trmd.service` 是 daemon 的**真正托管者**：
+
+```ini
+[Service]
+Type=simple
+User=guzhujushi
+WorkingDirectory=/opt/trimum
+ExecStart=/opt/trimum/venv/bin/python -m trimum_core.main
+Restart=always
+RestartSec=5
+```
+
+- **`disabled` 不等于没在跑**：单元没有开机自启，但可以是 `active`（手动 start 过一次就会一直在，
+  且 `Restart=always` 会把它拉回来）。`systemctl is-enabled trmd` 与 `is-active trmd` 是两件事。
+- **托管期间不要 `pkill`**：杀掉后 systemd 会在 `RestartSec`（5s）后复活它，新起的实例抢不到 8321，
+  日志里只有 `[Errno 98] address already in use` —— 2026-09-20 的「端口被占用」就是这个。
+  判断依据：`ss -ltnp` 里占着端口的那个 PID，其 `fd1`/`fd2` 指向 `/run/systemd/journal/stdout`
+  （systemd 起的进程日志进 journal，不写 `/tmp/trmd.out`）。
+- 正确动作：
+
+```bash
+sudo systemctl restart trmd                       # 重启；单元里的 User= 保证仍以 guzhujushi 运行
+systemctl status trmd --no-pager
+journalctl -u trmd -n 30 --no-pager               # 日志在这里，不在 /tmp/trmd.out
+```
+
+- `scripts/restart_trmd.sh` 已内建守卫：检测到单元 active 时，root 下自动改走 `systemctl restart`，
+  非 root 下打印指引并以退出码 `3` 结束（不再去抢端口）。手工托管（单元不存在/未运行）时行为不变。
+- 改变托管方式：改回手工 `sudo systemctl disable --now trmd`；要开机自启 `sudo systemctl enable trmd`。
 
 ## 收尾清单
 - 发布前跑 CLI 测试：`pytest tests/test_cli.py -q`
@@ -169,6 +204,8 @@ trm mcp call echo__echo '{"text": "hi"}'  # 与 `trm mcp call echo echo '...'` �
    pkill -f 'trimum_core.main'   # 注意：别让 pattern 命中当前 shell 自己的命令行
    ```
    注意 `trm daemon start/restart` 是**前台**运行，在 SSH 会话里会一直挂着。
+   **systemd 托管时别用 `pkill`**（会被 `Restart=always` 复活并抢端口），改用
+   `sudo systemctl restart trmd`，见「daemon 托管与重启（systemd）」。
 4. **确认监听形态**：`trm daemon status` 的 `source` 是 `rpc` 还是 `http`。
    `/opt/trimum/config.yaml` 用 `/run/trimum/trimum.sock`（root 路径），普通用户运行会
    `unix_socket_start_failed` → 自动退回 HTTP（功能可用，RPC 不可用）；cgroup 同理需 root。
