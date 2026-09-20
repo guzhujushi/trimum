@@ -39,6 +39,19 @@ def setup_logging(config: Config) -> None:
     log_format = config.log_format
     log_path = config.log_path
 
+    structlog.configure(
+        processors=_build_processors(log_format),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(
+            open(log_path, "a", encoding="utf-8") if log_path else None
+        ),
+        cache_logger_on_first_use=True,
+    )
+
+
+def _build_processors(log_format: str) -> list:
+    """Build the processor chain (shared by the daemon and the CLI)."""
     if log_format == "json":
         renderer = JSONRenderer()
     else:
@@ -59,14 +72,31 @@ def setup_logging(config: Config) -> None:
             structlog.processors.TimeStamper(fmt="iso", utc=False),
             *processors,
         ]
+    return processors
 
+
+class _StderrWriter:
+    """Write-through proxy so logs always reach the *current* ``sys.stderr``."""
+
+    def write(self, data: str) -> int:
+        return sys.stderr.write(data)
+
+    def flush(self) -> None:
+        sys.stderr.flush()
+
+
+def setup_cli_logging() -> None:
+    """Send CLI diagnostics to stderr, keeping stdout payload-only.
+
+    ``trm --json <cmd>`` must stay machine-readable, but library code logs at INFO
+    (e.g. ``mcp.started``) — without this, those lines land in front of the JSON.
+    The daemon keeps using :func:`setup_logging` (log file / stdout).
+    """
     structlog.configure(
-        processors=processors,
+        processors=_build_processors("console"),
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(
-            open(log_path, "a", encoding="utf-8") if log_path else None
-        ),
+        logger_factory=structlog.PrintLoggerFactory(_StderrWriter()),
         cache_logger_on_first_use=True,
     )
 
@@ -76,4 +106,4 @@ def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     return structlog.get_logger(name or "trimum_core")
 
 
-__all__ = ["setup_logging", "get_logger"]
+__all__ = ["setup_logging", "setup_cli_logging", "get_logger"]

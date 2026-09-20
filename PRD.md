@@ -46,6 +46,22 @@ Agent Registry 等能力，并通过 `~/.trimum/tools/<name>/` 的文件化工�
   已装条目**幂等**（不重装、不弹确认、退出码 0）。
 - 覆盖 pacman / apt / dnf / zypper / apk / brew / winget / scoop 八个可代装管理器，外加 `mise`（只登记，不代装）。
 
+### 已交付（2026-09-20，E2 MCP 接入：M0/M1/M2）
+
+- **协议层**（`src/trimum_core/mcp_client.py`）：自研 stdio MCP 客户端 —— 子进程 + JSON-RPC 2.0 换行分帧，
+  `initialize` / `tools/list` / `tools/call` / `ping` / `close`；stderr 落日志文件；
+  超时 / 非法报文 / 提前 EOF 判定为坏连接，由连接池丢弃重建。
+- **注册与生命周期**（`src/trimum_core/mcp_registry.py`）：`~/.trimum/mcp/<name>.json5` 放一行即接入
+  （`TRIMUM_MCP_DIR` 可指向别处）；**deny-by-default**（不写 `enabled: true` 永不启动）；
+  `allow_tools` / `deny_tools` 为 glob 白黑名单，`trust: cloud` 额外继承破坏性工具默认黑名单。
+- **调用面**：`mcp.tools.list [server]` / `mcp.tools.call <server> <tool> [json-arguments]` 已实装
+  （占位实现「MCP bridging not yet available」已移除），输出 JSON；`trm mcp list/tools/call/paths` 与网关共用同一实现。
+- **审计**：每次调用记 `mcp_call` 事件（server / tool / 耗时 / 结果 / 参数**键名**，不含参数值），经
+  `task.audit.mcp_call` 广播；`ToolGateway` 构造时把审计下沉回填给 MCP 分发器。
+- **CLI 契约修正**：`trm --json` 的 stdout 现在只含载荷 —— CLI 把诊断日志路由到 stderr。
+- 未做：M3 策展导入器（awesome-mcp-servers → `config/mcp-catalog.yaml`）、M4 HTTP/SSE + 空闲回收 + cgroup 绑定、
+  以及把远端工具聚合进 `ToolRegistry` 的动态工具机制（详见 `docs/MCP-INTEGRATION-PLAN.md`）。
+
 ### 规划中（下一阶段）
 
 - **官方分发渠道**：官网提供官方 Agent / Tool / Workflow，`trm install <name>` 下载即用；内置官方根证书

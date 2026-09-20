@@ -227,6 +227,43 @@
   `trm install <name>`（官方包安装，E5）留给将来，不与向导抢名称。
 - 测试：`tests/test_hosts.py`、`tests/test_setup_wizard.py`、`tests/test_skill_sync.py::TestDynamicTargets`。
 
+## MCP 接入（E2，2026-09-20 已实现：M0/M1/M2）
+
+> 生态四层的 **L1**（`docs/ECOSYSTEM-STRATEGY.md` §3）。方案与阶段划分见 `docs/MCP-INTEGRATION-PLAN.md`；
+> M3（策展导入器）、M4（HTTP/SSE + 空闲回收 + cgroup）未做。
+
+### 模块
+
+| 模块 | 职责 |
+|---|---|
+| `src/trimum_core/mcp_client.py` | 协议层：stdio 子进程 + JSON-RPC 2.0 换行分帧；`connect` / `initialize` / `list_tools` / `call_tool` / `ping` / `close` |
+| `src/trimum_core/mcp_registry.py` | 定义与生命周期：`~/.trimum/mcp/<name>.json5` → `MCPServerDefinition`；`MCPRegistry` 加载并上报坏文件；`MCPServerPool` 懒启动 / 按名复用 / 坏连接重建 |
+| `tool_dispatchers.MCPDispatcher` | 翻译层：`mcp.tools.list` / `mcp.tools.call` → MCP 调用 → JSON 输出 + `mcp_call` 审计 |
+| `cli/commands/mcp.py` | `trm mcp list/tools/call/paths`，与网关共用同一个 dispatcher（不是第二套实现） |
+
+### 关键设计（M0 冻结）
+
+- **自研最小 client，不引入 SDK / Node**：MCP 的 stdio 分帧就是「一行一个 JSON-RPC 2.0」（与 LSP 同款），
+  `create_subprocess_exec` + `readline()` 足够；将来若 coding Agent 走 openai-agents，可只替换 transport，
+  `MCPClient` 接口不变。
+- **stderr 落日志文件**（`mcp-<name>.log`），不用 PIPE：避免写满 64KB 管道卡死，以及短命进程在事件循环关闭后
+  flush 报错 —— 与 `agent_launcher.py` 同一约定。
+- **一次一个在途请求**（每客户端一把锁）：顺序答复的服务器不会被并发打乱；超时 / 非法 JSON / 提前 EOF 一律标记
+  broken，由 pool 丢弃并重建，不允许「半死不活的流」继续用。
+- **deny-by-default**：`enabled` 缺省 `false`；`allow_tools` / `deny_tools` 为 glob 白黑名单（**deny 优先**）；
+  `trust: cloud` 额外继承默认 deny 模式（`*delete*` `*exec*` `*shell*` `*eval*` …），远端 server 不能靠改名拿到破坏性本地工具。
+- **不新开旁路**：MCP 调用与内置工具走**同一层** ToolGateway 分层（Policy → Agent 权限 → SecurityRule → JIT）+
+  审计 + 凭据脱敏；MCP 类型本就在 `_check_cwd_jail` 的跳过表里（它不碰工作目录）。
+- **审计**：每次调用记 `mcp_call` 事件（server / tool / transport / trust / 耗时 / 结果 / 参数**键名**），
+  **参数值绝不入审计**；`ToolGateway` 构造完成后把 `audit_store` / `event_bus` 回填给 dispatcher（`bind_audit`），
+  事件以 `task.audit.mcp_call` 广播。被策略拦下的调用同样留痕（duration 0，action denied）。
+- **参数与输出**：`mcp.tools.list [server]`（空 = 所有已启用）、`mcp.tools.call <server> <tool> [json-arguments]`；
+  输出一律 JSON，Agent 可直接消费。
+- **CLI 输出纯净**：`cli.main()` 现在把 structlog 诊断路由到 **stderr**（`logger.setup_cli_logging()`），
+  否则 `trm --json ...` 的 stdout 会混进 `mcp.started` 这类 INFO 行（本轮实测到的既有缺陷，已修）。
+- 测试：`tests/fixtures/mcp_echo_server.py` 是**真协议** stdio server（不是 mock），
+  `tests/test_mcp_client.py`（16）+ `tests/test_mcp_registry.py`（27）+ `tests/test_mcp_dispatcher.py`（30）。
+
 ## 环境层与工具链安装（E3，2026-09-20 已实现）
 
 > 生态四层的 **L0**（`docs/ECOSYSTEM-STRATEGY.md` §3）。定位：**软件生态交给发行版** ——
