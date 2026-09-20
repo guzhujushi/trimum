@@ -146,11 +146,11 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
 
 | # | 缺口 | 说明 |
 |---|---|---|
-| 1 | `trm commands --all/--json/--check` + 命令元数据契约 | 对照 Omarchy 的 `# omarchy:` 注释；小改动、收益立现 |
-| 2 | Skills 分发（symlink 到各宿主）+ `trm skill list/import` | 零代码扩能力面 |
+| ~~1~~ | ~~`trm commands --all/--json/--check` + 命令元数据契约~~ | **已实现（2026-09-20，E1）**：命令面从 argparse 树推导（单一事实源）+ `cli/registry.py` 校验元数据 |
+| ~~2~~ | ~~Skills 分发（symlink 到各宿主）~~ | **已实现（2026-09-20，E1/E6）**：`skill_sync.py`，目标根按探测结果决定；`trm skill import`（拉外部生态）待做 |
 | 3 | MCP client（M1/M2） | 见 MCP 方案 |
 | 4 | 通用 CLI 适配器（`--help` → 工具条目 + 风险分级） | 替代「逐应用写 harness」 |
-| 5 | `trm env inventory/install` | 包管理器集成 |
+| ~~5~~ | ~~`trm env inventory/install`~~ | **已实现（2026-09-20，E3）**：9 个包管理器探测 + 已装清单 + 计划/执行分离（`env_toolchain.py`）；不自建包仓库 |
 | 6 | workflow 目录格式 + `trm workflow import` | Warp 式贡献入口 |
 | 7 | 生态统一注册表 schema（`trust`/`risk`/`requires`/`source_url`/`author`） | 借鉴 CLI-Anything registry + Warp FORMAT |
 | ~~8~~ | ~~skills 分发目标按已探测宿主动态决定~~ | **已实现（2026-09-20，E6）**：`src/trimum_core/hosts.py`；`--all-hosts` 保留全量模式 |
@@ -158,14 +158,14 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
 
 ---
 
-## 5. 路线图（E0-E4）
+## 5. 路线图（E0-E7）
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | **E0** | 冻结本战略；同步修正 MCP 方案的取舍；确定首批 3 个用例 | 用户确认 |
 | **E1** | 命令元数据契约 + `trm commands --json --check` + skills 分发 | 单测；`trm commands --json` 可被 Agent 直接消费 |
 | **E2** | MCP M1/M2（client + registry + ToolGateway 接线） | 见 `docs/MCP-INTEGRATION-PLAN.md` 验收 |
-| **E3** | `trm skill import` + `trm env inventory` | 离线可跑；导入支持 dry-run |
+| **E3** ✅ | **环境层**：`trm env inventory` + `trm env install`（2026-09-20 完成） | `env_toolchain.py`；清单只读（risk: low）、安装必须确认、`--dry-run` 不执行、已装幂等；`tests/test_env_toolchain.py`（34）—— **`trm skill import` 未做，顺延到 E4** |
 | **E4** | 通用 CLI 适配器 + workflow 目录（Warp 式）+ 导入器 | 导入 dry-run；风险分级正确 |
 | **E5** | 官方分发渠道：官网目录 + 官方根证书 + `.trmpkg` 校验器 + `trm install` | 签名校验单测（内置根/坏签名/哈希不符）+ 离线安装 dry-run |
 | **E6** ✅ | 选装工具链模型 + 首次安装引导 `trm setup` + 宿主探测（2026-09-20 完成） | `hosts.py` / `setup_wizard.py` / `identity.py` / `config/setup-catalog.yaml`；47 项新测试；`trm commands --check` 50 条通过 |

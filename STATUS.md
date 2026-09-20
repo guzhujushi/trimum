@@ -579,3 +579,55 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 - [x] `pyproject.toml`：**`cryptography>=42` 转为正式依赖**（身份密钥对 + 未来签名校验都需要；缺失时的优雅降级路径与测试保留）
 - 测试：`tests/test_agent_cert.py` 新增 `TestCapabilities` / `TestOfficialAgents`（11 项），
   `tests/test_setup_wizard.py` 新增 `TestOfficialStep`（4 项）
+---
+
+## 2026-09-20 E3：环境层（`trm env` —— 选装工具链的清单 / 计划 / 安装）
+
+> 生态四层的 **L0**（`docs/ECOSYSTEM-STRATEGY.md` §3）。定位：**软件生态交给发行版** ——
+> trimum 不自建包仓库，只回答「机器上有什么 / 能不能装 / 装的时候会执行什么」。
+> 与 E6 的分工：`trm setup` **只登记选装**，安装是显式动作（`trm env install`），两者共用 `config/setup-catalog.yaml`。
+
+### 交付
+
+- [x] `src/trimum_core/env_toolchain.py`：9 个已知包管理器（pacman / apt / dnf / zypper / apk / brew / winget / scoop / mise），
+  每个声明「探测 / 列举已装 / 安装」三条命令 + 是否需要 sudo + 适用平台；`mise` 只探测登记、**不代装**（运行时版本管理交给它自己）
+- [x] 只读探测链：`detect_managers()`（`which` + `--version`，探针异常不致命）→ `query_installed()` → `parse_installed()` →
+  `inventory()`（管理器现状 + 目录覆盖 + `trm setup` 的选装记录）
+- [x] 计划与执行分离：`plan_install()` 产出**确切命令**与 `already_installed` / `unavailable` / `unknown` 三类清单；
+  `commands_for()` 决定调用次数（winget 一包一条）；`run_install()` 是唯一执行点
+- [x] `trm env inventory [--manager] [--catalog]`（**risk: low**，只读）与
+  `trm env install <name>... [--manager|--dry-run|--yes|--catalog]`（**risk: high，requires_sudo**）
+- [x] 测试：`tests/test_env_toolchain.py`（34 项：探测 / 解析 / 计划 / 执行 / 清单 / CLI）
+
+### 本轮修掉的问题（测试暴露 → 代码修正）
+
+| 问题 | 处置 |
+|---|---|
+| winget 列表用 `split()[1]` 取 ID → 包名含空格时取到版本号 | 改为**按列对齐切分**（列间 ≥2 空格）取 `Id` 列 |
+| `sudo` 前缀依赖 `os.name == "posix"` → Windows 上计划里没有 sudo，跨平台行为不一致 | 改为「管理器需要 sudo 且当前不是 root」；显式 `use_sudo=` 优先 |
+| `trm env install` 先探测一次、`inventory()` 内部再探测一次（同一命令探测两遍） | `inventory(statuses=...)` 复用调用方结果；新增测试断言只探测一次 |
+| 已装条目仍会弹「将执行 0 条命令，确定继续？」 | 无待执行命令时不再询问；已装 → **幂等成功**（退出码 0） |
+| 测试自身两处 bug：CLI 用例没请求 `fake_env` fixture（打到了真实环境）；apt 探针写 `which_only("apt")`（实际二进制是 `apt-get`） | 修正测试，不改代码语义 |
+
+### 验证
+
+- `python -m pytest tests/test_env_toolchain.py -q --basetemp tmp/pytest-tmp -p no:cacheprovider` → **34 passed**
+- 全量：`pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider` → **614 passed / 8 failed / 4 skipped**；
+  8 项失败与既有基线逐条一致（Windows 沙箱写 `C:\Users\...\.trimum` 被拒 + LLM 断网），**无回归**（上一轮 580 passed，+34 为本轮新增）
+- `trm commands --check` → `ok: 53 commands checked, no problems`（新增 `env` / `env inventory` / `env install`）
+- 本机（Windows）实测：`trm env inventory` 正常列出 9 个管理器现状与 25 项目录覆盖
+  （本机无包管理器 → 全部 `not installed`，符合预期）
+
+### 遗留
+
+- [ ] `trm env install` 未在 Linux 真机（pacman / apt）实跑（等 Ubuntu 开机）；winget 列解析有单测但未对真实 `winget list` 输出冒烟
+- [ ] 目录条目与包名的对应靠人工维护（`config/setup-catalog.yaml`），未做「装完回读验证该软件真的可用」
+- [ ] `trm setup` 选装后不会自动安装（有意为之）；后续可在向导末尾提示「已选 N 项，运行 `trm env install`」
+- [ ] `trm skill import`（E3 原定项之一）顺延到 E4（本轮只完成 env 部分）
+
+### 文档同步
+
+- `ARCH.md`：新增「环境层与工具链安装（E3）」章节（包管理器表 / 解析 / 单遍探测 / sudo 策略 / 安装红线）
+- `PRD.md`：新增 E3 已交付；范围边界与验收标准改为「生态轮」口径（不再写「本轮只改文档」）
+- `TODO.md`：E3 勾选（含遗留）、已完成表、测试状态表（614 passed）、分支同步表
+- `docs/ECOSYSTEM-STRATEGY.md`：§4 缺口 1/2/5 标记已完成、§5 路线图标题改 E0-E7 且 E3 标记完成
