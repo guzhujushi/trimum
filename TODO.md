@@ -1,9 +1,11 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → **E2 MCP 接入 M0/M1/M2**）
+> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → **E2 MCP 接入 M0/M1/M2** → 收尾校验：全量测试 + 命令面 + 端到端冒烟）
 > 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E4 / E5 / E7 与 MCP 的 M3/M4 待做
 > 测试：本地 **687 passed / 8 failed / 4 skipped**（8 项为 Windows 沙箱写 `~/.trimum` 被拒 + LLM 断网，与既有基线逐条一致，无回归）；真机 Ubuntu 待开机后补跑
 > 当前工作分支：`server`；E1/E6/清理/E3/E2 均已推送四分支（E3：server `4331437` / main `2b4e9b2` / ubuntu `a5c6ad5` / arch-linux `98c8ccd`；E2：server `634e62a` / main `8af7d5d` / ubuntu `166841d` / arch-linux `c68ce85`）
+> ▶ **下次继续从这里开始（2026-09-20 收尾）**：**M3 策展导入器** —— 输入 `tmp/research/awesome-README.md`（1.7 MB / 4,117 条，已 gitignore，本机在），输出 `config/mcp-catalog.yaml` 候选清单（`reviewed: false`，**人工审核后才允许启用**）；条目解析规则见 `docs/MCP-INTEGRATION-PLAN.md` §3；
+> 红线：优先 `uvx` / `pip install` / 单二进制（Go/Rust），`npx` 派系默认不收。**纯离线可做，不依赖 Ubuntu 真机。**
 
 ---
 
@@ -207,7 +209,7 @@ trm config set <key> <value>       # 设置配置项
 > CLI-Anything 降级为可选导入源，主通道是 Agent Skills（长尾）+ MCP（服务）。
 > 灵感源：Omarchy（拥有环境 + 自描述命令面 + skills 分发）、Warp（低门槛目录 + 社区 PR）、ECC（一套技能分发进 30+ 宿主）。
 
-- [ ] **E0. 冻结战略**：确认四层定位（环境清单 / MCP / Skills / workflow 目录）+ 首批 3 个用例
+- [x] **E0. 冻结战略**（2026-09-20 完成）：四层定位见 `docs/ECOSYSTEM-STRATEGY.md` §3；首批 3 个「非它不可」用例见 `docs/MCP-INTEGRATION-PLAN.md` §2.3
 - [x] **E1. 自描述能力面**（2026-09-20 完成）：命令元数据契约（`cli/registry.py`）+ `trm commands [--all|--json|--check]`；`trm skill list/sync/paths` + `skill_sync.py`（symlink → Windows junction → copy 回退）
   - 测试：`tests/test_cli_commands_meta.py`（15）+ `tests/test_skill_sync.py`（22）；`trm commands --check` 检出并修掉 `ask` 的 `run` 别名无摘要问题
 - [x] **E2. MCP 接入**（2026-09-20 完成 M0/M1/M2）：`mcp_client.py` + `mcp_registry.py` + `MCPDispatcher` 实装 + `trm mcp`；见下方「MCP 接入」章节（M3/M4 待做）

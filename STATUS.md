@@ -1,10 +1,10 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-20（文档一致性修订 + CLI-Anything / MCP 调研）
+> 最后更新：2026-09-20（E2 MCP 接入完成 + 收尾校验）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
-> 新的下一阶段方向：**MCP 接入**（见 `docs/MCP-INTEGRATION-PLAN.md`），其余为 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）。
+> 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2**（E2，2026-09-20），下一项是 **M3 策展导入器**（`docs/MCP-INTEGRATION-PLAN.md` §6）；其余为 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）。
 
 ---
 
@@ -168,7 +168,7 @@
 > CLI 流式输出（已实现）、`tmp/` 清理（已完成）、`src/trimum-mvp/`（已删除）、
 > 「296/297 pass 修 AuditEvent 导出」（已被本地 482 passed 取代）。
 
-1. 🔴 **MCP 接入 M0** —— 见 `docs/MCP-INTEGRATION-PLAN.md`：先确认真实用例，再定「自研 client vs 复用 openai-agents MCP」
+1. 🔴 **MCP 接入 M3 策展导入器** —— `tmp/research/awesome-README.md`（4,117 条）→ `config/mcp-catalog.yaml` 候选清单（人工审核后才启用）；解析规则见 `docs/MCP-INTEGRATION-PLAN.md` §3，红线：优先 `uvx` / `pip install` / 单二进制，`npx` 派系默认不收（M0/M1/M2 已于 E2 完成）
 2. 🔴 **桌面/WebSocket 确认通道**（P2）—— `SecurityAgent.confirm()` 目前只有 CLI 交付手段
 3. 🟡 **`trm security revoke <token_id>`** —— security 命令组最后一块缺口
 4. 🟡 **`trm ask -i` 中断处理** —— `ask.py` 无 `KeyboardInterrupt` / `EOFError` 处理
