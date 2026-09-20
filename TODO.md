@@ -3,7 +3,7 @@
 > 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → **M4 传输与生命周期**）
 > 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；E4 / E5 / E7 与 MCP 的「工具聚合」待做
 > 测试：本地 **825 passed / 8 failed / 7 skipped**（8 项为 Windows 沙箱写 `~/.trimum` 被拒 + PATH 缺 `python.exe` + LLM 断网，与既有基线逐条一致，无回归）；真机 Ubuntu **827 passed / 11 failed / 2 skipped**（11 项全是宿主状态缺失、与同步前同一批，无回归）
-> 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固 均已推送四分支（M3：server `e7a30f5` / main `74b563f` / ubuntu `5200b99` / arch-linux `1ef88fa`；单实例加固：server `2f6adbb` / main `2a80fb9` / ubuntu `9ecf111` / arch-linux `fe05347`）；**M4 已开发完并在真机验收（`scripts/accept_m4.py` 16 PASS / 0 FAIL），四分支提交与推送待办。**
+> 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固 均已推送四分支（M3：server `e7a30f5` / main `74b563f` / ubuntu `5200b99` / arch-linux `1ef88fa`；单实例加固：server `2f6adbb` / main `2a80fb9` / ubuntu `9ecf111` / arch-linux `fe05347`）；**M4 已开发完、真机验收（`scripts/accept_m4.py` 16 PASS / 0 FAIL）并推送四分支（server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）。**
 > ⏳ **等用户执行（需要 sudo，脚本已 scp 到真机 `/tmp`）**：`sudo bash /tmp/sync_opt_m4.sh --check` 先看差异，确认后 `sudo bash /tmp/sync_opt_m4.sh` 把 M4（6 src + 6 tests）装进 `/opt/trimum`；装完以 guzhujushi 身份跑 `bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`（别用 sudo 起 daemon），再 `trm mcp status` 看 `source: daemon`。
 > ▶ **下次继续从这里开始（2026-09-20 M4 收尾）**：M4 代码/文档/真机验收都已完成，接下来是 **① 四分支提交与推送 ② 工具聚合** —— 把远端工具以 `<server>__<tool>` 聚合进 `ToolRegistry`，Agent 不必先 `mcp.tools.list` 再 `mcp.tools.call`；再往后是 E4 / E5 / E7。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`。
 
