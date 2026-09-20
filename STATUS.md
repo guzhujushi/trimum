@@ -1086,3 +1086,119 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 | 幽灵聚合条目（清缓存 + `definitions_readable`） | `9e63a81` | `8437694` | `af9c731` | `c6e7ba9` |
 | 无人值守确认不挂死 + 安装失败报原因 | `d34054a` | `07d43a3` | `0494adb` | `4ed51b1` |
 | `trm install` 向导非交互跳过可选步骤 | `bd00990` | `303f9ee` | `a8a16be` | `2ce3f3d` |
+
+
+---
+
+## E4 广接入：生态导入器（2026-09-20）
+
+> 计划与切分：`docs/E4-PLAN.md`；设计：`ARCH.md` §「广接入：生态导入器（E4）」；
+> 运维：`docs/OPERATIONS.md` §「生态导入」。缺口表 #4 / #6 / #7 与 E3 顺延的 `trm skill import`
+> 一起在这一轮收口（`docs/ECOSYSTEM-STRATEGY.md`）。
+
+### 交付内容
+
+| 片 | 内容 | 提交 |
+|---|---|---|
+| S1 | `ecosystem.py`：`EcosystemEntry` 统一 schema + `assess_risk` 分级器（动词表 + 理由，无证据兜底 medium）+ 校验器 + 共用 `ImportRefused` | `be5198d` |
+| S2 | `cli_adapter.py` + `trm tool import-cli`：`--help` 探测 → 解析 → 定级 → `tool.json5` + 薄壳 `main.py`；`generic_executor` 运行时再兜一层白名单 | `be5198d` |
+| S5 | `enabled` 开关：`tool_file_loader` 的 `load_manifest` / `manifest_enabled` / `set_manifest_enabled`（逐行就地改，保留 JSON5 注释）/ `list_manifests`；`tool_gateway.load_all()` 只 import 启用的工具；`trm tool enable|disable`、`trm tool list --all` | `be5198d` |
+| S3 | `workflow_catalog.py` + `trm workflow import`：Warp 式目录 YAML → 逐条校验 → 编译 `WorkflowDefV2` → `~/.trimum/workflows/<id>/workflow.yaml` | `861126e` |
+| S4 | `skill_import.py` + `trm skill import`：本地目录 / git URL（`git clone --depth 1` 到临时目录）→ frontmatter 校验 → `~/.trimum/skills/` | `05bb1ee` |
+| S6 | 文档：`ARCH.md` / `docs/OPERATIONS.md` / `docs/ECOSYSTEM-STRATEGY.md` / `TODO.md` | `be604e8` |
+| S7 | 真机验证 + 验收入口 `scripts/accept_e4.py` | 本提交 |
+
+新增测试 **159 项**：`tests/test_ecosystem.py`(29) + `tests/test_cli_adapter.py`(42) +
+`tests/test_workflow_catalog.py`(48) + `tests/test_skill_import.py`(40)；`trm commands --check` → **68 条**无问题。
+
+### 六条红线（写进代码与测试）
+
+| 红线 | 落点 |
+|---|---|
+| 导入不执行 | 适配器只跑 `--help`；workflow / skill 只读文本、只写文本，绝不 import / 执行导入物 |
+| `--dry-run` 不落盘 | 三个导入器同一条规则，测试逐条断言目标目录没有新增 |
+| 非交互要 `--yes` | 非 TTY 直接 abort（`cli/_ask.py`），退出码 1 |
+| 第三方默认不启用 | 工具产物 `enabled: false`；workflow / skill 是惰性文本（`enabled: true`，不 `run` 就不发生任何事） |
+| 不覆盖已有 | 目标存在即拒绝，除非显式 `--force`；**先全量检查再写**，不做半截导入 |
+| 不引入新依赖 | YAML 用已有 PyYAML；git 源走系统 `git clone`，失败即报错 |
+
+### 本轮修掉的真实缺陷（4 个）
+
+1. **`subprocess.run(capture_output=True)` 在 Windows 上永久挂死**：被探测 CLI 留下的后台孙进程持有
+   管道继承写句柄，而 Windows 上 `subprocess.run` 超时后会 `kill()` 再**无超时地** `communicate()`
+   一次 → `trm tool import-cli git` 挂住不返回（实测 + faulthandler 取到栈）。
+   修法：探测输出走**临时文件**（`cli_adapter.default_runner`），`stdin=DEVNULL` 防分页器等输入；
+   回归测试 `TestDefaultRunner` 用一个"泄漏孙进程"的假 CLI 顶住这条（守护线程兜底，不会把套件挂死）。
+2. **三处默认根写死 `Path.home()/".trimum"`**，绕开 `TRIMUM_HOME` → 「导入了却看不见」：
+   `tool_file_loader.list_manifests`、`WorkflowDefV2.load_from_dir`、`skill_sync.default_source_roots`
+   统一改走 `paths.trimum_path(...)`。
+3. **skill 导入：本地裸仓库路径（`.../repo.git`）被当成 URL**，把路径写进 `source_url` 导致校验失败。
+   现在 `source_url` 只收真 URL，来源另记 `origin`（本地 `.git` 路径仍会走 `git clone`，只是不联网）。
+4. **plan 与写盘之间源目录会变**：`write_skills` 现在在写入前**重算文件清单**（`--force` 确认要等人，
+   源目录也可能变），并且仍然先全量检查再写。
+
+### 本地验证
+
+- 全量：**1099 passed / 5 failed / 7 skipped**（E4 前 940 passed；+159 用例）。5 项失败 = 既有基线
+  （Windows 沙箱 + PATH 缺 `python.exe` + LLM 断网），名单与基线逐条相同。
+- `trm commands --check`：68 条无问题。
+- 端到端手测（临时 `TRIMUM_HOME`）：`import-cli git` → `list`（不含）→ `enable` → `list`（含）→
+  `disable`；`--dry-run` 不落盘；重复导入被拒；workflow 声明 `risk: low` 被命令里的 `prune` / `rm`
+  顶成 `high` 并给出理由；skill 复制 `.git` 不入副本。
+
+### 真机验证（Ubuntu 开发树 `/home/guzhujushi/trimum`，2026-09-20）
+
+- 同步：`git archive HEAD` → `/tmp/trimum-sync.tar` → 开发树 `tar -xf`（开发树已归 `guzhujushi`
+  属主，**不需要 sudo**；新文件 `ecosystem.py` / `cli_adapter.py` / `workflow_catalog.py` /
+  `skill_import.py` 逐个核对落地）。
+- 全量：**1098 passed / 11 failed / 2 skipped**。
+- **基线对照（严格）**：`git archive cfafc21`（E4 之前）解到 `/tmp/trimum_pre_e4`，
+  `PYTHONPATH=/tmp/trimum_pre_e4/src .venv/bin/python -m pytest /tmp/trimum_pre_e4/tests -q`
+  → 失败集合归一化后 `diff` = **IDENTICAL_11_of_11**（两条看起来可疑的
+  `test_tool_file_loading::test_get_executor_exists` 与 `test_other_dispatchers::TestEnvDispatcher`
+  在基线里同样失败 → 不是 E4 引入）。
+- 验收：`scripts/accept_e4.py`（已入库，跑法见其 docstring）→ **43 passed / 0 failed**：
+  - A 通用 CLI 适配器 8 项：探测到子命令、默认 `enabled=false`、`trust=third-party`、分级有理由、
+    manifest（JSON5）可解析、`--force` 没进白名单；
+  - B/C/D 启停 7 项：未启用不在注册表、`list --all` 看得到、enable 后进注册表、disable 后退出且不删文件；
+  - E 运行时白名单 3 项：白名单外旗标与未探测子命令**在 spawn 之前**就被拒（exit_code 2），
+    白名单内的 `--version` 真跑通（`git version 2.43.0`）；
+  - F workflow 7+3 项：dry-run 不落盘、声明 low 被 `rm` 顶成 high、理由点名触发词、真导入后
+    `workflow list` 可见、重复导入被拒；
+  - G/H skill 8+3 项：dry-run 不落盘、`SKILL.md` 逐字节一致、附件一起搬、`skill list` 可见、
+    重复导入被拒；**git 源真 `git clone` 本地裸仓库**（含 `<repo>/skills/<name>/` 一层嵌套布局）、
+    克隆临时目录不留残渣；
+  - I 全局 3 项：`commands --check` 无问题、`trm --version` 可用；
+  - **红线哨兵**：每条导入命令里都写着 `rm -f /tmp/TRM-E4-MUST-NOT-EXIST`，整轮验收后该文件
+    始终不存在（F6/F9/G7/I3 四处断言）→ 「导入不执行」在真机上成立。
+
+### 提交与分支
+
+> 分支纪律见 `AGENTS.md`（2026-09-20 改判）：**日常只推 `server`**，`main` / `ubuntu` /
+> `arch-linux` 只在收尾阶段统一同步推送。
+
+| 内容 | server |
+|---|---|
+| E4 计划与设计 | `fdee6d5` |
+| E4 S1/S2/S5（ecosystem + CLI 适配器 + 启停） | `be5198d` |
+| E4 S3（workflow 目录 + `trm workflow import`） | `861126e` |
+| E4 S4（`trm skill import`） | `05bb1ee` |
+| E4 S6 文档 | `be604e8` |
+| E4 S7 真机验收 + `scripts/accept_e4.py` | 本提交 |
+
+### 待用户执行（sudo，脚本已在远端 `/tmp`）
+
+1. `sudo bash /tmp/sync_opt_tree.sh` —— 部署树 `/opt/trimum` 同步到 E4 树
+   （默认源就是 `/tmp/trimum-sync.tar`，已是本轮 `git archive` 的 E4 内容）。
+   同步完记得重启 daemon：`sudo systemctl restart trmd`。
+2. `sudo bash /tmp/trm_env_install_real.sh` —— E3 遗留的 `trm env install` root 侧真执行验证（仍在）。
+
+### E4 遗留
+
+- **`WorkflowDefV2.to_workflow_definition()` 不搬运 `instruction`**：它只把 `agent_type` 变成节点
+  `handler`、`config` 原样带走，所以编译出来的 workflow 在 `trm workflow run` 下不会真的执行命令。
+  E4 的验收是「导入 + 校验 + 能被 `trm workflow list` 列出」，本轮不动引擎 —— 这条留给 E5 之后的
+  「workflow 执行语义」一轮。
+- `tests/test_cli_adapter.py` 的 `parse_help` 用的是抽象帮助文本；可选硬化：把 `git --help` 的真实
+  输出做成 fixture。
+- 证书 `capabilities` 与 ToolGateway / `security_rule.py` 的运行时合并仍未接线（`TODO.md` 有记录）。

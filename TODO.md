@@ -340,6 +340,10 @@ trm config set <key> <value>       # 设置配置项
 |------|------|
 | 本地全量测试 | 740 passed / 8 failed / 4 skipped (2026-09-20，M3 + 真机修复轮；+53)。8 项与基线**同源**：沙箱写 `~/.trimum` 被拒（PermissionError）+ PATH 缺 `python.exe` + LLM 断网，**无回归** |
 | 真机 Ubuntu 全量测试 | **739 passed / 11 failed / 2 skipped** (2026-09-20，M3 同步后，27s)。11 项 = 同步前基线的同一批宿主状态缺失（`~/.trimum/skills`、`~/.trimum/tools/mcp`、LLM 断网、宿主 env 顺序），**无回归**；同步后新暴露的 8 项失败（`test_setup_wizard` 7 + `test_mcp_dispatcher` 1）已全部修掉 |
+| 本地全量测试（E4） | **1099 passed / 5 failed / 7 skipped** (2026-09-20)。5 项 = 既有基线（沙箱 + PATH 缺 `python.exe` + LLM 断网），与 E4 前逐条相同 |
+| 真机 Ubuntu（E4） | **1098 passed / 11 failed / 2 skipped** (2026-09-20)。严格基线对照：`git archive cfafc21` 解到 `/tmp/trimum_pre_e4` 跑 `PYTHONPATH=... pytest`，失败集合归一化 diff = **IDENTICAL_11_of_11** |
+| E4 真机验收 | `scripts/accept_e4.py` → **43 passed / 0 failed**（三个导入器 + 六条红线 + 哨兵文件证明「导入不执行」） |
+| 新增覆盖（2026-09-20 E4） | `test_ecosystem.py`（29）、`test_cli_adapter.py`（42）、`test_workflow_catalog.py`（48）、`test_skill_import.py`（40） |
 | 新增覆盖（2026-09-20 生态轮） | `test_cli_commands_meta.py`（15）、`test_skill_sync.py`（27）、`test_hosts.py`（13）、`test_setup_wizard.py`（33）、`test_agent_cert.py` 增补（11）、`test_env_toolchain.py`（34）、`test_mcp_client.py`（16）、`test_mcp_registry.py`（27）、`test_mcp_dispatcher.py`（30） |
 | 新增覆盖（2026-09-20 M3） | `test_mcp_catalog.py`（52）：解析/分类/红线/命名/渲染 IO/CLI + 真实快照比对 |
 | 新增覆盖（2026-09-20 真机修复轮） | `test_setup_wizard.py::TestSetupCommand::test_skipped_identity_note_keeps_stdout_json_clean`（1，`--json` 契约回归）；`test_mcp_dispatcher.py` 审计哨兵改成不撞路径的串 |
@@ -352,6 +356,8 @@ trm config set <key> <value>       # 设置配置项
 | 分支 | 状态 | 备注 |
 |------|------|------|
 | `server` | ✅ 已同步 | 当前工作分支；E1 `779c0e0` / E6 `ab26edf` / 清理+证书 `1456aba` / E3 `4331437` / E2 `634e62a` / **M3 `e7a30f5`** / **真机修复轮 `209c98e`** |
+| `server`（E4，2026-09-20） | ✅ 已推送 | E4 计划 `fdee6d5` / S1+S2+S5 `be5198d` / S3 `861126e` / S4 `05bb1ee` / S6 文档 `be604e8` / S7 验收 + `scripts/accept_e4.py` 见 `STATUS.md`「E4 提交与分支」 |
+| `main` / `ubuntu` / `arch-linux`（E4） | ⏸ 未同步（设计如此） | `AGENTS.md` 分支纪律改判：**日常只推 `server`**，这三个分支只在收尾阶段统一同步推送（E4 之前的 M4.5 收口已同步过） |
 | `main` | ✅ 已同步 | E1 `49b2ef4` / E6 `e0e8f0b` / 清理+证书 `2b88561` / E3 `2b4e9b2` / E2 `8af7d5d` / **M3 `74b563f`** / **真机修复轮 `e0ad16f`** |
 | `ubuntu` | ✅ 已同步 | E1 `ba3ebe7` / E6 `e335db6` / 清理+证书 `c0885a8` / E3 `a5c6ad5` / E2 `166841d` / **M3 `5200b99`** / **真机修复轮 `3040b00`** |
 | `arch-linux` | ✅ 已同步 | E1 `1f58b7c` / E6 `417b9cc` / 清理+证书 `18f88c8` / E3 `98c8ccd` / E2 `c68ce85` / **M3 `1ef88fa`** / **真机修复轮 `9925c19`** |
