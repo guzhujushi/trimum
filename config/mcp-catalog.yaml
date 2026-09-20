@@ -1,0 +1,3464 @@
+# trimum MCP 策展候选清单（由 `trm mcp catalog import` 生成）
+#
+# 这是**候选库**，不是生效配置：
+#   * `reviewed: false` 的条目一律不生效 —— 人工审核后把该条目的 `reviewed` 改成 true；
+#   * 启用走文件化注册：人工把条目转成 ~/.trimum/mcp/<name>.json5 并显式 `enabled: true`
+#     （deny-by-default，见 docs/MCP-INTEGRATION-PLAN.md §4.2）；
+#   * 导入器只读本地 README 快照，不联网、不写 ~/.trimum、不启动任何 server；
+#   * 重新导入（`--force`）会按 repo 保留已有的 `reviewed` / `name` / `note`。
+#
+# 红线（docs/MCP-INTEGRATION-PLAN.md §3）：语言只收 python / go / rust，分发只收
+# uvx / uv / pip / go install / cargo install / docker；`npx` 等 Node 派系默认不收
+# （上游 4,000+ 条里 Node 派系占大头，全收等于把 Node 引回技术栈）。
+#
+# flags 含义：no-install-hint（描述里没有安装方式）/ unknown-scope（缺范围标记）/
+#   scope-mixed（本地+云端都标了）/ multi-language（多语言）/ embedded（嵌入式）/
+#   no-linux（标记里没有 Linux）。
+
+version: 1
+generated_from: tmp/research/awesome-README.md
+source_entries: 4118
+candidates: 232
+reviewed: 0
+excluded:
+  dist:brew: 7
+  dist:npm: 2
+  dist:npx: 14
+  dist:unknown: 1356
+  language:c_cpp: 5
+  language:csharp: 28
+  language:java: 29
+  language:ruby: 2
+  language:ts: 2219
+  language:unknown: 197
+  section:other: 27
+red_line:
+  languages:
+  - python
+  - go
+  - rust
+  distributions:
+  - uvx
+  - uv
+  - pip
+  - go
+  - cargo
+  - docker
+  categories: []
+  exclude_categories: []
+  limit: 0
+  note: npx / npm / deno 等 Node 派系默认不收（见 docs/MCP-INTEGRATION-PLAN.md §3）
+categories:
+- id: aggregators
+  label: Aggregators
+  candidates: 6
+  entries:
+  - repo: Wolido/OpenAaaS
+    name: openaaas
+    url: https://github.com/Wolido/OpenAaaS
+    lang: python
+    dist: uvx
+    install_hint: uvx openaaas-mcp-adapter
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: 'Python MCP adapter connecting Claude/Cursor/Cline to the OpenAaaS scientific agent network. Submit tasks to remote research agents (literature analysis, materials databases, etc.) — data stays local, only KB~MB results flow. Install: `uvx openaaas-mcp-adapter`.'
+    reviewed: false
+  - repo: activeing123/mcptoon
+    name: mcptoon
+    url: https://github.com/activeing123/mcptoon
+    lang: python
+    dist: pip
+    install_hint: pip install mcptoon
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Zero-dependency CLI that connects any AI agent to every MCP server: one config, synced to Claude Code, Cursor, Codex, Cline, Windsurf and VS Code. Tool discovery drops from 71,929 to 581 tokens across 255 tools (-99.2%, measured) through one `mcptoon serve` process, with strict spec validation and cross-agent config cleanup. `pip install mcptoon`.'
+    reviewed: false
+  - repo: daedalusdevelopmentgroup/ddg-agent-payable-services
+    name: ddg-agent-payable-services
+    url: https://github.com/daedalusdevelopmentgroup/ddg-agent-payable-services
+    lang: python
+    dist: pip
+    install_hint: pip install ddg-agent-services-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Pay-per-call x402 gateway: one MCP server for 90+ agent tools (utilities, DNS/WHOIS, blockchain RPC, market data, prediction markets, DEX data, security audits) plus an OpenAI-compatible LLM gateway. USDC on Base, free-trial calls per agent. `pip install ddg-agent-services-mcp` or remote `https://mcp.daedalusdevelopmentgroup.com/mcp`.'
+    reviewed: false
+  - repo: ertad-family/liquid
+    name: liquid
+    url: https://github.com/ertad-family/liquid
+    lang: python
+    dist: uvx
+    install_hint: uvx
+    scope: cloud
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: Connect your agent to any HTTP API on the fly — discovers + maps any REST API once, then fetches typed data deterministically (no per-call LLM). Self-hosted MCP server (`uvx --from 'liquid-api[mcp]' liquid-mcp`); works with OpenAI/Gemini/Anthropic/local or any provider via LiteLLM. Open source (AGPL).
+    reviewed: false
+  - repo: kevmoz/macaroonnetwork-mcp
+    name: macaroonnetwork-mcp
+    url: https://github.com/kevmoz/macaroonnetwork-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install macaroonnetwork-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: Discovery and purchase client for a predicate-gated scientific and data marketplace. Search the live catalogue and inspect metadata for free, then pay via x402 (USDC on Base mainnet, the live primary rail) or Lightning L402. Install with `pip install macaroonnetwork-mcp`.
+    reviewed: false
+  - repo: scotia1973-bot/api-hub
+    name: api-hub
+    url: https://github.com/scotia1973-bot/api-hub
+    lang: python
+    langs:
+    - python
+    - ts
+    dist: uvx
+    install_hint: uvx gadgethumans-api-hub-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - multi-language
+    description: 'Memory Vault: 49 MCP tools with persistent agent memory (store/recall/search), plus 45 utility tools (QR codes, crypto prices, weather, DNS, geolocation, passwords, UUIDs, text, finance, code). Free tier + $2.99/mo Pro. Install: `pip install gadgethumans-api-hub-mcp` or `uvx gadgethumans-api-hub-mcp`. Hosted at `api.gadgethumans.com/mcp`.'
+    reviewed: false
+- id: art-and-culture
+  label: Art & Culture
+  candidates: 3
+  entries:
+  - repo: ArturLys/ao3-mcp
+    name: ao3-mcp
+    url: https://github.com/ArturLys/ao3-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install ao3-mcp
+    scope: local
+    trust: local
+    risk: low
+    description: Search the Archive of Our Own (AO3) and delegate full-fic reading to a secondary model (Gemini), so the agent recommends from the actual text, not the author's blurb. `pip install ao3-mcp`
+    reviewed: false
+  - repo: TOBYCAI/image-mcp
+    name: image-mcp
+    url: https://github.com/TOBYCAI/image-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install pillow
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Local Pillow-based image-processing MCP server: info / resize / crop / convert / compress / rotate / flip / thumbnail / watermark / effects / placeholder / overlay (12 tools). Offline, no API key. Install: `pip install pillow && python3 image_mcp.py`.'
+    reviewed: false
+  - repo: leonardoca1/aesthetics-wiki-mcp
+    name: aesthetics-wiki-mcp
+    url: https://github.com/leonardoca1/aesthetics-wiki-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx aesthetics-wiki-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Search, read, and discover thousands of visual aesthetics (cottagecore, dark academia, y2k, goblincore, and many more) from the [Aesthetics Wiki](https://aesthetics.fandom.com). Great for moodboards, brand direction, and creative inspiration. `uvx aesthetics-wiki-mcp`
+    reviewed: false
+- id: bio
+  label: Biology, Medicine and Bioinformatics
+  candidates: 6
+  entries:
+  - repo: NyxToolsDev/dicom-hl7-mcp-server
+    name: dicom-hl7-mcp-server
+    url: https://github.com/NyxToolsDev/dicom-hl7-mcp-server
+    lang: python
+    dist: pip
+    install_hint: pip install dicom-hl7-mcp
+    scope: local
+    trust: local
+    risk: low
+    description: The only MCP server bridging DICOM, HL7v2, and FHIR in one package. Cross-standard mapping, Mirth Connect channel generation, vendor private tag decoding (GE, Siemens, Philips), and integration pattern knowledge. Built by a 19-year healthcare IT veteran. `pip install dicom-hl7-mcp`
+    reviewed: false
+  - repo: ajibadedapo/flowproof-mcp
+    name: flowproof-mcp
+    url: https://github.com/ajibadedapo/flowproof-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install flowproof-mcp
+    scope: local
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: Run reproducible bioinformatics pipelines (Nextflow) from an AI assistant, with verifiable Workflow Run RO-Crate provenance (container digests, tool versions, input/output checksums). `pip install flowproof-mcp`
+    reviewed: false
+  - repo: healthchainai/HealthChain
+    name: healthchain
+    url: https://github.com/healthchainai/HealthChain
+    lang: python
+    dist: pip
+    install_hint: pip install healthchain[mcp]
+    scope: local
+    trust: local
+    risk: low
+    description: Typed, validated FHIR tools for healthcare AI agents — build, read, validate, and code FHIR resources from a patient bundle, with terminology lookup and machine-readable validation reports built for fix-and-retry. `pip install healthchain[mcp]`
+    reviewed: false
+  - repo: musharna/plant-genomics-mcp
+    name: plant-genomics-mcp
+    url: https://github.com/musharna/plant-genomics-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install plant-genomics-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 32 tools for plant-genomics locus lookup across 11 public backends (Ensembl Plants, Phytozome, UniProtKB, KEGG, STRING-DB, Gramene, Europe PMC, QuickGO, NCBI BLAST, ATTED-II, BAR). Single-locus, parallel-batch, and cross-source synthesis variants; JSON output schemas and EDAM ontology tags on every tool. `pipx install plant-genomics-mcp`.
+    reviewed: false
+  - repo: smaniches/alphafold-sovereign-mcp
+    name: alphafold-sovereign-mcp
+    url: https://github.com/smaniches/alphafold-sovereign-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx alphafold-sovereign-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: AlphaFold MCP server integrating AlphaFold DB with eight additional public biomedical data sources, backed by a local SQLite knowledge graph for structural-confidence, variant, disease/phenotype, drug-target, and orthology workflows. `uvx alphafold-sovereign-mcp`
+    reviewed: false
+  - repo: smaniches/uniprot-mcp
+    name: uniprot-mcp
+    url: https://github.com/smaniches/uniprot-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx uniprot-mcp-server
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: 'Auditable UniProt MCP server: 41 tools over the UniProt knowledgebase (entries, features, variants, PTMs, GO terms, cross-references) with per-query SHA-256 provenance and offline replay. `uvx uniprot-mcp-server`'
+    reviewed: false
+- id: cloud-platforms
+  label: Cloud Platforms
+  candidates: 4
+  entries:
+  - repo: chaandannn/finopsmcp
+    name: finopsmcp
+    url: https://github.com/chaandannn/finopsmcp
+    lang: python
+    dist: uvx
+    install_hint: uvx nable
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Local-first FinOps copilot. Connect AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI bills, then ask cost questions in Claude or Cursor, find waste, and get the fix as a pull request you approve. Read-only; your credentials and bill stay on your machine. `uvx nable`.
+    reviewed: false
+  - repo: john-broadway/proximo
+    name: proximo
+    url: https://github.com/john-broadway/proximo
+    lang: python
+    dist: uvx
+    install_hint: uvx proximo-proxmox
+    scope: local
+    trust: local
+    risk: low
+    description: All four Proxmox surfaces — VE, Backup Server, Mail Gateway, Datacenter Manager — plus in-container exec on one audited control plane. Every mutation dry-runs to a PLAN with its blast radius named, snapshots first where the platform can, and lands in a hash-chained tamper-evident audit ledger. 365 tools, read-only by default. `uvx proximo-proxmox`
+    reviewed: false
+  - repo: rosenvladimirov/odoo-claude-mcp
+    name: odoo-claude-mcp
+    url: https://github.com/rosenvladimirov/odoo-claude-mcp
+    lang: python
+    dist: docker
+    install_hint: docker Compose +
+    scope: local
+    systems:
+    - linux
+    - macos
+    - windows
+    trust: local
+    risk: low
+    description: Self-hosted MCP server suite for Odoo ERP (versions 15-19). 197+ tools across 8 federated MCP servers (odoo-rpc, GitHub, Portainer, OCA, Teams, filesystem). Multi-tenant Claude/Claude Code integration, browser-based xterm.js + tmux terminal, Qdrant + Ollama memory layer, Bulgaria localization (НАП, ДДС, ЕИК). Docker Compose + K3s/Kustomize deployment.
+    reviewed: false
+  - repo: x7even/cloudcostsmcp
+    name: cloudcostsmcp
+    url: https://github.com/x7even/cloudcostsmcp
+    lang: go
+    dist: pip
+    install_hint: pip install opencloudcosts
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: Anchor AI FinOps to real, live cloud pricing. 15 tools for AWS, GCP & Azure — public list prices and enterprise negotiated rates (Reserved Instances, Savings Plans, CUDs, EDPs). No credentials needed for AWS and Azure public pricing. `pip install opencloudcosts`
+    reviewed: false
+- id: coding-agents
+  label: Coding Agents
+  candidates: 2
+  entries:
+  - repo: natiixnt/redcon
+    name: redcon
+    url: https://github.com/natiixnt/redcon
+    lang: python
+    dist: pip
+    install_hint: pip install redcon
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Deterministic repository context packing for AI coding agents: selects, compresses, caches, and budgets only the files a task needs. Measured 83% fewer input tokens at the same task coverage, no LLM in the loop. One MCP server for Claude Code, Cursor, Windsurf, Cline, and Zed. `pip install redcon`'
+    reviewed: false
+  - repo: nandhakumar-murugan/gemini-antigravity-bridge
+    name: gemini-antigravity-bridge
+    url: https://github.com/nandhakumar-murugan/gemini-antigravity-bridge
+    lang: python
+    dist: pip
+    install_hint: pip install gemini-antigravity-bridge
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: Bidirectional MCP bridge connecting Google Gemini Spark (cloud AI) with DeepMind Antigravity (local agentic IDE). Features 23 tools for autonomous coding subagent dispatch, cross-agent shared memory, local file operations, and orchestration of Spark connected apps (Canva, YouTube, Google Docs). `pip install gemini-antigravity-bridge`
+    reviewed: false
+- id: command-line
+  label: Command Line
+  candidates: 5
+  entries:
+  - repo: cygnussystems/cygnus-ssh-mcp
+    name: cygnus-ssh-mcp
+    url: https://github.com/cygnussystems/cygnus-ssh-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx cygnus-ssh-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'MCP server for SSH-based control of remote Linux, macOS, and Windows servers with 46 purpose-built tools instead of one generic command-runner: line-level file editing (no download/edit/upload round-trip), background task launch/monitor/kill, real sudo support, host aliases, recursive directory ops, archive create/extract, and full Unicode via SFTP (avoids PowerShell OEM code page corruption on Windows targets). `pip install cygnus-ssh-mcp` or `uvx cygnus-ssh-mcp`.'
+    reviewed: false
+  - repo: dwgx/SmartCLI
+    name: smartcli
+    url: https://github.com/dwgx/SmartCLI
+    lang: python
+    dist: uvx
+    install_hint: uvx smartcli-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Drive full-screen terminal programs (vim, htop, lazygit) by reading the screen, not the byte stream: a live cell grid exposes which row is reverse-video selected, cursor position and alt-screen state, so waits are screen-state predicates instead of sleeps. The emulation is differentially tested against real tmux and GNU screen (cell-by-cell grid diffs plus a generative VT fuzz), which caught 12 emulation bugs including missing alternate-screen support. pip install smartcli-toolkit then smartcli-mcp, or uvx --from smartcli-toolkit smartcli-mcp.'
+    reviewed: false
+  - repo: faizbawa/mcp-remote-ssh
+    name: mcp-remote-ssh
+    url: https://github.com/faizbawa/mcp-remote-ssh
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-remote-ssh
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Full SSH access for AI agents with secret-safe environment injection and automatic output redaction. Persistent sessions, structured execution, SFTP, port forwarding — secrets are fed via stdin (invisible to `ps`) and scrubbed from all tool responses before reaching the LLM. `uvx mcp-remote-ssh`
+    reviewed: false
+  - repo: laszlopere/mcp-tmux
+    name: mcp-tmux
+    url: https://github.com/laszlopere/mcp-tmux
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-tmux
+    scope: local
+    systems:
+    - linux
+    - macos
+    trust: local
+    risk: low
+    description: 'Universal tmux driver: sessions, windows, panes, keystrokes, and pane capture — local or remote over SSH. Curated tools plus a raw `tmux_command` passthrough; works against tmux 1.8+. Shared, visible sessions for pair-programming with the agent. `uvx mcp-tmux`.'
+    reviewed: false
+  - repo: tarides/sudo-proxy
+    name: sudo-proxy
+    url: https://github.com/tarides/sudo-proxy
+    lang: rust
+    dist: cargo
+    install_hint: cargo install sudo-proxy
+    scope: local
+    systems:
+    - linux
+    trust: local
+    risk: low
+    description: Run privileged, mutating commands — locally or over SSH — with a mandatory single-keypress human approval on every one. The model calls `execute`; a TUI Y/N prompt gates the command, then `sudo` escalates, and no password is ever stored. Sanitized env allowlist, no-shell `argv` execution, replay protection, and audit logging. `cargo install sudo-proxy`.
+    reviewed: false
+- id: communication
+  label: Communication
+  candidates: 5
+  entries:
+  - repo: MailFlat/mailflat-sdks
+    name: mailflat-sdks
+    url: https://github.com/MailFlat/mailflat-sdks/tree/main/packages/mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx mailflat-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: Email inboxes for agents, with the one-time code returned as a field instead of a regex over the message body. Addresses are permanent; only the messages expire, on a retention window you choose. `uvx mailflat-mcp`
+    reviewed: false
+  - repo: Spix-HQ/spix-mcp
+    name: spix-mcp
+    url: https://github.com/Spix-HQ/spix-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install spix-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Give AI agents a real phone number and voice. Make outbound calls, handle inbound calls, send email, and manage contacts via 26 MCP tools. ~500ms voice latency (Deepgram Nova-3 + Claude + Cartesia Sonic-3). Install: `pip install spix-mcp`. [Free tier available](https://spix.sh).'
+    reviewed: false
+  - repo: grzgrzgrz3/pingwa-client
+    name: pingwa-client
+    url: https://github.com/grzgrzgrz3/pingwa-client
+    lang: python
+    dist: uvx
+    install_hint: uvx pingwa
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: 'WhatsApp notifications for AI agents with zero setup — no Meta account, no templates, no dashboard: text "join", get an API key, send in 60 seconds (`uvx pingwa mcp` or remote at pingwa.dev/mcp). Two-way: `ask` with tap-to-answer buttons, `check_replies`. Official Meta Cloud API — won''t ban your number.'
+    reviewed: false
+  - repo: jaimenbell/discord-mcp
+    name: discord-mcp
+    url: https://github.com/jaimenbell/discord-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install jaimenbell-discord-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'MCP server over the Discord REST API: read-only tools for listing channels, categories, roles, member roles and permission overwrites, plus write tools for channel, role, guild and message management that stay gated off by default. `pip install jaimenbell-discord-mcp`'
+    reviewed: false
+  - repo: shichuanqiong/AgoraDM
+    name: agoradm
+    url: https://github.com/shichuanqiong/AgoraDM
+    lang: python
+    dist: pip
+    install_hint: pip install agoradm-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'DM / IM layer for AI agents over the A2A 1.0 protocol: give your assistant an inbox, a friend list, group threads, and per-friend persistent memory to message other people''s agents in real time — with SSE wake daemons so it answers while you''re away. `pip install agoradm-mcp`.'
+    reviewed: false
+- id: cryptography
+  label: Cryptography
+  candidates: 1
+  entries:
+  - repo: laszlopere/mcp-bytesmith
+    name: mcp-bytesmith
+    url: https://github.com/laszlopere/mcp-bytesmith
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-bytesmith
+    scope: local
+    trust: local
+    risk: low
+    description: 'Local byte-wrangling toolbox: encoding (hex/Base64/Base32/Base58/Base45…), cryptographic + CRC hashing, base conversion, and CSPRNG tokens/passphrases, plus an opt-in Ethereum/EVM toolset (keccak, ABI/RLP codecs, EIP-191/712 hashing, function/event selectors, EIP-55). No network calls. `uvx mcp-bytesmith`.'
+    reviewed: false
+- id: data-platforms
+  label: Data Platforms
+  candidates: 4
+  entries:
+  - repo: Sugra-Systems/sugra-api-mcp
+    name: sugra-api-mcp
+    url: https://github.com/Sugra-Systems/sugra-api-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install sugra-api-mcp
+    scope: cloud
+    official: true
+    trust: cloud
+    risk: medium
+    description: 'Connector between LLM agents and world data - 1,500+ endpoints aggregating 160+ primary sources across 36 data domains: markets, macroeconomics, company fundamentals, government, news, climate, maritime, and entity screening. Install via `pip install sugra-api-mcp` or hosted at app.sugra.ai/mcp.'
+    reviewed: false
+  - repo: Evan-Crx/permisapi-mcp
+    name: permisapi-mcp
+    url: https://github.com/Evan-Crx/permisapi-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install permisapi-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: '7 tools for French open-data building permits (Sitadel, 311k rows, ~2M permits/year, Etalab license). Search, details, DVF transactions cross-ref, real estate dealer opportunity score, PLU urban zoning, BRGM natural and technological risks, and a Vue 360 composite that fans out 6 sub-fetches in one tool call. Powered by [permisapi.fr](https://permisapi.fr). Plan Free covers basic search and details, Pro+ unlocks the enrichments. Install: `pip install permisapi-mcp`.'
+    reviewed: false
+  - repo: antonio-mello-ai/mcp-airflow
+    name: mcp-airflow
+    url: https://github.com/antonio-mello-ai/mcp-airflow
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-airflow
+    scope: local
+    trust: local
+    risk: low
+    description: 'Manage Apache Airflow through its REST API — list DAGs, inspect DAG runs and task instances, trigger runs, and check failed-DAG and scheduler/metadatabase health. 7 tools, built with FastMCP. Install: `uvx mcp-airflow`.'
+    reviewed: false
+  - repo: flexorch/flexorch-mcp
+    name: flexorch-mcp
+    url: https://github.com/flexorch/flexorch-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install flexorch-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: 'Convert unstructured business documents (PDF, DOCX, invoices, contracts, payroll) into structured, LLM-ready datasets with automatic classification, field extraction, PII masking (10+ locales), and quality scoring. 6 async MCP tools covering the full pipeline: submit → poll → extract → build → export JSONL/RAG/CSV. Install: `pip install flexorch-mcp`.'
+    reviewed: false
+- id: data-science-tools
+  label: Data Science Tools
+  candidates: 6
+  entries:
+  - repo: BlackMount-ai/blackmount-nlp-mcp
+    name: blackmount-nlp-mcp
+    url: https://github.com/BlackMount-ai/blackmount-nlp-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install blackmount-nlp-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Deterministic local text analysis: sentiment, readability scoring, keyword extraction, text similarity, summarization, and language detection across 18 languages. Pure Python, zero heavy dependencies, 42 KB wheel. Install: `pip install blackmount-nlp-mcp`.'
+    reviewed: false
+  - repo: FantasyLab-ai/aurora
+    name: aurora
+    url: https://github.com/FantasyLab-ai/aurora
+    lang: python
+    dist: uvx
+    install_hint: uvx aurora-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Glass-box statistical analysis: 19 research-grade methods, cited findings, integrity-hashed bundles, and measured detector false-fire rates shipped as a calibration corpus. Agents cite real math instead of inventing it. `uvx aurora-mcp`.'
+    reviewed: false
+  - repo: haiiibin/data-profiler-mcp
+    name: data-profiler-mcp
+    url: https://github.com/haiiibin/data-profiler-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install data-profiler-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Profiles tabular data files (CSV, TSV, Parquet, Excel, JSON) for LLM agents: one-call dataset overview, per-column statistics, a data-quality audit (missing values, duplicates, mixed types, outliers), and memory-saving dtype suggestions. Pure Python (pandas); files are read locally and nothing leaves your machine. `pip install data-profiler-mcp`.'
+    reviewed: false
+  - repo: laszlopere/mcp-gnu-units
+    name: mcp-gnu-units
+    url: https://github.com/laszlopere/mcp-gnu-units
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-gnu-units
+    scope: local
+    systems:
+    - linux
+    trust: local
+    risk: low
+    description: Unit conversion and dimensional analysis backed by the bundled GNU units database (3000+ units, compound expressions, reduction to SI base units). Offline and deterministic. `uvx mcp-gnu-units`.
+    reviewed: false
+  - repo: lihtness/gnomon-mcp
+    name: gnomon-mcp
+    url: https://github.com/lihtness/gnomon-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx gnomon-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Deterministic batch tools so LLM agents stop next-token-guessing dates and math. Rich `now()` snapshot (18 fields), `calendar(ops)` batch dispatcher (diff/until/since/add/weekday/business_days, natural-language parsing), `calc(expressions)` Python eval with math+stats pre-loaded, and Pint-based unit conversion. One wiring for dates + math + units. Listed in the official MCP Server Registry. `uvx gnomon-mcp`.
+    reviewed: false
+  - repo: mrnh/rigor
+    name: rigor
+    url: https://github.com/mrnh/rigor
+    lang: python
+    dist: uvx
+    install_hint: uvx rigor-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Classical hypothesis testing, effect sizes, power/sample-size, and multiple-comparisons correction, computed from scratch and returned as a cited, assumption-checked answer instead of a number recalled from training data. `uvx rigor-mcp`.
+    reviewed: false
+- id: data-visualization
+  label: Data Visualization
+  candidates: 2
+  entries:
+  - repo: marzukia/charted
+    name: charted
+    url: https://github.com/marzukia/charted
+    lang: python
+    dist: uvx
+    install_hint: uvx charted-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Zero-dependency chart server that renders bar, line, pie, scatter, and more from JSON or CSV to SVG, HTML, PNG, or data URL. Built-in themes; PNG output renders inline in chat. Install via `uvx --from charted[mcp] charted-mcp`.
+    reviewed: false
+  - repo: subhatta123/twilize
+    name: twilize
+    url: https://github.com/subhatta123/twilize
+    lang: python
+    dist: uvx
+    install_hint: uvx twilize
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Programmatic Tableau workbook (.twb/.twbx) generation — 47 MCP tools for charts, dashboards, calculated fields, dashboard actions, workbook migration, and CSV-to-dashboard pipelines. Install via `uvx twilize`.
+    reviewed: false
+- id: databases
+  label: Databases
+  candidates: 2
+  entries:
+  - repo: slotix/dbconvert-streams-public
+    name: dbconvert-streams-public
+    url: https://github.com/slotix/dbconvert-streams-public
+    lang: go
+    dist: docker
+    install_hint: docker run slotix/stream-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    official: true
+    trust: local
+    risk: low
+    description: 'Read-only SQL across PostgreSQL, MySQL, S3-compatible buckets and folders of Parquet/CSV/JSON — and one query can join across all of them, federated in-process by DuckDB. No tool writes: they are absent rather than disabled, and every tool declares `readOnlyHint`. Runs from connection strings alone as `docker run -i --rm slotix/stream-mcp postgres://…` or as a one-click Claude extension.'
+    reviewed: false
+  - repo: FROWNINGdev/django-orm-lens
+    name: django-orm-lens
+    url: https://github.com/FROWNINGdev/django-orm-lens
+    lang: python
+    dist: pip
+    install_hint: pip install django-orm-lens[mcp]
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Django ORM static-analysis MCP server. Nine read-only tools (`list_apps`, `list_models`, `describe_model`, `find_relations`, `cascade_preview`, `er_diagram`, `describe_migration_dependency`, `suggest_indexes`, `signal_graph`) that expose Django schema, relationships (FK/M2M/O2O, on_delete, related_name), migration deps, missing indexes, and signal graphs — no DB, no Django boot, no credentials. Companion to a VS Code / VSCodium / Cursor extension (Open VSX verified) and a `django-orm-lens` PyPI CLI. `pip install django-orm-lens[mcp]`.
+    reviewed: false
+- id: delivery
+  label: Delivery
+  candidates: 2
+  entries:
+  - repo: kannajune/mcp-architect
+    name: mcp-architect
+    url: https://github.com/kannajune/mcp-architect
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-architect
+    scope: local
+    trust: local
+    risk: low
+    description: 'Gives any AI assistant real architectural understanding of a codebase: tech-stack overview, internal dependency graph with cycle detection, risk hotspots, and module summaries. Local, zero-config, no API keys. `uvx mcp-architect`.'
+    reviewed: false
+  - repo: Dudude-bit/yandex-lavka-mcp
+    name: yandex-lavka-mcp
+    url: https://github.com/Dudude-bit/yandex-lavka-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx yandex-lavka-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    reviewed: false
+- id: developer-tools
+  label: Developer Tools
+  candidates: 25
+  entries:
+  - repo: JeanFrancoisGagne/crapkit
+    name: crapkit
+    url: https://github.com/JeanFrancoisGagne/crapkit
+    lang: python
+    dist: pip
+    install_hint: pip install crapkit
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    official: true
+    trust: local
+    risk: low
+    description: 'Read-only view of a repository''s CRAP scores, one per function: `ccn^2 * (1 - cov)^3 + ccn`, cyclomatic complexity joined to the branch coverage your own test command already writes. Twelve tools (`get_next_item`, `list_worklist`, `get_function_brief`, `get_function_history`, `check_gate`, `check_config`, `list_coupled_files`, `list_duplicate_functions`, `get_ratchet_report`, `get_trend`, `list_runs`, `list_claims`) hand the agent the worst function to fix next with its own source, its uncovered lines, its change-coupled files, its near-duplicates and a gate verdict on the edited file. None of the twelve runs a test suite or edits source files. Reads Python, TypeScript, JavaScript, Go, Rust, Swift, Java, C/C++ and more through lizard. `pip install crapkit`, then `crapkit mcp`.'
+    reviewed: false
+  - repo: FI-Mihej/codebase-agent-mcp
+    name: codebase-agent-mcp
+    url: https://github.com/FI-Mihej/codebase-agent-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx codebase-agent-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: A sub-harness (both an MCP server and an MCP client). Delegates documentation and source code analysis, as well as interactions with related context-providing MCP servers, to a local or inexpensive OpenAI-compatible LLM. Drastically reduces token usage and context size for coding agents on the top-tier LLM. `uvx codebase-agent-mcp`
+    reviewed: false
+  - repo: Jott2121/agent-gate
+    name: agent-gate
+    url: https://github.com/Jott2121/agent-gate
+    lang: python
+    dist: pip
+    install_hint: pip install mcp-agent-gate
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Lets an AI agent gate its own work before claiming "done": a fail-closed ship checklist (`verify_gate` counts a check satisfied only if explicitly proven), required independent refute-first review, and an append-only sha256-chained receipts ledger that makes any edit to past receipts detectable. `pip install mcp-agent-gate`.'
+    reviewed: false
+  - repo: TimurRakhmatullin86/mcp-drill
+    name: mcp-drill
+    url: https://github.com/TimurRakhmatullin86/mcp-drill
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-drill
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Fault injection + model-free reliability scorecard for MCP servers. Injects timeouts, malformed JSON-RPC, truncated & corrupted-but-valid outputs; grades `outputSchema` enforceability (31 servers, 265 tools — only 3% enforceable) + error conformance. `pip install mcp-drill[scan]` · `uvx mcp-drill scan -- npx -y @modelcontextprotocol/server-filesystem /tmp` · GitHub Action + badge. See [vs mcp-scan](https://timurrakhmatullin86.github.io/mcp-drill/vs-mcp-scan/).
+    reviewed: false
+  - repo: VOYAGER-Inc/excel-vision-mcp
+    name: excel-vision-mcp
+    url: https://github.com/VOYAGER-Inc/excel-vision-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx excel-vision-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Reads the embedded images other Excel servers drop: diagrams and screenshots come back as `ImageContent` mapped to the cell they sit in, so specs where the workflow lives in a picture are actually readable. Also surfaces the formatting that carries meaning (bold, strikethrough, highlight and font colors) and skips hidden rows/columns unless a visible formula depends on them. Write support with atomic saves. `uvx excel-vision-mcp`.'
+    reviewed: false
+  - repo: ahmedak/defluff
+    name: defluff
+    url: https://github.com/ahmedak/defluff
+    lang: python
+    dist: pip
+    install_hint: pip install defluff
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Deterministic slop detector for AI-generated prose. Flags filler phrases and clichés with zero false positives by design (curated phrase list, not a model), returns exact spans plus a pinnable 0-1 score, and runs offline with no API key. CLI + CI exit code + MCP server for agents to self-check their own output before it lands in a PR or doc. `pip install defluff`
+    reviewed: false
+  - repo: aos-standard/mcp-agent-health
+    name: mcp-agent-health
+    url: https://github.com/aos-standard/mcp-agent-health
+    lang: python
+    dist: pip
+    install_hint: pip install mcp-agent-health==0.3.1
+    scope: local
+    trust: local
+    risk: low
+    description: 'MCP Agent Health Reporter — advisory agent health scan under AOS discipline (manifest, services, immune loop, evidence). Stdio MCP: `mcp-agent-health`. Install: `pip install mcp-agent-health==0.3.1` · [PyPI](https://pypi.org/project/mcp-agent-health/0.3.1/)'
+    reviewed: false
+  - repo: aos-standard/mcp-blast-radius
+    name: mcp-blast-radius
+    url: https://github.com/aos-standard/mcp-blast-radius
+    lang: python
+    dist: pip
+    install_hint: pip install mcp-blast-radius==0.2.0
+    scope: local
+    trust: local
+    risk: low
+    description: 'MCP Blast-Radius Auditor — static blast radius extraction and AOS `manifest.json` divergence gate (Oracle / Permitted / Prohibited). Stdio MCP (`mcp-blast-radius`) plus CI blocking gate (`mcp-blast-radius-gate`). Install: `pip install mcp-blast-radius==0.2.0` · [PyPI](https://pypi.org/project/mcp-blast-radius/0.2.0/)'
+    reviewed: false
+  - repo: appcreationsca/bumpguard-mcp
+    name: bumpguard-mcp
+    url: https://github.com/appcreationsca/bumpguard-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install bumpguard-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Pre-flight dependency-upgrade impact analysis: reports exactly which of your code''s API usages break *before* you bump a dependency, with line numbers, severity, and fix hints. Also verifies AI-written code against the actually-installed API to catch hallucinated calls. Static analysis only — never runs third-party code. Python + .NET. `pip install bumpguard-mcp`'
+    reviewed: false
+  - repo: aurumflux20/effectfence
+    name: effectfence
+    url: https://github.com/aurumflux20/effectfence
+    lang: rust
+    dist: cargo
+    install_hint: cargo install effectfence
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Causal effect fence for agent tool calls: stops double-charges and duplicate side effects. Same-instant races elect exactly one winner; late duplicates replay a sealed, content-addressed receipt (fence_prepare / fence_commit / fence_abort). Ships a 1,000-attempt storm demo enforced in CI. `npx -y effectfence` (prebuilt binaries for macOS, Windows and Linux — no Rust toolchain) or `cargo install effectfence`.'
+    reviewed: false
+  - repo: cq27-dev/rag-rat
+    name: rag-rat
+    url: https://github.com/cq27-dev/rag-rat
+    lang: rust
+    dist: cargo
+    install_hint: cargo install rag-rat
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Local repo-intelligence index and MCP server for coding agents — "what a repository knows about itself." Hybrid BM25 + vector semantic search, a tree-sitter code graph (callers/callees/imports across Rust, TS/TSX, Kotlin, C/C++, Python) with an optional compiler-grade SCIP oracle, queryable git/GitHub history, and typed, source-anchored repo memories (Invariant, Decision, Risk, …) that persist across sessions. Every result carries provenance — confidence labels and coverage warnings. Keeps source read-only; a background watcher keeps queries fresh. PreToolUse hooks augment `grep` and flag near-duplicate code as you write it. `cargo install rag-rat`
+    reviewed: false
+  - repo: deed-lang/deed
+    name: deed
+    url: https://github.com/deed-lang/deed
+    lang: rust
+    dist: cargo
+    install_hint: cargo install deed-lang
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Contract-first programming language and local MCP server for checking types, effects, capabilities, and contracts in agent-written modules. Its review tool compares before and after source sets and returns machine-readable receipts for new authority, weaker promise tiers, and new Guarded runtime obligations. Install: `cargo install deed-lang`; run `deed mcp`.'
+    reviewed: false
+  - repo: gvasile29/qai-consultant
+    name: qai-consultant
+    url: https://github.com/gvasile29/qai-consultant
+    lang: python
+    dist: uvx
+    install_hint: uvx qai-consultant-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Keyless local MCP server bringing ISTQB / OWASP / IEEE / ISO / EU AI Act QA standards into your AI client: standards-grounded retrieval, deterministic QA effort estimation, and automated QA document quality review (0-100 rubric) plus JUnit/CSV test-results flakiness analysis. `uvx qai-consultant-mcp`'
+    reviewed: false
+  - repo: jaimenbell/mcp-factory
+    name: mcp-factory
+    url: https://github.com/jaimenbell/mcp-factory
+    lang: python
+    dist: pip
+    install_hint: pip install jaimenbell-mcp-factory
+    scope: local
+    trust: local
+    risk: low
+    description: 'Manifest-driven MCP server scaffolder and runtime hub: write a YAML manifest, get an MCP server, with batch registration and a live routing hub. `pip install jaimenbell-mcp-factory`'
+    reviewed: false
+  - repo: kao273183/mk-qa-master
+    name: mk-qa-master
+    url: https://github.com/kao273183/mk-qa-master
+    lang: python
+    dist: uvx
+    install_hint: uvx mk-qa-master
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'AI 測試大師 — end-to-end QA loop over MCP. Drives pytest / Jest / Cypress / Go / Maestro from one surface; analyzes URLs (Web DOM) or live mobile screens (`maestro hierarchy`) to extract testable modules, generates runnable pytest or Maestro YAML with real selectors (not `# TODO` stubs), runs with auto-retry, then writes a prioritized `optimization-plan.md` ranked by evidence (flaky vs broken vs coverage gap). Mobile-first: iOS Simulator, Android Emulator, real devices, and BlueStacks (`QA_ANDROID_HOST=127.0.0.1:5555`). Install via `uvx mk-qa-master`.'
+    reviewed: false
+  - repo: laszlopere/mcp-abacus
+    name: mcp-abacus
+    url: https://github.com/laszlopere/mcp-abacus
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-abacus
+    scope: local
+    systems:
+    - macos
+    - linux
+    trust: local
+    risk: low
+    description: 'Type-faithful calculator: evaluate expressions under fixed-point, IEEE-754 double, or exact rational arithmetic, with every answer labelled exact vs inexact. Tools: calculate, analyze, solver, help, info. Offline, no network. `uvx mcp-abacus`.'
+    reviewed: false
+  - repo: lorenzo-cambiaghi/LynxMCP
+    name: lynxmcp
+    url: https://github.com/lorenzo-cambiaghi/LynxMCP
+    lang: python
+    dist: pip
+    install_hint: pip install lynx-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: '100% local semantic code search for AI agents: AST-aware chunking (tree-sitter), hybrid BM25+dense retrieval, and a code knowledge graph (callers, inheritance, imports) over codebases, docs sites, and PDFs. Install via `pipx install lynx-mcp`.'
+    reviewed: false
+  - repo: no-materials/hird
+    name: hird
+    url: https://github.com/no-materials/hird
+    lang: rust
+    dist: cargo
+    install_hint: cargo install hird-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Compiler-as-MCP-server for the Hirð language (typed actors and effect rows on the BEAM): type inference, definition lookup, effect-row explanation, IR fragments, actor protocol and supervision graphs, and token-budget-aware symbol summaries, so agents query the compiler instead of reading source. Errors come back structured, so an agent can self-correct from tool output alone. `cargo install --git https://github.com/no-materials/hird hird-mcp`'
+    reviewed: false
+  - repo: patchloom/patchloom
+    name: patchloom
+    url: https://github.com/patchloom/patchloom
+    lang: rust
+    dist: cargo
+    install_hint: cargo install patchloom
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Agent-safe structured file edits for AI agents: JSON/YAML/TOML by selector, markdown, AST, dry-run, multi-file batch/tx. Not a generic filesystem MCP. `cargo install patchloom` / `npx -y patchloom mcp-server`.'
+    reviewed: false
+  - repo: richer-richard/fenestra
+    name: fenestra
+    url: https://github.com/richer-richard/fenestra/tree/main/fenestra-mcp
+    lang: rust
+    dist: cargo
+    install_hint: cargo install fenestra-mcp
+    scope: local
+    trust: local
+    risk: low
+    description: 'Render and verify native Rust GUIs with no display or GPU: render to a typed accessibility tree, query/interact by semantic selector (never coordinates), check contrast/focus-order/hit-target-size, diff screenshots, and watch motion play as a captioned filmstrip. 13 tools. `cargo install fenestra-mcp`.'
+    reviewed: false
+  - repo: scarletkc/vexor
+    name: vexor
+    url: https://github.com/scarletkc/vexor
+    lang: python
+    dist: uvx
+    install_hint: uvx vexor
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: A semantic search engine for files and code — find files by describing what they do, not their names. Local reusable indexes, configurable embedding providers (OpenAI, Gemini, Voyage, any OpenAI-compatible API, or fully offline local models), AST-aware code chunking, optional reranking. `uvx vexor mcp` or `pip install vexor`.
+    reviewed: false
+  - repo: sebastienrousseau/rlg
+    name: rlg
+    url: https://github.com/sebastienrousseau/rlg
+    lang: rust
+    dist: cargo
+    install_hint: cargo install rlg-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Log-stream tools for on-call / SRE agent workflows** — expose `rlg` (RustLogs) log files as MCP tools. Three tools: `tail_log` (last N events, filtered by level/target), `filter_log` (JSON-path-style predicates), `summarize_errors` (grouped error taxonomy). Speaks JSON-RPC 2.0 over stdio; near-lock-free structured logging engine underneath (65k-slot ring buffer, 14 output formats, `os_log`/`journald` sinks). Install `cargo install rlg-mcp` or `docker run -i ghcr.io/sebastienrousseau/rlg-mcp`. Dual-licensed MIT OR Apache-2.0.'
+    reviewed: false
+  - repo: swapnanil/vectr
+    name: vectr
+    url: https://github.com/swapnanil/vectr
+    lang: python
+    dist: pip
+    install_hint: pip install vectr
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Semantic codebase search + persistent working memory for AI code editors. Hybrid dense + BM25 search over AST-aware chunks, a symbol graph for locate/trace, and typed notes that survive context compaction and session restarts. Local embeddings, zero config, no API key. `pip install vectr`
+    reviewed: false
+  - repo: xfloukiex-lab/laugh-tale
+    name: laugh-tale
+    url: https://github.com/xfloukiex-lab/laugh-tale
+    lang: python
+    dist: pip
+    install_hint: pip install laugh-tale-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Capstone of the Grand Line MCP set: a "collect them all" server that unlocks once the other tools are installed. `pip install laugh-tale-mcp`'
+    reviewed: false
+  - repo: ForeverTools/kiprio-mcp
+    name: kiprio-mcp
+    url: https://github.com/ForeverTools/kiprio-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install kiprio-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Multi-purpose API toolkit: email validation, DNS lookup, WHOIS, SSL certificate inspection, IBAN validation, business day calculator, hash encoding, and GPU pricing. Free tier included. `pip install kiprio-mcp`'
+    reviewed: false
+- id: e-commerce
+  label: E-Commerce
+  candidates: 5
+  entries:
+  - repo: ilyautov/chestny-znak-mcp-ru
+    name: chestny-znak-mcp-ru
+    url: https://github.com/ilyautov/chestny-znak-mcp-ru
+    lang: python
+    dist: uvx
+    install_hint: uvx chestny-znak-mcp-ru
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Chestny ZNAK (Russian mandatory product marking, GIS MT and SUZ) API for AI assistants: marking codes, emission orders, circulation documents and code checks through 33 schema-driven methods with a read/write/destructive safety gate. PyPI (`uvx chestny-znak-mcp-ru`).'
+    reviewed: false
+  - repo: jasp-nerd/marktplaats-mcp
+    name: marktplaats-mcp
+    url: https://github.com/jasp-nerd/marktplaats-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx marktplaats-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Search Marktplaats.nl and 2dehands.be, the Dutch and Belgian second-hand marketplaces. Listings with price, condition and distance filters, full ad details, seller verification and reviews, categories, and new-listing monitoring. No account or API key needed. Install via `uvx marktplaats-mcp`.
+    reviewed: false
+  - repo: TonyWang-hub/mcp-cn-commerce
+    name: mcp-cn-commerce
+    url: https://github.com/TonyWang-hub/mcp-cn-commerce
+    lang: python
+    dist: pip
+    install_hint: pip install mcp-cn-commerce
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: Read-only merchant data connector for 8 Chinese e-commerce platforms — Tmall/Taobao, JD.com, Pinduoduo, Douyin Shop + Qianchuan ads, Kuaishou, Xiaohongshu, and WeChat Store. Orders, products, after-sales, inventory, and ad reports for AI agents. Published on the official MCP Registry. Install via `pip install mcp-cn-commerce`.
+    reviewed: false
+  - repo: ilyautov/marketplaces-mcp-ru
+    name: marketplaces-mcp-ru
+    url: https://github.com/ilyautov/marketplaces-mcp-ru
+    lang: python
+    dist: uvx
+    install_hint: uvx marketplaces-mcp-ru
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: 'Wildberries and Ozon Seller APIs for Russian marketplace sellers: sales, stocks, prices, finance, reviews and ads through 793 schema-driven methods with a read/write/destructive safety gate, multi-store switching and ready-made seller workflows. PyPI (`uvx marketplaces-mcp-ru`), Docker image, one-click Claude Desktop `.mcpb` bundle.'
+    reviewed: false
+  - repo: ilyautov/moysklad-mcp-ru
+    name: moysklad-mcp-ru
+    url: https://github.com/ilyautov/moysklad-mcp-ru
+    lang: python
+    dist: uvx
+    install_hint: uvx moysklad-mcp-ru
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: 'MoySklad cloud ERP for Russian retail and wholesale: stock, products, orders, counterparties and profit/turnover/cash reports, plus document writes (supplies, shipments, invoices, returns) over the JSON API 1.2. 892 schema-driven methods reached through 8 generic meta-tools, kopecks converted to rubles, and a read/write/destructive safety gate that needs an explicit confirmation before a document is created and a second one before it is posted or deleted. PyPI (`uvx moysklad-mcp-ru`), one-click installer for Claude Desktop, Claude Code, Codex and OpenCode. Alpha.'
+    reviewed: false
+- id: education
+  label: Education
+  candidates: 2
+  entries:
+  - repo: JuhongPark/mcp-server-pronunciation
+    name: mcp-server-pronunciation
+    url: https://github.com/JuhongPark/mcp-server-pronunciation
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-server-pronunciation@0.3.0
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Local MCP voice coach with English pronunciation, grammar, fluency, phoneme-level feedback, practice drills, and learner-profile hints. Install via `uvx mcp-server-pronunciation@0.3.0`.
+    reviewed: false
+  - repo: anzy-renlab-ai/pronounce
+    name: pronounce
+    url: https://github.com/anzy-renlab-ai/pronounce
+    lang: python
+    dist: uvx
+    install_hint: uvx pronounce-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Community pronunciation dictionary for developer project / product / jargon names (kubectl, nginx, GIF, JSON, Pydantic, Knative, LaTeX — 1,848 entries). Each entry carries IPA, a General-American respelling, alternate readings where the pronunciation is contested, a source citation (creator interview / project FAQ / Wikipedia § Pronunciation), and a confidence level. Tools: `pronounce(word)`, `search_pronunciations(query)`, `list_pronunciations(category)`. Install: `uvx pronounce-mcp`. Live browse: <https://pronounce.renlab.ai>.'
+    reviewed: false
+- id: embedded-system
+  label: Embedded System
+  candidates: 3
+  entries:
+  - repo: Gearotons/servomotor-mcp
+    name: servomotor-mcp
+    url: https://github.com/Gearotons/servomotor-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx servomotor-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    official: true
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    - embedded
+    description: 'Drive the Gearotons M17, an open-source closed-loop NEMA-17 servomotor, from plain English over RS-485: discovers serial ports, auto-detects every motor on the bus, and exposes the firmware''s full command set as tools. Mock backend needs no hardware. `uvx --from servomotor-mcp servomotor-mcp`'
+    reviewed: false
+  - repo: ProductOfAmerica/mcp-server-kicad
+    name: mcp-server-kicad
+    url: https://github.com/ProductOfAmerica/mcp-server-kicad
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-server-kicad
+    scope: embedded
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    - embedded
+    description: 'KiCad EDA automation: 100+ tools for schematic capture, PCB layout, ERC, DRC, and Gerber/BOM/3D exports. Byte-preserving writes, KiCad 9 and 10. Install via `uvx --from mcp-server-kicad mcp-server-kicad`.'
+    reviewed: false
+  - repo: codeofaxel/Kiln
+    name: kiln
+    url: https://github.com/codeofaxel/Kiln
+    lang: python
+    dist: pip
+    install_hint: pip install kiln3d
+    scope: embedded
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    - embedded
+    description: MCP server that lets AI agents drive real 3D printers end to end — design, slice, queue, monitor via camera, and recover from failures — across Bambu Lab, Creality, Prusa, Elegoo, and more over OctoPrint, Moonraker/Klipper, PrusaLink, and USB. AGPL-3.0, `pip install kiln3d`.
+    reviewed: false
+- id: file-systems
+  label: File Systems
+  candidates: 4
+  entries:
+  - repo: Cohexa-ai/agent-coherence
+    name: agent-coherence
+    url: https://github.com/Cohexa-ai/agent-coherence
+    lang: python
+    dist: uvx
+    install_hint: uvx
+    scope: local
+    trust: local
+    risk: low
+    description: 'Coherence guard for shared files: when two agents write the same file, the stale writer is denied instead of silently overwriting, then reacquires and retries. Single-host, TLA+-verified. Install: `uvx --from "agent-coherence[mcp]" stale-write-guard-fs`.'
+    reviewed: false
+  - repo: FI-Mihej/text_file_read_and_refactor_mcp
+    name: text-file-read-and-refactor-mcp
+    url: https://github.com/FI-Mihej/text_file_read_and_refactor_mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx text-file-read-and-refactor-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Token-efficient Python stdio MCP server exposing safe text-file search, reading, and refactoring tools. Tools automatically resolve the file BOM and codepage; edit tools save files with their original encoding and BOM. `uvx text-file-read-and-refactor-mcp`
+    reviewed: false
+  - repo: bzsanti/oxidize-python
+    name: oxidize-python
+    url: https://github.com/bzsanti/oxidize-python
+    lang: python
+    dist: uvx
+    install_hint: uvx oxidize-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Rust-powered PDF toolkit: create, read, and analyze PDFs; extract text and entities for RAG; convert to Markdown; split, merge, rotate, and reorder pages; add content, annotations, and form fields; and encrypt documents. Ships in the `oxidize-pdf` PyPI package — run locally with `uvx oxidize-mcp`.'
+    reviewed: false
+  - repo: risha-max/0xpdf-mcp
+    name: 0xpdf-mcp
+    url: https://github.com/risha-max/0xpdf-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx oxpdf-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: Schema-first PDF→JSON MCP for AI agents (0xPdf API). Define a JSON schema, parse invoices/forms (OCR optional), manage schemas, and poll async jobs. `uvx oxpdf-mcp` · [docs](https://0xpdf.io/docs#mcp) · [playground](https://0xpdf.io/samples)
+    reviewed: false
+- id: finance--fintech
+  label: Finance & Fintech
+  candidates: 31
+  entries:
+  - repo: human-beyond/mainbook-mcp
+    name: mainbook-mcp
+    url: https://github.com/human-beyond/mainbook-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx mainbook-mcp
+    scope: local
+    systems:
+    - macos
+    - linux
+    official: true
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: Convert customer-supplied PDF bank statements into checked JSON, Excel, or CSV with balance validation, using the MainBook API. Runs locally via `uvx mainbook-mcp` or over the hosted Streamable HTTP endpoint at `https://mcp.mainbook.ai/mcp`, where the client signs the user in with their MainBook account over OAuth (a legacy `mb_live_` API key still works for headless use); setup is documented at https://mainbook.ai/mcp. Does not connect to bank accounts.
+    reviewed: false
+  - repo: xsf0221/pattern-vista-cli
+    name: pattern-vista-cli
+    url: https://github.com/xsf0221/pattern-vista-cli
+    lang: python
+    dist: uvx
+    install_hint: uvx
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    official: true
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: 'End-of-day US equity technical data: how far each S&P 500 / Nasdaq 100 name has strayed from its own 200-day average, what share of the universe currently sits above it, and the chart patterns from each night''s scan carried with their historical win-rate against SPY. Tool descriptions state their own caveats — data is end-of-day, never intraday, and a bucket win-rate is a property of hundreds of past signals rather than a probability for the next one. Free tier needs no card. On the official MCP Registry as `io.github.xsf0221/pattern-vista`. `uvx --from ''pattern-vista[mcp]'' pattern-vista-mcp`'
+    reviewed: false
+  - repo: Luminc/peil-mcp
+    name: peil-mcp
+    url: https://github.com/Luminc/peil-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx peil-mcp
+    scope: cloud
+    official: true
+    trust: cloud
+    risk: medium
+    description: 'Peil — financial orientation for Dutch freelancers (ZZP''ers): log hours, draft invoices from unbilled time, and ask where you stand — outstanding, overdue, and your net effective hourly rate. Scoped API keys with draft-by-default: putting email in front of a client needs a separate `invoices:send` permission the key can be issued without. `uvx peil-mcp`'
+    reviewed: false
+  - repo: Declan142/calcnook-mcp-server
+    name: calcnook-mcp-server
+    url: https://github.com/Declan142/calcnook-mcp-server
+    lang: python
+    dist: uvx
+    install_hint: uvx calcnook-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Personal finance calculations across 7 countries (US, UK, CA, AU, AE, SA, India) plus Sharia-compliant Islamic finance (Zakat, Murabaha, Ijarah, Mudarabah, Hajj savings, halal stock screening). 17 tools wrapping the deterministic [calcnook](https://pypi.org/project/calcnook/) engine — income tax, SIP/EMI/loans, retirement, EOSG, VAT, currency formatting (incl. Indian lakh/crore), and BMI/BMR/TDEE. Zero API keys, pure stdlib. Install with `uvx calcnook-mcp`.
+    reviewed: false
+  - repo: FLOX-Foundation/flox
+    name: flox
+    url: https://github.com/FLOX-Foundation/flox/tree/main/mcp
+    lang: python
+    dist: pip
+    install_hint: pip install flox-mcp
+    scope: local
+    trust: local
+    risk: low
+    description: 'MCP server for the FLOX trading systems framework. ~30 tools to run backtests, scaffold strategies, validate for lookahead bias, place orders, query PnL via Claude/Cursor. C++23 core with Python/Node/Codon/QuickJS strategy bindings. Same code from backtest to live (CcxtBroker or native connectors). Install: `pip install flox-mcp`.'
+    reviewed: false
+  - repo: SimonTarara62/capitalcom-mcp-server
+    name: capitalcom-mcp-server
+    url: https://github.com/SimonTarara62/capitalcom-mcp-server
+    lang: python
+    dist: uvx
+    install_hint: uvx capitalcom-mcp
+    scope: local
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: 'Unofficial, community MCP for the Capital.com Open API: safe, guarded trading and market data. Two-phase trades (preview → confirm → execute), allowlists, demo-first. Install with `uvx capitalcom-mcp`.'
+    reviewed: false
+  - repo: alforge-labs/alpha-forge-mcp
+    name: alpha-forge-mcp
+    url: https://github.com/alforge-labs/alpha-forge-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx alpha-forge-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: AlphaForge quant CLI as an MCP server — backtest, optimize (Optuna TPE), and walk-forward-test trading strategies from Claude Desktop, Cursor, or Claude Code. Local-first, anti-overfitting. `uvx alpha-forge-mcp`
+    reviewed: false
+  - repo: dolphinquant/echolon
+    name: echolon
+    url: https://github.com/dolphinquant/echolon
+    lang: python
+    dist: pip
+    install_hint: pip install echolon
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: LLM-agent-native backtest framework for SHFE daily futures research. 23 MCP tools (strategy validation, scaffolding, indicator catalog, error-code lookup), 22 in-package skills, 32 catalogued error codes, working strategy templates. `pip install echolon` then `claude mcp add -s user echolon -- echolon-mcp`.
+    reviewed: false
+  - repo: haiiibin/acb-tax-mcp
+    name: acb-tax-mcp
+    url: https://github.com/haiiibin/acb-tax-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install acb-tax-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Canadian adjusted cost base (ACB) and capital gains from a trade history: average-cost tracking, per-disposition realized gains, and superficial-loss detection. Pure Python, runs locally, a calculation aid (not tax advice). `pip install acb-tax-mcp`.'
+    reviewed: false
+  - repo: sailorpepe/undesirables-mcp-server
+    name: undesirables-mcp-server
+    url: https://github.com/sailorpepe/undesirables-mcp-server
+    lang: python
+    dist: pip
+    install_hint: pip install undesirables-mcp-server
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: 'TCG collectibles + AI agent intelligence. 35+ tools: Vision AI card grading (PSA/Beckett prediction), Monte Carlo price simulation (Heston/Merton/Kou), AI music generation, local image generation (FLUX), TTS, RAG memory, SAST security auditing, and x402 Oracle API. 370K+ indexed products across 25 games. Install via `pip install undesirables-mcp-server`.'
+    reviewed: false
+  - repo: sebastienrousseau/camt053-mcp
+    name: camt053-mcp
+    url: https://github.com/sebastienrousseau/camt053-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install camt053-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: ISO 20022 bank-statement parsing + reversing entries** (`camt.053` Bank-to-Customer Statement). 19 tools + 3 resources + 4 guided prompts across message-type discovery, return-reason lookup, schema introspection, IBAN/BIC/LEI validation, camt.053 parsing + XSD validation, Nov 2026 CBPR+ cliff readiness check, curated SEPA / CBPR+ / HVPS+ rulebook citation lookup, accounting-platform journal export (Xero + QuickBooks Online), LLM-driven entry classification via MCP Sampling, entry listing/filtering, and one-shot validated reversing-entry XML generation. Built on the [`camt053`](https://github.com/sebastienrousseau/camt053) library (100% line + branch coverage, SLSA Build L3 + PEP 740 attestations, Apache-2.0). Install `pip install camt053-mcp`, run `camt053-mcp`.
+    reviewed: false
+  - repo: sebastienrousseau/pacs008-mcp
+    name: pacs008-mcp
+    url: https://github.com/sebastienrousseau/pacs008-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install pacs008-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: ISO 20022 FI-to-FI credit-transfer generation + validation** (`pacs.008` FI-to-FI Customer Credit Transfer, `pacs.004` Payment Return, `pacs.002` Status Report). 15 tools across message-type + scheme discovery, JSON Schema + rail-usage validation, validated XML generation, XSD validation, inbound parsing, the November 2026 structured-address cliff toolkit (classify/validate/repair/batch), and legacy SWIFT MT103 → pacs.008 conversion. Built on the [`pacs008`](https://github.com/sebastienrousseau/pacs008) library (100% branch coverage, Apache-2.0). Install `pip install pacs008-mcp`, run `pacs008-mcp`.
+    reviewed: false
+  - repo: slenderongithub/fix-protocol-mcp
+    name: fix-protocol-mcp
+    url: https://github.com/slenderongithub/fix-protocol-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install
+    scope: local
+    trust: local
+    risk: low
+    description: Parse, validate, build, and explain FIX protocol trading messages (Logon, NewOrderSingle, ExecutionReport, and the rest of the session/order workflow). Fully offline — bundled FIX 4.4 field dictionary, no API keys or network calls. Install `pip install .`, run `fix-protocol-mcp`.
+    reviewed: false
+  - repo: vdalhambra/axiom-calculator-mcp
+    name: axiom-calculator-mcp
+    url: https://github.com/vdalhambra/axiom-calculator-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx axiom-calculator-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Personal finance calculators — mortgage payments, compound interest, FIRE retirement number, loan comparison, true credit cost, and debt payoff. 8 tools, zero API keys, works with `uvx axiom-calculator-mcp`.
+    reviewed: false
+  - repo: viniciuslazzari/bolsai-mcp
+    name: bolsai-mcp
+    url: https://github.com/viniciuslazzari/bolsai-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx bolsai-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Brazilian stock market data (B3, CVM, BCB) for AI assistants — stock prices, 27+ fundamentals, dividends, FIIs, and macro indicators (Selic, IPCA, CDI). Install: `pip install bolsai-mcp` or `uvx bolsai-mcp`.'
+    reviewed: false
+  - repo: 0xDegenMo/lighter-mcp
+    name: lighter-mcp
+    url: https://github.com/0xDegenMo/lighter-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install 0xdegenmo-lighter-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: 'MCP server for [Lighter](https://lighter.xyz) — a zero-fee zk-rollup perpetual DEX. Trade ~190 perpetuals (crypto + RWA: PAXG/XAU gold, XAG silver, WTI oil, equity tickers like TSLA/AMZN/ASML) from Claude Desktop, Cursor, Hermes, or any MCP client. Three credential tiers (PUBLIC market data → READ account → TRADE signing), native on-chain stop-loss / take-profit, server-side safety caps (max-quote-USD, slippage, symbol allowlist). `pip install 0xdegenmo-lighter-mcp`.'
+    reviewed: false
+  - repo: 27dream/mcp-eastmoney
+    name: mcp-eastmoney
+    url: https://github.com/27dream/mcp-eastmoney
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-eastmoney
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: 'China A-share stock market MCP server — real-time quotes, main capital flow ranking, sector fund flow, and historical K-lines via Eastmoney''s free APIs. Zero config, no API keys required. 5 tools: `get_stock_quote`, `search_stock`, `main_fund_rank`, `sector_fund_flow`, `get_kline`. Install: `uvx mcp-eastmoney` or `pip install mcp-eastmoney`.'
+    reviewed: false
+  - repo: AletaIndex/aletaindex-fin-narratives
+    name: aletaindex-fin-narratives
+    url: https://github.com/AletaIndex/aletaindex-fin-narratives
+    lang: python
+    dist: uvx
+    install_hint: uvx narrative-intelligence-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: Financial narrative intelligence for AI agents. Tracks how financial stories evolve across 109 tickers — clustering news into structured narratives, measuring sentiment momentum, and mapping narrative risk across portfolios. Install via Smithery or `uvx narrative-intelligence-mcp`.
+    reviewed: false
+  - repo: FalsifyLab/falsifylab-alpha-mcp
+    name: falsifylab-alpha-mcp
+    url: https://github.com/FalsifyLab/falsifylab-alpha-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install falsifylab-alpha-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: '9 MCP tools surfacing FalsifyLab public-market research data: DeFi yield farms (emissions-stripped APY), Hyperliquid vault leaderboard, SEC Form 4 insider buy clusters, material 8-K filings, macro tape (SPX/VIX/UST/DXY/GOLD/BTC/ETH), US spot crypto ETF flows, airdrop yield-gap detection, Polymarket whale positions, and confluence_today (cross-source signal alignment). Free tier requires no signup. Pro $19/mo for real-time + 100 results + 90d history. Install: `pip install falsifylab-alpha-mcp`.'
+    reviewed: false
+  - repo: JacobiusMakes/parlay-api-mcp
+    name: parlay-api-mcp
+    url: https://github.com/JacobiusMakes/parlay-api-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx parlayapi-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: Sports odds, player props, and prediction-market data for personal projects and internal research, with keyless live previews, source-quality and coverage tools. Install with `uvx parlayapi-mcp`.
+    reviewed: false
+  - repo: Kali123411/k402-mcp
+    name: k402-mcp
+    url: https://github.com/Kali123411/k402-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install k402-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: 'Agent-payable APIs settled on Kaspa L1: text tools (summarize, schema-guaranteed extract, classify, rewrite), web reading, embeddings + semantic search, live Kaspa chain data, GPU LLM tiers, covenants-as-a-service, and RISC Zero zk proving with cycle-exact quotes. Pay per call in KAS, BTC, LTC, DOGE, BCH, DASH, ETH, or USDC — fractions of a cent, no account or API key. `pip install k402-mcp`'
+    reviewed: false
+  - repo: Scottcjn/rustchain-mcp
+    name: rustchain-mcp
+    url: https://github.com/Scottcjn/rustchain-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install rustchain-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: MCP server for RustChain blockchain, BoTTube video platform, and Beacon agent messaging. Wallet management, mining queries, bounties, video search/upload, and agent messaging tools. Install via `pip install rustchain-mcp`.
+    reviewed: false
+  - repo: deficlow/zipp-mcp
+    name: zipp-mcp
+    url: https://github.com/deficlow/zipp-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx zipp-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Multi-language crypto news for AI assistants — editorial summaries with sentiment labels (BULLISH/NEUTRAL/BEARISH) and importance scores (0–100). 6 tools across 8 languages, every story credits the original publisher. Install: `uvx zipp-mcp` or `ghcr.io/deficlow/zipp-mcp`. Public Streamable HTTP endpoint at `https://zippfeed.com/mcp/`; listed on the [Official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=zipp).'
+    reviewed: false
+  - repo: foretak/registry-mcp
+    name: registry-mcp
+    url: https://github.com/foretak/registry-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx registry-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: 'Company data from national business registries for AI agents, one JSON shape per country. United Kingdom (Companies House): look up by company number, search by name, read the accounts and confirmation-statement due dates the register publishes. Norway (Brønnøysundregistrene / Enhetsregisteret): look up by organisasjonsnummer, search by name, check VAT (MVA) registration, compute statutory filing deadlines with the rule each one cites. Five read-only tools plus ChatGPT-connector `search`/`fetch`; hosted at `https://api.foretak.dev/mcp` or `uvx registry-mcp`.'
+    reviewed: false
+  - repo: gabrielmahia/mpesa-mcp
+    name: mpesa-mcp
+    url: https://github.com/gabrielmahia/mpesa-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install mpesa-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: First MCP server for M-PESA (Safaricom Daraja API) — STK push, B2C payments, balance queries, transaction status, SIM swap detection, Bill Manager, and 16 more tools for Kenya's 35M+ mobile money users. `pip install mpesa-mcp`.
+    reviewed: false
+  - repo: gpartin/CryptoGuardClient
+    name: cryptoguardclient
+    url: https://github.com/gpartin/CryptoGuardClient
+    lang: python
+    dist: pip
+    install_hint: pip install CryptoGuardClient
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: Per-transaction deterministic crypto validator for AI trading agents. Validate trades (PROCEED/CAUTION/BLOCK), scan tokens, detect rug pulls — powered by WaveGuard physics engine. 5 free calls/day, x402 USDC payments. `pip install CryptoGuardClient`
+    reviewed: false
+  - repo: grahammccain/chart-library-mcp
+    name: chart-library-mcp
+    url: https://github.com/grahammccain/chart-library-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install chartlibrary-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Historical stock chart pattern intelligence for AI agents. 24M pre-computed embeddings across 15K stocks and 10 years of data. Search by ticker+date or screenshot to find the most similar historical patterns and see what happened next. 19 tools including pattern search, forward returns, regime analysis, and trade simulation. Install: `pip install chartlibrary-mcp`. Free tier: 200 calls/day.'
+    reviewed: false
+  - repo: omniologynow-rgb/profitspot-mcp
+    name: profitspot-mcp
+    url: https://github.com/omniologynow-rgb/profitspot-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install profitspot-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: Cross-chain DeFi intelligence MCP server for AI agents. 7 tools for yield discovery, pool analysis, profit simulation, risk scoring, whale tracking, impermanent loss calculation, and DeFi overview across 86 chains and 6,500+ liquidity pools. Install via `pip install profitspot-mcp`.
+    reviewed: false
+  - repo: phuocdu/agentpay-vn
+    name: agentpay-vn
+    url: https://github.com/phuocdu/agentpay-vn
+    lang: python
+    dist: pip
+    install_hint: pip install agentpay-vn
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: VietQR payments for AI agents in Vietnam. Agents generate a VietQR code, send it to the user, and auto-confirm settlement from the bank feed. Non-custodial — money flows directly to the merchant's bank account, never held by the platform. `pip install agentpay-vn`, ships an MCP server for Claude Desktop/Code.
+    reviewed: false
+  - repo: pickelfintech/the13f-mcp
+    name: the13f-mcp
+    url: https://github.com/pickelfintech/the13f-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx the13f-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Institutional 13F intelligence for Claude Desktop, Cursor, and VS Code. Nine Read tools: manager search, holdings lookup, portfolio similarity, consensus portfolio, market regime, sector flows. SEC EDGAR-sourced. Install `uvx the13f-mcp`.'
+    reviewed: false
+  - repo: sailorpepe/litvm-tcg-oracle-mcp
+    name: litvm-tcg-oracle-mcp
+    url: https://github.com/sailorpepe/litvm-tcg-oracle-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install litvm-tcg-oracle
+    scope: cloud
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: 'On-chain TCG price oracle for the LitecoinVM ecosystem. 6 MCP tools: search 455K+ trading cards, 60-day price history, Merkle proof verification on LiteForge (Chain 4441), Monte Carlo simulation (Merton Jump-Diffusion), and AI card grading via Qwen 2.5 VL. 290K+ merkle-proven prices across 25 games. Install via `pip install litvm-tcg-oracle`.'
+    reviewed: false
+- id: gaming
+  label: Gaming
+  candidates: 1
+  entries:
+  - repo: danielenricocahall/lorcana-mcp
+    name: lorcana-mcp
+    url: https://github.com/danielenricocahall/lorcana-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx lorcana-cards-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Disney Lorcana TCG: card search, deck validation against format rules (60-card minimum, max 4 copies, 2-ink limit, dual-ink requirements), deck stats (ink curve, color split, keyword counts), and Dreamborn/Pixelborn deck list import/export. 10 tools, 2,506 unique cards refreshed daily. `uvx lorcana-cards-mcp`'
+    reviewed: false
+- id: knowledge--memory
+  label: Knowledge & Memory
+  candidates: 39
+  entries:
+  - repo: DanceNitra/inspeximus
+    name: inspeximus
+    url: https://github.com/DanceNitra/inspeximus
+    lang: python
+    dist: uvx
+    install_hint: uvx
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Persistent agent memory with a first-class correction channel: supersede or revert a fact so recall stops returning the stale value, an echo guard that blocks a restated old value from resurrecting it, and receipted erasure (a signed, content-free tombstone that makes a deletion provable). No LLM on the write path, zero dependencies, the core in one file, 73 MCP tools. `uvx --from "inspeximus[mcp]" inspeximus-mcp`'
+    reviewed: false
+  - repo: JinyangWang27/people-context
+    name: people-context
+    url: https://github.com/JinyangWang27/people-context
+    lang: python
+    dist: uvx
+    install_hint: uvx people-context
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Local-first memory for AI agents about the people in your life: explainable identity resolution, relationships, roles, facts, interactions, reminders, and communication guidance in one SQLite file you own. Imports are review-gated, sensitive disclosure is operator-gated, and ordinary operation makes no network calls. `uvx --from people-context people-context`'
+    reviewed: false
+  - repo: KVANTRA-dev/NOUZ-MCP
+    name: nouz-mcp
+    url: https://github.com/KVANTRA-dev/NOUZ-MCP
+    lang: python
+    dist: pip
+    install_hint: pip install nouz-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Semantic knowledge graph for Obsidian. Three modes (pure graph / semantic classification / strict hierarchy), local embeddings, sign classification via cosine similarity to user-defined cores, bottom-up core_mix aggregation, semantic bridge discovery, and drift detection. `pip install nouz-mcp`
+    reviewed: false
+  - repo: Lians-ai/Lians
+    name: lians
+    url: https://github.com/Lians-ai/Lians
+    lang: python
+    dist: uvx
+    install_hint: uvx
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Bitemporal agent memory with deterministic fact supersession, point-in-time recall, memory lineage, conflict tracking, and tamper-evident audit trails. Supports self-hosted and managed deployments. `uvx --from 'lians-sdk[mcp]' lians-mcp`
+    reviewed: false
+  - repo: Patdolitse/piia-engram
+    name: piia-engram
+    url: https://github.com/Patdolitse/piia-engram
+    lang: python
+    dist: pip
+    install_hint: pip install piia-engram
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Persistent user identity across AI tools. Stores preferences, lessons, and decisions as local JSON; 13 core MCP tools share them with Claude Code, Cursor, Codex, and any MCP client. Knowledge governance (staging→verified), AES-256-GCM encryption, cross-tool sync. `pip install piia-engram`
+    reviewed: false
+  - repo: SaravananJaichandar/world-model-mcp
+    name: world-model-mcp
+    url: https://github.com/SaravananJaichandar/world-model-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install world-model-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Temporal knowledge graph for codebases. Captures decision traces, links test failures to code changes, learns co-edit patterns, predicts regression risk, and enforces learned constraints at the edit boundary via a PreToolUse hook. 22 MCP tools, 9 SQLite databases with FTS5, supports Python/TypeScript/JavaScript/Solidity/Go/Rust/Java. Install via `pip install world-model-mcp`.
+    reviewed: false
+  - repo: Semiotronika/LINZA-MCP
+    name: linza-mcp
+    url: https://github.com/Semiotronika/LINZA-MCP
+    lang: python
+    dist: pip
+    install_hint: pip install linza-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Local-first review-gated sidecar for Markdown workspaces. Indexes notes and incoming artifacts into SQLite, proposes domains, links, memory, and growth cards with evidence, and keeps source files unchanged until explicit review. `pip install linza-mcp`
+    reviewed: false
+  - repo: Shweta-Mishra-ai/tokenmizer
+    name: tokenmizer
+    url: https://github.com/Shweta-Mishra-ai/tokenmizer
+    lang: python
+    dist: pip
+    install_hint: pip install tokenmizer
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Graph-structured session memory for LLMs. Local OpenAI-compatible proxy that extracts tasks, decisions, and files into a typed knowledge graph, auto-checkpoints before context overflow, and resumes any session in ~250 tokens. 6 MCP tools including `why_decision` (traces why a decision changed, with reasons and evidence). `pip install tokenmizer`
+    reviewed: false
+  - repo: Thezenmonster/agentmem
+    name: agentmem
+    url: https://github.com/Thezenmonster/agentmem
+    lang: python
+    dist: pip
+    install_hint: pip install quilmem[mcp]
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Governed memory for coding agents with trust lifecycle (hypothesis → active → validated → deprecated), conflict detection, staleness tracking, and health scoring. SQLite + FTS5, zero infrastructure. `pip install quilmem[mcp]`
+    reviewed: false
+  - repo: Vasilispapg/claude-handoff
+    name: claude-handoff
+    url: https://github.com/Vasilispapg/claude-handoff
+    lang: python
+    dist: pip
+    install_hint: pip install claude-handoff
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Post-hoc session handoff and project memory for Claude Code: turns any session transcript — including crashed or usage-limit-hit ones — into one clean handoff.md another model continues from (ChatGPT, Gemini, or the next Claude), and distills a project''s ENTIRE session history into one cited memory brief injected at every session start. MCP tools `list_sessions` and `handoff` (LLM summaries only behind an explicit `--allow-llm`); zero dependencies, pure stdlib, secrets redacted from every output. `pipx install claude-handoff`, then `claude-handoff --mcp`.'
+    reviewed: false
+  - repo: VonderVuflya/Yggdrasil
+    name: yggdrasil
+    url: https://github.com/VonderVuflya/Yggdrasil
+    lang: python
+    dist: uvx
+    install_hint: uvx ygg
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Durable, local-first memory for AI coding agents over MCP. Zero-dependency (pure Python + SQLite/FTS5), curated and semantically de-duped — you own the data as plain rows. Works with Claude Code, Codex & any MCP host. `uvx --from yggdrasil-memory ygg mcp`
+    reviewed: false
+  - repo: Yarmoluk/ckg-mcp
+    name: ckg-mcp
+    url: https://github.com/Yarmoluk/ckg-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install ckg-mcp
+    scope: local
+    trust: local
+    risk: low
+    description: 'Compressed Knowledge Graphs (pre-structured dependency DAGs) as MCP context — agents traverse declared edges instead of inferring from text. Open CKG Benchmark (64 domains, 10,838 queries): 3.8× RAG''s F1 at 11× fewer tokens, ~42× RDS, 0 fabricated edges by construction. 97 domains, 4 tools, no DB/embeddings. `pip install ckg-mcp`'
+    reviewed: false
+  - repo: afairai/afair
+    name: afair
+    url: https://github.com/afairai/afair
+    lang: python
+    dist: uv
+    install_hint: uv tool run python
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: The open-source, self-organizing memory for all your AI tools. Three frozen verbs (remember/recall/observe); background agents extract entities, resolve conflicts, consolidate and decay, so the vault structures itself instead of only storing. Append-only, content-addressed, encrypted (SQLCipher), single-tenant, self-hostable. `uv run python -m afair`
+    reviewed: false
+  - repo: ayushagrawal288/memex
+    name: memex
+    url: https://github.com/ayushagrawal288/memex
+    lang: python
+    dist: docker
+    install_hint: docker compose up
+    scope: local
+    trust: local
+    risk: low
+    description: Production-grade persistent memory service for AI agents. Semantic search with recency decay (configurable α blend), local ONNX embeddings (zero API cost), background memory summarisation, and Prometheus/Grafana observability. `docker compose up` — no cloud dependencies.
+    reviewed: false
+  - repo: billy12151/memory-arbiter-mcp
+    name: memory-arbiter-mcp
+    url: https://github.com/billy12151/memory-arbiter-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install memory-arbiter-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'AI enhancement middleware: precise retrieval replaces full-memory loading (~80%+ token cut), rule-based conflict arbitration with explainable reasons, and one local SQLite shared across Claude Code/Codex/Cursor/ZCode. Local-first, zero cloud, MIT. `pip install memory-arbiter-mcp`'
+    reviewed: false
+  - repo: caix84476-netizen/personal-understanding
+    name: personal-understanding
+    url: https://github.com/caix84476-netizen/personal-understanding
+    lang: python
+    langs:
+    - python
+    - ts
+    dist: pip
+    install_hint: pip install personal-understanding
+    scope: local
+    trust: local
+    risk: low
+    flags:
+    - multi-language
+    description: 'Verbatim-first personal memory for AI agents: every personal message captured word-for-word and hashed before anything is derived, every record linked back to the exact quote it came from, with anti-fabrication validators and an audit dashboard. Local-first skill + MCP server, Python stdlib only. `pip install personal-understanding`'
+    reviewed: false
+  - repo: ccf/agentcairn
+    name: agentcairn
+    url: https://github.com/ccf/agentcairn
+    lang: python
+    dist: uvx
+    install_hint: uvx agentcairn
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Local-first agent memory: a plain-Markdown Obsidian vault is the source of truth, with a rebuildable DuckDB index for hybrid BM25 + vector + graph recall. Non-lossy capture with secret redaction; works across Claude Code, Codex, Cursor, and any MCP host. `uvx agentcairn`'
+    reviewed: false
+  - repo: drexthealpha/Knos
+    name: knos
+    url: https://github.com/drexthealpha/Knos
+    lang: python
+    dist: pip
+    install_hint: pip install knos
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: One local memory every coding agent on the machine shares — Claude Code, Cursor, Claude Desktop, OpenCode — with claim/withhold so a second agent is refused answers about work a first one is mid-change on. Reads sessions, commits, CLAUDE.md/AGENTS.md and ADRs; every answer names its source. `pip install knos && knos connect`
+    reviewed: false
+  - repo: eidetic-works/nucleus-mcp
+    name: nucleus-mcp
+    url: https://github.com/eidetic-works/nucleus-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install nucleus-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: Sovereign Agent OS — persistent memory, governance, and audit trails for AI agents. One brain for Cursor, Claude Code, Windsurf, and Gemini. Local-first `.brain/` directory with engrams, hypervisor file protection, and optional remote sync. `pip install nucleus-mcp` or Streamable HTTP at `relay.nucleusos.dev`.
+    reviewed: false
+  - repo: gingugu/gingugu
+    name: gingugu
+    url: https://github.com/gingugu/gingugu
+    lang: python
+    dist: pip
+    install_hint: pip install gingugu
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Persistent memory for AI coding assistants. Local SQLite, no cloud. 16 MCP tools: store, recall, search, relate, consolidate, export, and credential vault (OS keychain). Typed memories with confidence lifecycle (verified/inferred/stale/deprecated), namespaces, knowledge graph, and hybrid BM25 + semantic search via fastembed ONNX. Works with Cursor, Windsurf, Claude, and any MCP client. `pip install gingugu`'
+    reviewed: false
+  - repo: jaimenbell/rag-mcp
+    name: rag-mcp
+    url: https://github.com/jaimenbell/rag-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install jaimenbell-rag-mcp
+    scope: local
+    trust: local
+    risk: low
+    description: 'Minimal RAG-over-a-corpus retrieval tool: `search_knowledge(query, k)` embeds the query, vector-searches a local corpus and returns cited passages. Runs fully locally with no paid embedding API. `pip install jaimenbell-rag-mcp`'
+    reviewed: false
+  - repo: juyterman1000/entroly
+    name: entroly
+    url: https://github.com/juyterman1000/entroly
+    lang: python
+    langs:
+    - python
+    - rust
+    dist: pip
+    install_hint: pip install entroly
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - multi-language
+    description: Auditable context control plane and MCP server for AI coding agents. Compresses context 70–95% (BM25 + entropy + dep-graph knapsack), stabilizes prompt prefixes for provider cache discounts, routes easy tasks to cheaper models (RAVS Bayesian router), and verifies answers locally with WITNESS hallucination guard (0.844 AUROC, $0, ~3 ms). MemoryOS adds local budget-aware working/episodic/semantic memory with decay, safety scanning, and durable persistence. 38 agent integrations (Cursor, Claude Code, Codex, Aider, and more). Ships as MCP server (`entroly serve`), HTTP proxy, or Python/Rust library. Apache-2.0, local-first. `pip install entroly`
+    reviewed: false
+  - repo: knaisoma/data-olympus
+    name: data-olympus
+    url: https://github.com/knaisoma/data-olympus
+    lang: python
+    dist: pip
+    install_hint: pip install data-olympus
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Governance-grade project knowledge MCP server for coding agents. Git-native Markdown knowledge base with proposed vs accepted guidance, validity windows, supersession chains, and status-aware retrieval of current in-force decisions and standards. `pip install data-olympus`
+    reviewed: false
+  - repo: laradji/deadzone
+    name: deadzone
+    url: https://github.com/laradji/deadzone
+    lang: go
+    dist: docker
+    install_hint: docker run ghcr.io/laradji/deadzone
+    scope: local
+    systems:
+    - macos
+    - linux
+    trust: local
+    risk: low
+    description: Local-first semantic search over library docs. Single Go binary, MCP stdio, vector index pinned to the binary version. Like Context7 with the internet off. Pre-built index DB auto-fetched on first launch and SHA256-verified, then zero network. Also available as `docker run --rm -i ghcr.io/laradji/deadzone server`. Listed in the official MCP Registry as `io.github.laradji/deadzone`.
+    reviewed: false
+  - repo: liza-studio/skillmem
+    name: skillmem
+    url: https://github.com/liza-studio/skillmem
+    lang: python
+    dist: pip
+    install_hint: pip install skillmem
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Self-improving skill memory for coding agents: skills that help get reinforced, unused ones fade on an Ebbinghaus decay curve. $0 write path (SQLite FTS5 + local ONNX embeddings, no LLM calls), bilingual EN/RU hybrid search, SHA256 tamper-evident history, deterministic LongMemEval benchmark in-repo (hit@5 0.871). 8 mem_* tools; deep Claude Code hook integration optional. `pip install skillmem`'
+    reviewed: false
+  - repo: ohad6k/emulo
+    name: emulo
+    url: https://github.com/ohad6k/emulo
+    lang: python
+    dist: uvx
+    install_hint: uvx emulo
+    scope: local
+    trust: local
+    risk: low
+    description: Loads your personal profile, mined from your local Claude Code/Codex/OpenCode logs, so your agent works like you instead of a cold start. One tool, `load_emulo_profile`. Run with `uvx emulo mcp`.
+    reviewed: false
+  - repo: robotel-limited/robo-cortex
+    name: robo-cortex
+    url: https://github.com/robotel-limited/robo-cortex
+    lang: python
+    dist: pip
+    install_hint: pip install robo-cortex[mcp]
+    scope: local
+    trust: local
+    risk: low
+    description: Git-aware, evidence-based memory store for AI coding agents. Memories anchored to git blob hashes are automatically flagged for review when linked code changes. `pip install robo-cortex[mcp]` or on registry.modelcontextprotocol.io
+    reviewed: false
+  - repo: sachitrafa/YourMemory
+    name: yourmemory
+    url: https://github.com/sachitrafa/YourMemory
+    lang: python
+    dist: pip
+    install_hint: pip install yourmemory
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Persistent memory for AI agents with Ebbinghaus forgetting-curve decay, hybrid BM25+vector retrieval, and entity graph for multi-hop reasoning. Memories auto-prune by importance and recall rate. Built-in browser dashboard, multi-agent support, and `yourmemory ask` for zero-API-call local queries. `pip install yourmemory`
+    reviewed: false
+  - repo: setheerwagen/local-ai-mcp-servers
+    name: local-ai-mcp-servers
+    url: https://github.com/setheerwagen/local-ai-mcp-servers/tree/main/mcp-modelmanager
+    lang: python
+    dist: pip
+    install_hint: pip install mcp-modelmanager
+    scope: local
+    trust: local
+    risk: low
+    description: 'Manage a local model machine: pull/remove Ollama models, switch the inference service between models, and run LoRA fine-tuning jobs. `pip install mcp-modelmanager`'
+    reviewed: false
+  - repo: soolaugust/0CompactMem
+    name: 0compactmem
+    url: https://github.com/soolaugust/0CompactMem
+    lang: python
+    dist: uvx
+    install_hint: uvx memory-os
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Persistent memory MCP server with OS-style demand paging, kswapd-style eviction, and mlock pinning. Multi-agent shared SQLite store with BM25 + FTS5 retrieval, importance scoring, and capacity-aware reclaim. 5 tools: `memory_lookup`, `pin_memory`, `unpin_memory`, `memory_stats`, `list_pinned`. `uvx --from git+https://github.com/soolaugust/0CompactMem memory-os`'
+    reviewed: false
+  - repo: syndicalt/zaxy
+    name: zaxy
+    url: https://github.com/syndicalt/zaxy
+    lang: python
+    dist: pip
+    install_hint: pip install zaxy-memory
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Event-sourced agent memory on a hash-chained append-only log with an embedded temporal knowledge graph (Kuzu, no sidecar). Cited Memory Checkout context, salience-based forgetting that attenuates instead of deleting, compaction-recovery hooks for Claude Code, token-budgeted checkout, and review-gated consolidation. 47 MCP tools with an 8-tool core profile default. `pip install zaxy-memory` [Docs](https://docs.zaxy.io)
+    reviewed: false
+  - repo: turbyho/mem-context
+    name: mem-context
+    url: https://github.com/turbyho/mem-context
+    lang: python
+    dist: pip
+    install_hint: pip install mem-context
+    scope: local
+    systems:
+    - macos
+    - linux
+    trust: local
+    risk: low
+    description: Temporal memory MCP server with LanceDB vector search, weight-decay scoring, and LLM consolidation. Automatic session capture, deduplication, 6-factor relevance scoring. `pip install mem-context`
+    reviewed: false
+  - repo: vbcherepanov/total-agent-memory
+    name: total-agent-memory
+    url: https://github.com/vbcherepanov/total-agent-memory
+    lang: python
+    dist: pip
+    install_hint: pip install total-agent-memory
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Persistent local memory for coding agents: temporal knowledge graph with fact invalidation, procedural memory, episodic recall, AST codebase ingest and cross-project analogy. 74 tools, 9 IDEs, and zero LLM or network calls in the default hot path. Reproducible benchmarks — LongMemEval R@5 95.1%, LoCoMo 0.607, BEAM 1M 0.448. `pip install total-agent-memory`'
+    reviewed: false
+  - repo: vornicx/Midas
+    name: midas
+    url: https://github.com/vornicx/Midas
+    lang: python
+    langs:
+    - python
+    - ts
+    dist: uvx
+    install_hint: uvx midas-memory-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - multi-language
+    description: Local-first memory for long-horizon AI agents with no LLM at ingest — $0 per message, zero data egress, verbatim source-traceable recall. Typed belief revision, selective forgetting, and a provenance guard that blocks memory-justified destructive actions unless user-confirmed. One `midas init` wires Claude Code, Cursor, Codex, and 6 more clients to one shared SQLite memory; local web inspector and hash-chained audit log. Benchmarked on LongMemEval/LoCoMo/BEAM with one-command repros — including published negatives. `uvx midas-memory-mcp` or `npx -y midas-memory-mcp`
+    reviewed: false
+  - repo: yubinkim444/repo-memory
+    name: repo-memory
+    url: https://github.com/yubinkim444/repo-memory
+    lang: python
+    dist: uvx
+    install_hint: uvx repo-memory-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Shared, git-tracked memory for AI agents on the same codebase. Stores facts/decisions/gotchas in a `.ai-memory/` directory you commit to the repo — sync is git, no DB, no daemon. What one Claude/Cursor/Cline learns, the next one picks up automatically across users and machines. 5 MCP tools (`get_repo_memory`, `add_fact`, `list_facts`, `add_decision`, `add_gotcha`). Install: `uvx repo-memory-mcp --repo /path/to/repo`.'
+    reviewed: false
+  - repo: zsxh1990/pr-genius
+    name: pr-genius
+    url: https://github.com/zsxh1990/pr-genius
+    lang: python
+    dist: pip
+    install_hint: pip install prgenius-core
+    scope: local
+    trust: local
+    risk: low
+    description: Evidence-backed PR contribution advisor. 550+ case studies from 33 repos, 8 tools for merge probability analysis, pattern matching, and contribution strategy. `pip install prgenius-core`
+    reviewed: false
+  - repo: atakanelik34/Bilinc
+    name: bilinc
+    url: https://github.com/atakanelik34/Bilinc
+    lang: python
+    dist: pip
+    install_hint: pip install bilinc
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: Hosted agent memory that keeps an audit trail. Three tools — `commit_mem`, `recall`, `status` — where each write carries provenance (which run, tool, or operator produced it), contradictions with prior state surface as inspectable changes rather than silent overwrites, and a bad run is recovered from a snapshot instead of repaired by hand. `pip install -U bilinc`
+    reviewed: false
+  - repo: dbwls99706/deadends.dev
+    name: deadends-dev
+    url: https://github.com/dbwls99706/deadends.dev
+    lang: python
+    dist: pip
+    install_hint: pip install deadends-dev
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: Structured knowledge of what does NOT work. 2,400+ entries across 54 domains record the dead ends for an error - the fix that looks right and fails, and why - alongside workarounds with success rates and an error transition graph. Covers code errors and country-specific real-world rules (visa, banking, legal, emergency) where generic answers are most often wrong. `pip install deadends-dev`, or hosted at `https://deadends.dev/mcp`
+    reviewed: false
+  - repo: khwanlabs/khwan-mcp
+    name: khwan-mcp
+    url: https://github.com/khwanlabs/khwan-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install khwan-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: Durable memory for coding agents, built around corrections. Captures the moment you correct the agent as a typed event and distils it overnight into a standing rule the next session starts with, rather than only extracting facts. An isolated brain per project instead of one blended profile. Recall and record make no model calls — your client is the model. `pip install khwan-mcp`
+    reviewed: false
+- id: legal
+  label: Legal
+  candidates: 4
+  entries:
+  - repo: CSOAI-ORG/eu-ai-act-compliance-mcp
+    name: eu-ai-act-compliance-mcp
+    url: https://github.com/CSOAI-ORG/eu-ai-act-compliance-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install eu_ai_act_compliance_mcp
+    scope: local
+    trust: local
+    risk: low
+    description: 'EU AI Act measurement corpus — 417 frozen provisions (the Act''s 113 Articles at provision-level granularity) with risk classification, a 42-point audit, Article 11 documentation drafts, and a penalty calculator. Measurement, not certification. Install: `pip install eu_ai_act_compliance_mcp`.'
+    reviewed: false
+  - repo: ilyautov/diadoc-mcp-ru
+    name: diadoc-mcp-ru
+    url: https://github.com/ilyautov/diadoc-mcp-ru
+    lang: python
+    dist: uvx
+    install_hint: uvx diadoc-mcp-ru
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Kontur Diadoc API for AI assistants: legally significant document exchange, signing, counteragents, machine-readable powers of attorney and docflow status through 114 schema-driven methods with a read/write/destructive safety gate. PyPI (`uvx diadoc-mcp-ru`).'
+    reviewed: false
+  - repo: ilyautov/sbis-mcp-ru
+    name: sbis-mcp-ru
+    url: https://github.com/ilyautov/sbis-mcp-ru
+    lang: python
+    dist: uvx
+    install_hint: uvx sbis-mcp-ru
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'SBIS (Saby) API for AI assistants: documents and their workflow stages, electronic signature, certificates, employees and organizations through 45 schema-driven methods with a read/write/destructive safety gate. PyPI (`uvx sbis-mcp-ru`).'
+    reviewed: false
+  - repo: aydincan/turk-hukuku-mevzuat-mcp
+    name: turk-hukuku-mevzuat-mcp
+    url: https://github.com/aydincan/turk-hukuku-mevzuat-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx turk-hukuku-mevzuat-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Turkish legislation live from the official source (mevzuat.gov.tr): current article text by law and article number, with verification links. Install: `uvx turk-hukuku-mevzuat-mcp`.'
+    reviewed: false
+- id: location-services
+  label: Location Services
+  candidates: 1
+  entries:
+  - repo: ArtBreguez/greeks-mcp
+    name: greeks-mcp
+    url: https://github.com/ArtBreguez/greeks-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx greeks-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: 'Live options analytics as 12 tools: Greeks (Δ Γ Θ V ρ), GEX/DEX & gamma flip, max pain, unusual flow, a full overview (IV surface, expected move, term structure), plus a screener and GEX heatmap. Derived data only, runs locally over stdio. Install: `uvx greeks-mcp`.'
+    reviewed: false
+- id: marketing
+  label: Marketing
+  candidates: 4
+  entries:
+  - repo: moiosintel/kd-scout
+    name: kd-scout
+    url: https://github.com/moiosintel/kd-scout
+    lang: python
+    dist: pip
+    install_hint: pip install kd-scout
+    scope: local
+    trust: local
+    risk: low
+    description: 'Zero-dependency MCP server for keyword research arithmetic: difficulty estimation, opportunity scoring, and structured content briefs. Install: `pip install kd-scout`.'
+    reviewed: false
+  - repo: pghdma/callrail-mcp
+    name: callrail-mcp
+    url: https://github.com/pghdma/callrail-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install callrail-mcp
+    scope: local
+    trust: local
+    risk: low
+    description: 'CallRail REST API v3 integration with 49 tools for call tracking, form submissions, transcripts, full CRUD on tags/trackers/companies/users, plus agency-specific aggregation tools (`usage_summary` for per-client cost attribution, `compare_periods` for MoM deltas, `bulk_update_calls` with dry-run, `spam_detector`, `call_eligibility_check` for Google Ads conversion debugging). Built by an actual CallRail customer for agency use. Install: `pipx install callrail-mcp`.'
+    reviewed: false
+  - repo: acamolese/google-search-console-mcp
+    name: google-search-console-mcp
+    url: https://github.com/acamolese/google-search-console-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-google-search-console
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Google Search Console MCP server: query performance data, inspect URLs, check indexing, and generate brandable HTML SEO audit reports with a 30/60/90-day roadmap. Read-only OAuth scope, installable via `uvx mcp-google-search-console`.'
+    reviewed: false
+  - repo: atomno-mcp/mcp-seo-audit
+    name: mcp-seo-audit
+    url: https://github.com/atomno-mcp/mcp-seo-audit
+    lang: python
+    dist: pip
+    install_hint: pip install atomno-mcp-seo-audit
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Technical SEO audit powered by the detail.web engine. `audit_site(url)` returns a 0-100 health score, issues across 8 categories, and a GEO (Generative Engine Optimization) sub-score for visibility in AI search (ChatGPT, Perplexity, Google AI Overviews). Plus validators for robots.txt, sitemap.xml, JSON-LD, and meta tags. Install: `pipx install atomno-mcp-seo-audit`.'
+    reviewed: false
+- id: monitoring
+  label: Monitoring
+  candidates: 8
+  entries:
+  - repo: tp322d/lastping-app
+    name: lastping-app
+    url: https://github.com/tp322d/lastping-app
+    lang: go
+    dist: go
+    install_hint: go install github.com/tp322d/lastping-app/cmd/lastping-mcp@latest
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    official: true
+    trust: cloud
+    risk: medium
+    description: Dead man's switch for AI agents, cron jobs and CI/CD pipelines. An agent creates its own monitor, asks for its ping commands and reports its runs in one conversation; LastPing alerts when a run goes silent, stalls, fails or loops, and `list_open_incidents` hands back what broke with the recurrence count, failing step and exit code. 36 tools. Hosted at `https://mcp.lastping.dev/mcp` (via `mcp-remote`), or `go install github.com/tp322d/lastping-app/cmd/lastping-mcp@latest`. Free for individuals.
+    reviewed: false
+  - repo: ShekharBhardwaj/AgenticLedger
+    name: agenticledger
+    url: https://github.com/ShekharBhardwaj/AgenticLedger
+    lang: python
+    dist: pip
+    install_hint: pip install agentic-ledger
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Agents query their own ledger: sessions, costs, loop runs, and stuck-loop flags captured by the Agentic Ledger transparent-proxy flight recorder (local-first, MIT). Install: `pip install agentic-ledger`.'
+    reviewed: false
+  - repo: antonio-mello-ai/mcp-redis-monitor
+    name: mcp-redis-monitor
+    url: https://github.com/antonio-mello-ai/mcp-redis-monitor
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-redis-monitor
+    scope: local
+    trust: local
+    risk: low
+    description: 'Read-only Redis monitoring — queue depths by type, Celery queue status, connected clients, server/memory stats, and key counts per database. 5 tools, built with FastMCP. Install: `uvx mcp-redis-monitor`.'
+    reviewed: false
+  - repo: cloudsealed/cloudsealed-mcp
+    name: cloudsealed-mcp
+    url: https://github.com/cloudsealed/cloudsealed-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx cloudsealed-mcp
+    scope: local
+    trust: local
+    risk: low
+    description: 'Two deterministic, rule-based analysis engines for agents: cloud billing cost anomaly detection (rolling-median + MAD, resistant to the masking effect) and auditable architecture risk scoring (single point of failure, coupling, scalability gap) with a rule-by-rule breakdown for every score. `uvx cloudsealed-mcp`'
+    reviewed: false
+  - repo: esp4ce/infra-mcp
+    name: infra-mcp
+    url: https://github.com/esp4ce/infra-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install infra-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Read-only MCP server for on-prem Linux VMs and PostgreSQL over SSH. Check service health (systemd/journald), retrieve bounded logs, inspect DB state, and explore table schemas — without terminal access. Allowlist-gated, append-only audit log. `pip install infra-mcp`.
+    reviewed: false
+  - repo: jaimenbell/vllm-ops-mcp
+    name: vllm-ops-mcp
+    url: https://github.com/jaimenbell/vllm-ops-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install vllm-ops-mcp
+    scope: local
+    trust: local
+    risk: low
+    description: 'Read-only ops and health server for a local vLLM instance: liveness versus real-completion health tiers, GPU and VRAM status, service status, and live serve-flag introspection. `pip install vllm-ops-mcp`'
+    reviewed: false
+  - repo: zhaoyue722/llm-usage-mcp
+    name: llm-usage-mcp
+    url: https://github.com/zhaoyue722/llm-usage-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx llm-usage-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Local-first LLM API cost tracker. Captures usage across Anthropic, OpenAI, Qwen, and DeepSeek into a local SQLite ledger and exposes spend queries, provider comparison, and recommendations as MCP tools — with first-class Chinese-provider support (CNY→USD). Install: `uvx llm-usage-mcp`.'
+    reviewed: false
+  - repo: tickstem/mcp
+    name: mcp
+    url: https://github.com/tickstem/mcp
+    lang: go
+    dist: go
+    install_hint: go install github.com/tickstem/mcp/cmd/tsk-mcp@latest
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: 'HTTP uptime monitoring, heartbeat (dead-man''s switch) monitoring, cron job scheduling, and email verification. Single API key, per-tool quota tracking. Install: `go install github.com/tickstem/mcp/cmd/tsk-mcp@latest`.'
+    reviewed: false
+- id: multimedia-process
+  label: Multimedia Process
+  candidates: 4
+  entries:
+  - repo: botmonster/image2svg-mcp
+    name: image2svg-mcp
+    url: https://github.com/botmonster/image2svg-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx image2svg-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Convert raster images (PNG/JPG/WEBP/TIFF) to SVG vector format. Single tool, accepts base64 or URL input; runs locally via `uvx image2svg-mcp` or as a Docker HTTP server.
+    reviewed: false
+  - repo: chaoz23/loudcheck
+    name: loudcheck
+    url: https://github.com/chaoz23/loudcheck
+    lang: python
+    dist: uvx
+    install_hint: uvx
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Loudness compliance verdicts for media files against formal broadcast standards (EBU R128, ATSC A/85): pass/fail with per-metric deltas, spec citations, and the exact ffmpeg remediation command. CLI and MCP over one engine; zero-install via `uvx --from ''loudcheck[mcp]'' loudcheck --mcp`. Requires ffmpeg.'
+    reviewed: false
+  - repo: korovin-aa97/talkthrough-mcp
+    name: talkthrough-mcp
+    url: https://github.com/korovin-aa97/talkthrough-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx talkthrough-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Turn narrated screen recordings (or any local video/audio) into agent-ready data: local Whisper transcript, scene keyframes, OCR, full-text search, and wall-clock anchoring that maps spoken remarks to real timestamps for log correlation. No cloud, no LLM inside. `uvx talkthrough-mcp`.'
+    reviewed: false
+  - repo: richer-richard/cochlea
+    name: cochlea
+    url: https://github.com/richer-richard/cochlea
+    lang: rust
+    dist: cargo
+    install_hint: cargo install cochlea-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Render, analyze, and verify audio (WAV or FLAC) through a fully offline, deterministic engine. Compose scores as data, render byte-identical PCM, pull loudness, pitch, tempo, key, and structure reports, generate spectrograms, and diff two renders against each other. No ffmpeg, no audio device, just numbers an agent can actually reason about. `cargo install cochlea-mcp`
+    reviewed: false
+- id: os-automation
+  label: OS Automation
+  candidates: 2
+  entries:
+  - repo: tinqiao-oss/clawtouch-mcp
+    name: clawtouch-mcp
+    url: https://github.com/tinqiao-oss/clawtouch-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install clawtouch-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Physical USB HID keyboard/mouse control via a Raspberry Pi Pico 2 running open-source firmware. Exposes move, click, drag, type, key combos, and scroll as MCP tools for any MCP client. Genuine physical HID input on the standard driver path, with a `--mock` mode for hardware-free trials. `pip install clawtouch-mcp`
+    reviewed: false
+  - repo: yunfeng-enrich/usemymac
+    name: usemymac
+    url: https://github.com/yunfeng-enrich/usemymac
+    lang: python
+    dist: uvx
+    install_hint: uvx usemymac
+    scope: local
+    systems:
+    - macos
+    trust: local
+    risk: low
+    flags:
+    - no-linux
+    description: Turn a Mac into a remote computer-use MCP server with one command. `uvx usemymac up` wraps CUA's computer-server (screenshot, mouse, keyboard, windows, apps, accessibility tree) in a per-run token, hides shell and file tools unless opted in, and opens a Cloudflare quick tunnel so Claude Code, Codex, or any MCP client on another machine can use the Mac. Rides an existing CuaDriver daemon when one is running.
+    reviewed: false
+- id: other-tools-and-integrations
+  label: Other Tools and Integrations
+  candidates: 1
+  entries:
+  - repo: MaxEllis/orcaslicer-mcp
+    name: orcaslicer-mcp
+    url: https://github.com/MaxEllis/orcaslicer-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx orcaslicer-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Drive a running OrcaSlicer (3D-printing slicer) from an AI assistant: load models, tune settings, slice, compare slice variants, and render the plate. Ships an offline settings reference and a physics sanity-check so it can explain what a setting does, not just change it. `uvx orcaslicer-mcp` (or `pip install orcaslicer-mcp`).'
+    reviewed: false
+- id: product-management
+  label: Product Management
+  candidates: 2
+  entries:
+  - repo: xfloukiex-lab/road-poneglyph
+    name: road-poneglyph
+    url: https://github.com/xfloukiex-lab/road-poneglyph
+    lang: python
+    dist: pip
+    install_hint: pip install road-poneglyph-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Reviews a plan for what's missing — unstated assumptions, omitted technical risks, and execution blind spots (a structured pre-mortem). `pip install road-poneglyph-mcp`
+    reviewed: false
+  - repo: devemberx/mcp-server-polarion
+    name: mcp-server-polarion
+    url: https://github.com/devemberx/mcp-server-polarion
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-server-polarion
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: Polarion ALM integration with 24 read/write tools for documents, work items, traceability links, and comments. Renders documents as Markdown, searches with Lucene or SQL, walks incoming/outgoing links, and creates/updates/reorganizes work items. Every write tool supports `dry_run` with pre-write field, enum, and link-target validation. Requires Polarion 2506+. `uvx mcp-server-polarion`.
+    reviewed: false
+- id: research
+  label: Research
+  candidates: 9
+  entries:
+  - repo: TheWhiteWater/tube-bridge
+    name: tube-bridge
+    url: https://github.com/TheWhiteWater/tube-bridge
+    lang: python
+    dist: uvx
+    install_hint: uvx tube-bridge
+    scope: local
+    trust: local
+    risk: low
+    description: 'Self-hosted YouTube research MCP with 17 tools for video and channel search, transcripts, comments, playlists, timestamped frames, and private local semantic corpora. Fourteen tools work without an API key. Install: `uvx tube-bridge`.'
+    reviewed: false
+  - repo: WenyuChiou/research-hub
+    name: research-hub
+    url: https://github.com/WenyuChiou/research-hub
+    lang: python
+    dist: pip
+    install_hint: pip install research-hub-pipeline
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: Research workspace MCP integrating Zotero, Obsidian, and NotebookLM. Search papers (arXiv/Semantic Scholar/PubMed/CrossRef), ingest into Zotero, sync notes to Obsidian, verify NotebookLM briefs. All three external tools optional. `pip install research-hub-pipeline` then `research-hub serve`.
+    reviewed: false
+  - repo: haoming-luo/agentfem-mcp
+    name: agentfem-mcp
+    url: https://github.com/haoming-luo/agentfem-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx agentfem-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Official AgentFEM bridge for AI agents to create, validate, run, inspect, and verify finite-element simulations through seven typed tools. Install: `uvx --from agentfem-mcp agentfem-mcp`.'
+    reviewed: false
+  - repo: laszlopere/mcp-molecules
+    name: mcp-molecules
+    url: https://github.com/laszlopere/mcp-molecules
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-molecules
+    scope: local
+    systems:
+    - linux
+    - macos
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: 'Chemistry toolbox computed from authoritative data: molecular weight / molar mass of any formula (nested groups, isotope labels, propagated NIST uncertainties, percent composition), isotope-distribution mass spectra (m/z peaks for a given charge), and name⇆formula lookup with isomer resolution. Element masses from the NIST Atomic Weights and Isotopic Compositions database; offline and deterministic, with an optional on-by-default online fallback (PubChem/Wikidata/EPA CompTox) that can be disabled. `uvx mcp-molecules`.'
+    reviewed: false
+  - repo: musharna/data-aggregator-mcp
+    name: data-aggregator-mcp
+    url: https://github.com/musharna/data-aggregator-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx data-aggregator-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Search and fetch research datasets across Zenodo, DataCite (Dryad/Figshare/Dataverse/OSF), NCBI omics (GEO/SRA/BioProject), and literature (PubMed/OpenAIRE) behind one normalized model — DOI deduplication, NCBI-Taxonomy synonym expansion, paper→data linking, and checksum-verified download. `uvx data-aggregator-mcp`.
+    reviewed: false
+  - repo: smaniches/semantic-scholar-mcp
+    name: semantic-scholar-mcp
+    url: https://github.com/smaniches/semantic-scholar-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx s2-mcp-server
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: 'Semantic Scholar MCP server: 14 typed tools over 200M+ academic papers — search, paper/author retrieval, citation-graph traversal, and recommendations. `uvx s2-mcp-server`'
+    reviewed: false
+  - repo: SPARKIT-science/sparkit-mcp
+    name: sparkit-mcp
+    url: https://github.com/SPARKIT-science/sparkit-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install sparkit-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: MCP server for [SPARKIT](https://sparkit.science), a scientific research agent that searches the literature, reads papers, and returns cited Markdown reports. Submit a question via the `research` tool from Claude Desktop / Cursor / Claude Code; get back a ~90-second cited report without leaving the chat. `uv tool install sparkit-mcp` or `pip install sparkit-mcp`.
+    reviewed: false
+  - repo: rnwkr7rscy-lang/fittin-mcp
+    name: fittin-mcp
+    url: https://github.com/rnwkr7rscy-lang/fittin-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install fittin-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: Patent prior art search and startup IP intelligence for AI founders. Clone risk score, defensibility map, patentable features, competitor patent landscape — free analysis in ~2 minutes. Full IP Portfolio Package (6 documents) available for $99. `pip install fittin-mcp`
+    reviewed: false
+  - repo: xmpuspus/ph-civic-data-mcp
+    name: ph-civic-data-mcp
+    url: https://github.com/xmpuspus/ph-civic-data-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx ph-civic-data-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: 'Philippine government data as agent-callable tools: PHIVOLCS earthquakes + volcano alerts, PAGASA weather + typhoons, PhilGEPS procurement, PSA 2020 Census population + poverty, AQICN air quality. Install: `uvx ph-civic-data-mcp`.'
+    reviewed: false
+- id: search
+  label: Search & Data Extraction
+  candidates: 10
+  entries:
+  - repo: NameetP/pdfmux
+    name: pdfmux
+    url: https://github.com/NameetP/pdfmux
+    lang: python
+    dist: pip
+    install_hint: pip install pdfmux
+    scope: local
+    trust: local
+    risk: low
+    description: 'PDF extraction router with built-in MCP server. Classifies each page (digital, scanned, tables) and routes to the best backend (PyMuPDF, Docling, OCR, or optional LLM fallback). Per-page confidence scoring flags low-quality pages and auto-reextracts them — prevents silent RAG failures. Zero config: `pip install pdfmux`. MIT licensed.'
+    reviewed: false
+  - repo: telly6/searchpin
+    name: searchpin
+    url: https://github.com/telly6/searchpin
+    lang: python
+    dist: pip
+    install_hint: pip install searchpin
+    scope: local
+    trust: local
+    risk: low
+    description: Free web search for AI agents with smart re-ranking. Multi-engine parallel search, zero API keys. Works natively within China's network, no proxy/VPN needed. Install via `pip install searchpin && searchpin-setup`.
+    reviewed: false
+  - repo: trendsmcp-ai/Trends-MCP
+    name: trends-mcp
+    url: https://github.com/trendsmcp-ai/Trends-MCP
+    lang: python
+    dist: uvx
+    install_hint: uvx trends-mcp-server
+    scope: local
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: Live trend data from Google, TikTok, YouTube, Amazon, Reddit, npm, Steam, and 20+ other sources. Local stdio via `uvx trends-mcp-server` or hosted at `https://api.trendsmcp.ai/mcp`.
+    reviewed: false
+  - repo: yubinkim444/ai-first-scraper-mcp
+    name: ai-first-scraper-mcp
+    url: https://github.com/yubinkim444/ai-first-scraper-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx ai-first-scraper-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: 'Three MCP tools for ad-free Markdown web scraping and search. `fetch_page` (URL → clean Markdown), `fetch_pages_batch` (up to 25 URLs in parallel), `search_web` (web search → top-k pages as Markdown). Works with Claude Desktop / Cursor / Cline. Install: `uvx ai-first-scraper-mcp`.'
+    reviewed: false
+  - repo: HughesCuit/heventure-search-mcp
+    name: heventure-search-mcp
+    url: https://github.com/HughesCuit/heventure-search-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx heventure-search-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: 'Free MCP web search server with 5 engines (DuckDuckGo, Bing, Google SerpAPI, Tavily). No API key required. Auto rate limiting, 300s cache, multi-language support. Install: `uvx heventure-search-mcp`.'
+    reviewed: false
+  - repo: JerryLiu369/agent-web-search
+    name: agent-web-search
+    url: https://github.com/JerryLiu369/agent-web-search
+    lang: python
+    dist: pip
+    install_hint: pip install agent-web-search-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: 'Agent-native web search for AI agents: one provider-neutral `web_search` tool aggregating model-native grounding (ARK, Gemini, Grok, DeepSeek, Zhipu) and agent search APIs (Exa, Parallel, Brave, Perplexity, Tavily, You.com). Keyless free defaults, stdio + stateless Streamable-HTTP MCP, CLI, Python API, and Hermes plugin. Install via `pipx install agent-web-search-mcp`.'
+    reviewed: false
+  - repo: deficlow/HyperStore-MCP
+    name: hyperstore-mcp
+    url: https://github.com/deficlow/HyperStore-MCP
+    lang: python
+    dist: uvx
+    install_hint: uvx hyperstore-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: Search 6,500+ curated AI applications from the HyperStore directory. 8 tools (keyword + semantic search, full details, browsing), 3 resources, 3 prompts. Install via `uvx hyperstore-mcp` or use the hosted endpoint at `https://mcp.store.hypergpt.ai/mcp`.
+    reviewed: false
+  - repo: omniologynow-rgb/scout-intel-mcp
+    name: scout-intel-mcp
+    url: https://github.com/omniologynow-rgb/scout-intel-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install scout-intel-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: Web intelligence MCP server for AI agents. 7 tools for SERP analysis, competitor research, market trends, content gap analysis, keyword insights, audience discovery, and citation tracking. Install via `pip install scout-intel-mcp`.
+    reviewed: false
+  - repo: robbyczgw-cla/web-search-plus-mcp
+    name: web-search-plus-mcp
+    url: https://github.com/robbyczgw-cla/web-search-plus-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx web-search-plus-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: Multi-provider web search with intelligent auto-routing (Serper, Tavily, Exa). Available via `uvx web-search-plus-mcp`.
+    reviewed: false
+  - repo: rozetyp/grounder-mcp
+    name: grounder-mcp
+    url: https://github.com/rozetyp/grounder-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx grounder-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Live web grounding for local and cloud LLMs: `web_search`, `fetch`, `deep_search` (a token-capped, cited evidence pack sized to a small context window), and `research` (an agentic search-and-read loop). Flat monthly pricing, no query content stored, free tier. Install via `uvx grounder-mcp`.'
+    reviewed: false
+- id: security
+  label: Security
+  candidates: 14
+  entries:
+  - repo: Buggy1111/anonymize-mcp
+    name: anonymize-mcp
+    url: https://github.com/Buggy1111/anonymize-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install anonymize-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Anonymize PII and redact text for GDPR across Czech and 35+ languages. Real NLP via ÚFAL/LINDAT (MasKIT + NameTag NER, not just regex), 80+ PII patterns, plus morphology, translation, and spellcheck. Czech-first, non-commercial. Install: `pip install anonymize-mcp`.'
+    reviewed: false
+  - repo: CTRLRun/ctrlrun
+    name: ctrlrun
+    url: https://github.com/CTRLRun/ctrlrun
+    lang: python
+    dist: pip
+    install_hint: pip install ctrlrun
+    scope: local
+    trust: local
+    risk: low
+    description: 'Execution safety for AI agent actions. `ctrlrun mcp-operator` exposes the approval queue as tools (`list_pending_approvals`, `approve`, `deny`, `resolve`, plus `receipts`, `effects`, `stats` and `inspect_action`), so the human who has to answer a held action answers it from the assistant they are already in; read tools answer without a credential and write tools refuse without one that names a person. Separately, the gateway proxies any MCP server so every tool call is checked against a YAML policy before it runs: allow, hold for a human, or deny. Approvals are single-use and bound to the hash of the exact action, one logical effect runs at most once across processes and hosts, and an unknown outcome is recorded AMBIGUOUS rather than FAILED so a blind retry is refused. Every attempt leaves a hash-chained JSON receipt. Apache-2.0. `pip install ctrlrun`'
+    reviewed: false
+  - repo: UnboundCompute/lachesis
+    name: lachesis
+    url: https://github.com/UnboundCompute/lachesis
+    lang: python
+    dist: uvx
+    install_hint: uvx lachesis-mcp
+    scope: local
+    systems:
+    - macos
+    - linux
+    trust: local
+    risk: low
+    description: 'Compiler-precise code property graph for C, Python, and TypeScript, navigable over MCP. Exposes callers/callees, data- and taint-flow with source→sink witnesses, points-to, and guard/sink structure so an agent can reason about how a value moves and where it reaches a sink unguarded — not just where a name appears. Zero-config: `uvx --from lachesis-cpg lachesis-mcp`.'
+    reviewed: false
+  - repo: aggrete/aggrete
+    name: aggrete
+    url: https://github.com/aggrete/aggrete
+    lang: python
+    dist: pip
+    install_hint: pip install aggrete
+    scope: local
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: 'Policy proxy that governs what AI assistants can reach and do: refuses forbidden tool calls before the upstream is contacted, with per-user memory and a tamper-evident audit. Stops prompt-injection exfiltration and forbidden data combinations across Slack, Drive, GitHub and more. `pip install aggrete`.'
+    reviewed: false
+  - repo: aurumflux20/seal
+    name: seal
+    url: https://github.com/aurumflux20/seal
+    lang: python
+    dist: pip
+    install_hint: pip install seal-kernel
+    scope: local
+    trust: local
+    risk: low
+    description: 'Exactly-once execution for agents that move money: the same payment can''t settle twice across processes or retries. World-confirmation asks the provider ("did this charge actually land?") and returns CONFIRMED_ONE / MULTIPLE / ABSENT / UNKNOWN; out-of-band reconcile catches spend that bypassed the gateway; earned-autonomy licensing (L0–L5) only raises an agent''s unattended spend ceiling on proven-clean history. In the official MCP Registry as `io.github.aurumflux20/seal`. `pip install seal-kernel`'
+    reviewed: false
+  - repo: dengyier/OpenWorkProof
+    name: openworkproof
+    url: https://github.com/dengyier/OpenWorkProof
+    lang: python
+    dist: pip
+    install_hint: pip install openworkproof
+    scope: local
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: Verifiable execution protocol for AI agent tool calls. Ed25519-signed PolicyDecisions, causal evidence chains (RFC 8785 JCS), and offline verification from SQLite ledger. 2,281 tests, 2 real-world bugs demonstrated end-to-end. `pip install openworkproof`
+    reviewed: false
+  - repo: felixpg13-glitch/spendshield
+    name: spendshield
+    url: https://github.com/felixpg13-glitch/spendshield
+    lang: python
+    dist: pip
+    install_hint: pip install spendshield
+    scope: local
+    trust: local
+    risk: low
+    description: 'Payment guardrails for AI agents: spend-capped digital identity (KYA), dry-run / budget / amount-limit / approval gates, prompt-injection defense (new recipients & large amounts require human sign-off), AES-encrypted secret vault with audited access, full audit trail. Python library + stdio MCP server. `pip install spendshield`'
+    reviewed: false
+  - repo: infai-tech/vulnfeed-mcp
+    name: vulnfeed-mcp
+    url: https://github.com/infai-tech/vulnfeed-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install vulnfeed-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Dependency vulnerability scanner with EPSS exploit probability scoring. Scans lockfiles (npm, pip, Go, Cargo, Ruby, Composer, Gradle, NuGet, Mix), prioritizes by real-world exploit likelihood, recommends fix versions. 9 MCP tools for scanning, monitoring, and alerting. Free tier + x402 micropayments. `pip install vulnfeed-mcp`
+    reviewed: false
+  - repo: jaimenbell/rails-mcp
+    name: rails-mcp
+    url: https://github.com/jaimenbell/rails-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install rails-mcp
+    scope: local
+    trust: local
+    risk: low
+    description: 'Self-hosted default-deny action registry, append-only spend-intent ledger and human sign-off audit trail, exposed as MCP tools. Provides the schema and audit trail for gating irreversible agent actions rather than intercepting them: you wire it into your own hook or CI gate, and it ships with no preloaded action data. `pip install rails-mcp`'
+    reviewed: false
+  - repo: jonnybottles/patch-tuesday-mcp
+    name: patch-tuesday-mcp
+    url: https://github.com/jonnybottles/patch-tuesday-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx patch-tuesday-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    flags:
+    - scope-mixed
+    description: Microsoft Patch Tuesday triage from the official MSRC Security Update Guide. Monthly rollups, CVE/KB lookups, supersedence chains, product watchlists, and urgency-ranked results enriched with EPSS scores and the CISA KEV catalog. No API keys; also available as a free hosted remote endpoint. `uvx patch-tuesday-mcp`
+    reviewed: false
+  - repo: nagameTW/mcp-server-malcolm
+    name: mcp-server-malcolm
+    url: https://github.com/nagameTW/mcp-server-malcolm
+    lang: python
+    dist: pip
+    install_hint: pip install mcp-server-malcolm
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'The first MCP server for [Malcolm](https://malcolm.fyi), the open-source network traffic analysis suite (Zeek + Suricata + Arkime + OpenSearch + NetBox). Gives AI agents structured, threat-hunting access: search and aggregate traffic, discover fields, query Suricata alerts, browse Arkime sessions, and resolve NetBox assets. Read-only by default; opt-in, audited write classes for alerts, tagging, hunts, and PCAP upload. `pip install mcp-server-malcolm`'
+    reviewed: false
+  - repo: nickgeorgeseo/mcp-gatehouse
+    name: mcp-gatehouse
+    url: https://github.com/nickgeorgeseo/mcp-gatehouse
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-gatehouse
+    scope: local
+    trust: local
+    risk: low
+    description: Permission tiers, approval gates, and secret-redacting audit logging enforced inside the server at the tool boundary; includes a demo order-desk server. `uvx mcp-gatehouse`
+    reviewed: false
+  - repo: srinivasan-sundaresan95/orihime
+    name: orihime
+    url: https://github.com/srinivasan-sundaresan95/orihime
+    lang: python
+    dist: pip
+    install_hint: pip install orihime
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Cross-repository code knowledge graph MCP server for Java, Kotlin, JavaScript, and TypeScript. Indexes source into embedded KuzuDB via tree-sitter; 30+ tools for call-flow tracing, multi-hop taint analysis (OWASP/CWE/PCI/STIG reports), entry-point reachability filtering, performance hotspot detection, and license compliance — without reading source files. 95% fewer tokens vs source-reading baseline. `pip install orihime`
+    reviewed: false
+  - repo: meloliva14/verity-mcp
+    name: verity-mcp
+    url: https://github.com/meloliva14/verity-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install verity-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: 'Fail-closed "verify before you act" trust gate for AI agents: fact-check (catch hallucinations), prompt-injection detection, content moderation, PII/secret detection, and a pre-action guardrail (allow/review/block). Independent, keyless, pay-per-call via x402. `pip install verity-mcp`'
+    reviewed: false
+- id: social-media
+  label: Social Media
+  candidates: 3
+  entries:
+  - repo: 06ketan/substack-ops
+    name: substack-ops
+    url: https://github.com/06ketan/substack-ops
+    lang: python
+    dist: uvx
+    install_hint: uvx substack-ops
+    scope: local
+    trust: local
+    risk: low
+    description: 'Substack with **zero AI API keys**. 26 tools (posts, notes, comments, replies, reactions, restacks). Host LLM drafts via `propose_reply` → `confirm_reply` tokens. SQLite dedup, JSONL audit, dry-run default. Install: `uvx substack-ops mcp install cursor`.'
+    reviewed: false
+  - repo: ihuzaifashoukat/x-use
+    name: x-use
+    url: https://github.com/ihuzaifashoukat/x-use
+    lang: python
+    dist: pip
+    install_hint: pip install x-use-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Multi-account X (Twitter) automation with no X API key: it drives a real Chrome session using your own cookies. 33 tools for posting, replies, keyword search, engagement, single-tweet reads that return images as MCP content, per-account personas, proxy pools, and a persistent scheduled-action queue. Draft-approval mode is on by default, so write tools return a draft and nothing goes live until you call `approve_draft`. Listed on the official MCP Registry. Install: `pip install x-use-mcp`, then `x-use init` and `x-use mcp`.'
+    reviewed: false
+  - repo: ilyautov/vk-mcp-ru
+    name: vk-mcp-ru
+    url: https://github.com/ilyautov/vk-mcp-ru
+    lang: python
+    dist: uvx
+    install_hint: uvx vk-mcp-ru
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'VK API for AI assistants: wall posts, communities, messages, market items, ads and stats through 373 schema-driven methods with a read/write/destructive safety gate. The agent searches methods in plain language instead of getting 373 tools. PyPI (`uvx vk-mcp-ru`).'
+    reviewed: false
+- id: spirituality-and-esoterica
+  label: Spirituality & Esoterica
+  candidates: 2
+  entries:
+  - repo: arthiqlabs/vedaksha
+    name: vedaksha
+    url: https://github.com/arthiqlabs/vedaksha
+    lang: rust
+    dist: cargo
+    install_hint: cargo install vedaksha-mcp
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Self-hosted clean-room Vedic astrology computation server with 17 deterministic MCP tools for natal charts, dashas, vargas, shadbala, ashtakavarga, panchanga, transits, muhurta search, synastry and property-graph export. Install: `cargo install vedaksha-mcp`.'
+    reviewed: false
+  - repo: socraticsurge/telugu-calendar-utilities
+    name: telugu-calendar-utilities
+    url: https://github.com/socraticsurge/telugu-calendar-utilities
+    lang: python
+    dist: uvx
+    install_hint: uvx mcp-server-panchangam
+    scope: local
+    trust: local
+    risk: low
+    description: 'Telugu Panchangam (Hindu almanac): tithi, nakshatra, muhurta windows, 30+ festivals, tarabalam & chandrabalam good-day finder, gochara transits and a deterministic daily rasi phalalu — Swiss Ephemeris precision, every rule pinned against reference almanacs, by [AstroChaganti](https://panchangam.astrochaganti.com). `uvx mcp-server-panchangam`.'
+    reviewed: false
+- id: sports
+  label: Sports
+  candidates: 1
+  entries:
+  - repo: NasserAlbusaidi/macrofactor-mcp
+    name: macrofactor-mcp
+    url: https://github.com/NasserAlbusaidi/macrofactor-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx macrofactor-mcp
+    scope: local
+    systems:
+    - macos
+    - linux
+    trust: local
+    risk: low
+    description: 'Fueling & recovery decision engine combining MacroFactor nutrition data with Garmin training data. Recovery checks, daily briefings, weekly reports, and nutrition-performance correlations over your own local data. Install: `uvx macrofactor-mcp`.'
+    reviewed: false
+- id: text-to-speech
+  label: Text-to-Speech
+  candidates: 1
+  entries:
+  - repo: supertone-inc/supertone-mcp
+    name: supertone-mcp
+    url: https://github.com/supertone-inc/supertone-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx supertone-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: 'High-quality Supertone TTS API: generate speech, search & preview the voice catalog, predict duration/cost, and clone voices. Korean, English, Japanese, and 20+ more languages. Install via `uvx supertone-mcp`.'
+    reviewed: false
+- id: travel-and-transportation
+  label: Travel & Transportation
+  candidates: 1
+  entries:
+  - repo: VirajMishra1/wander-agent
+    name: wander-agent
+    url: https://github.com/VirajMishra1/wander-agent
+    lang: python
+    dist: pip
+    install_hint: pip install wander-agent
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Personal travel agent with 66 tools — flights, hotels, visa checks, itinerary planning, travel advisories, currency conversion, passport power index, and credit card points/miles optimization. Offline-capable profile stores home airports, passports, and card portfolio. Install: `pip install wander-agent`.'
+    reviewed: false
+- id: version-control
+  label: Version Control
+  candidates: 1
+  entries:
+  - repo: jaimenbell/github-mcp
+    name: github-mcp
+    url: https://github.com/jaimenbell/github-mcp
+    lang: python
+    dist: pip
+    install_hint: pip install jaimenbell-github-mcp
+    scope: cloud
+    trust: cloud
+    risk: medium
+    description: Read and write MCP server over the GitHub REST API. Env-gated tool groups with writes off by default, fine-grained PAT auth that degrades gracefully to the unauthenticated tier, and typed rate-limit and error handling. An independent reference implementation, not GitHub's official server. `pip install jaimenbell-github-mcp`
+    reviewed: false
+- id: workplace-and-productivity
+  label: Workplace & Productivity
+  candidates: 6
+  entries:
+  - repo: ilyautov/hh-mcp-ru
+    name: hh-mcp-ru
+    url: https://github.com/ilyautov/hh-mcp-ru
+    lang: python
+    dist: uvx
+    install_hint: uvx hh-mcp-ru
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'hh.ru (HeadHunter) API for AI assistants: vacancy search and publishing, applications and invitations, resumes, dictionaries and salary statistics through 133 schema-driven methods built from the official OpenAPI spec, with a read/write/destructive safety gate. PyPI (`uvx hh-mcp-ru`).'
+    reviewed: false
+  - repo: mnoomnoo/resume-mcp-server
+    name: resume-mcp-server
+    url: https://github.com/mnoomnoo/resume-mcp-server
+    lang: python
+    dist: pip
+    install_hint: pip install resume-mcp-server
+    scope: local
+    systems:
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: MCP server for searching and retrieving structured information from local resume and job application documents (.docx, .pdf, .md, .txt) with auto hot-reload. 21 tools for full-text search and filtering by skill, company, and education, plus structured extraction of work experience, achievements, badge skills, and side projects. `pip install resume-mcp-server`
+    reviewed: false
+  - repo: nometalalchemist/KitchenSink4Word
+    name: kitchensink4word
+    url: https://github.com/nometalalchemist/KitchenSink4Word
+    lang: python
+    dist: pip
+    install_hint: pip install kitchensink4word
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: 'Everything plus the kitchen sink for Microsoft Word: 170 tools for .docx editing including live editing of open documents, merge-aware tables, citations/footnotes/TOC, tracked-changes writing, mail merge, redaction, accessibility audits, LaTeX equations, Zotero integration, and publication style conversion. Windows for live/COM features; the file-based majority is cross-platform. `pip install kitchensink4word`'
+    reviewed: false
+  - repo: tuanle96/mcp-odoo
+    name: mcp-odoo
+    url: https://github.com/tuanle96/mcp-odoo
+    lang: python
+    dist: docker
+    install_hint: docker Compose smoke
+    scope: local
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: local
+    risk: low
+    description: Production-grade MCP server for Odoo ERP (16-19) with zero Odoo-side install. 24 tools across read, write (approval-token gated), diagnose, migrate, and audit. JSON-2 transport for Odoo 19+, real Docker Compose smoke tests against Odoo 16/17/18/19, diagnostics (`diagnose_odoo_call`, `upgrade_risk_report`, `fit_gap_report`, `scan_addons_source`), and 5 reusable agent prompts.
+    reviewed: false
+  - repo: dlbolshov/yandex-wiki-search-mcp
+    name: yandex-wiki-search-mcp
+    url: https://github.com/dlbolshov/yandex-wiki-search-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx yandex-wiki-search-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    description: Yandex Wiki with full-text search — 26 typed tools for pages, comments, attachments, and dynamic tables (grids), plus a server-side read-only mode. `uvx yandex-wiki-search-mcp` or Docker.
+    reviewed: false
+  - repo: mrmaciej1/justfill-mcp
+    name: justfill-mcp
+    url: https://github.com/mrmaciej1/justfill-mcp
+    lang: python
+    dist: uvx
+    install_hint: uvx justfill-mcp
+    scope: cloud
+    systems:
+    - macos
+    - windows
+    - linux
+    trust: cloud
+    risk: medium
+    flags:
+    - scope-mixed
+    description: Fill existing AcroForm, flat, and scanned PDF forms from AI agents. Detect and visually review fields, save deterministic templates, map JSON values, and preview filled output before export. Use the hosted OAuth endpoint or run locally with `uvx justfill-mcp`; MIT licensed.
+    reviewed: false

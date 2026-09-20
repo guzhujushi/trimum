@@ -59,8 +59,22 @@ Agent Registry 等能力，并通过 `~/.trimum/tools/<name>/` 的文件化工�
 - **审计**：每次调用记 `mcp_call` 事件（server / tool / 耗时 / 结果 / 参数**键名**，不含参数值），经
   `task.audit.mcp_call` 广播；`ToolGateway` 构造时把审计下沉回填给 MCP 分发器。
 - **CLI 契约修正**：`trm --json` 的 stdout 现在只含载荷 —— CLI 把诊断日志路由到 stderr。
-- 未做：M3 策展导入器（awesome-mcp-servers → `config/mcp-catalog.yaml`）、M4 HTTP/SSE + 空闲回收 + cgroup 绑定、
-  以及把远端工具聚合进 `ToolRegistry` 的动态工具机制（详见 `docs/MCP-INTEGRATION-PLAN.md`）。
+- 未做：M4 HTTP/SSE + 空闲回收 + cgroup 绑定、以及把远端工具聚合进 `ToolRegistry` 的动态工具机制
+  （详见 `docs/MCP-INTEGRATION-PLAN.md`）。M3 策展导入器见下一节。
+
+### 已交付（2026-09-20，M3 MCP 策展导入器）
+
+- **导入器**（`src/trimum_core/mcp_catalog.py`）：读本地 README 快照（**不联网**）→ 解析条目 →
+  按语言 / 范围 / 系统 / 官方 / 分发分类 → 红线筛选 → 渲染候选清单。
+- **产物**（`config/mcp-catalog.yaml`，tracked）：2026-09-20 快照 4,118 条 → **232 条候选**，按 39 个分类分组，
+  条目一律 `reviewed: false`；差额逐项可查（ts 2,219 / 描述无安装方式 1,356 / npx+npm 16 / brew 7 /
+  非 server 小节 27），**不静默丢弃**。
+- **红线**：语言只收 `python` / `go` / `rust`，分发只收 `uvx` / `uv` / `pip` / `go install` / `cargo install` /
+  `docker`；`npx` 等 Node 派系默认不收（可用 `--include-npx` 等显式放宽）。
+- **CLI**：`trm mcp catalog import [--dry-run|--force|--limit|--category …]`、`trm mcp catalog list [--unreviewed|…]`；
+  清单已存在时默认拒写，`--force` 重导入按 `repo` 保留人工的 `reviewed` / `name` / `note`。
+- **候选 ≠ 生效**：导入器不写 `~/.trimum/mcp/`、不启动任何 server；启用仍走人工三步（审核 → 改 `reviewed` →
+  写成 `<name>.json5` 并 `enabled: true`）。
 
 ### 规划中（下一阶段）
 
@@ -100,5 +114,5 @@ Agent Registry 等能力，并通过 `~/.trimum/tools/<name>/` 的文件化工�
 - 生态四层**只在 trimum 自有模块内新增代码**（`src/trimum_core/`），不改既有对外接口语义、不引入 Node 生态依赖。
 - 不安装 / 不内嵌 CLI-Anything（需 Node，且经调研已否决）；第三方 harness 只作为**可选导入源**。
 - **不自建包仓库**：`trm env install` 只调机器上的系统包管理器（pacman / apt / dnf / zypper / apk / brew / winget / scoop）。
-- MCP 接入（E2）只出方案（`docs/MCP-INTEGRATION-PLAN.md`），不写实现。
+- MCP 接入按阶段推进：M0/M1/M2（stdio 协议 + 注册 + 审计）与 M3（策展导入器）已交付，M4（HTTP/SSE + 生命周期）待做。
 - 官方分发渠道（E5：官网 + 官方根证书 + `.trmpkg` 校验器）只出设计，不写实现。

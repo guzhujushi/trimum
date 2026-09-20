@@ -231,7 +231,7 @@
 ## MCP 接入（E2，2026-09-20 已实现：M0/M1/M2）
 
 > 生态四层的 **L1**（`docs/ECOSYSTEM-STRATEGY.md` §3）。方案与阶段划分见 `docs/MCP-INTEGRATION-PLAN.md`；
-> M3（策展导入器）、M4（HTTP/SSE + 空闲回收 + cgroup）未做。
+> M4（HTTP/SSE + 空闲回收 + cgroup）未做；M3 策展导入器见下节。
 
 ### 模块
 
@@ -265,6 +265,33 @@
 - 测试：`tests/fixtures/mcp_echo_server.py` 是**真协议** stdio server（不是 mock），
   `tests/test_mcp_client.py`（16）+ `tests/test_mcp_registry.py`（27）+ `tests/test_mcp_dispatcher.py`（30）。
 
+## MCP 策展导入器（M3，2026-09-20 已实现）
+
+> 生态四层 **L1 的入口**（姿势 B，`docs/MCP-INTEGRATION-PLAN.md` §5/§5.1）：把上游 4,000+ 条
+> `awesome-mcp-servers` 压成一份**候选清单**，让人只审「能用的那一小撮」。
+
+### 模块
+
+| 模块 | 职责 |
+|---|---|
+| `src/trimum_core/mcp_catalog.py` | 解析 README 快照 → 条目分类（语言 / 范围 / 系统 / 官方 / 分发）→ 红线筛选 → 渲染候选清单；只读输入、离线、确定性输出 |
+| `config/mcp-catalog.yaml` | 产物（tracked）：232 条候选，按分类分组，条目一律 `reviewed: false` |
+| `cli/commands/mcp.py` | `trm mcp catalog import [--dry-run\|--force\|--limit\|--category …]`、`trm mcp catalog list [--unreviewed\|--category\|--dist\|--lang]` |
+
+### 关键设计
+
+- **候选 ≠ 生效**：导入器**不写** `~/.trimum/mcp/`、不启动任何 server、不联网；产物里每条都是 `reviewed: false`，
+  启用仍走 §4.2 的文件化注册（deny-by-default 不破）。
+- **红线可解释**：拒绝原因按 `section:*` / `language:*` / `dist:*` 计数写进产物摘要 —— 4,118 条 → 232 条候选的
+  差额逐项可查（ts 2,219 / 描述无安装方式 1,356 / npx+npm 16 / brew 7 / 非 server 小节 27 …），不静默丢弃。
+- **确定性**：无时间戳、稳定排序（官方 → 本地 → 分类 → repo），同输入同字节；`--force` 重导入按 `repo`
+  保留人工写下的 `reviewed` / `name` / `note`，审核成果不会被下一次刷新冲掉。
+- **名称直接可用**：`name` 满足 `^[a-z0-9][a-z0-9_-]{0,63}$`（与 `mcp_registry.NAME_PATTERN` 同规则），
+  重名自动退避（`mcp-server` → `other-mcp-server` → `…-2`），条目可原样落成 `<name>.json5`。
+- **写入策略**：默认拒绝覆盖已存在的清单，`--force` 才写（写前先读旧文件做 carry-over）；落盘强制 LF
+  （tracked 文件，Windows 检出不得变 CRLF）。
+- 测试：`tests/test_mcp_catalog.py`（52）—— 离线 fixture（`tests/fixtures/awesome-mcp-sample.md`）
+  + 真实快照（`tmp/research/awesome-README.md`，缺失时自动 skip）。
 ## 环境层与工具链安装（E3，2026-09-20 已实现）
 
 > 生态四层的 **L0**（`docs/ECOSYSTEM-STRATEGY.md` §3）。定位：**软件生态交给发行版** ——
