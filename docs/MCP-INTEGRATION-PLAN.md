@@ -39,7 +39,7 @@
 | ① 协议客户端（stdio） | ✅ | `mcp_client.py`：子进程 + JSON-RPC 2.0 换行分帧，`connect/initialize/list_tools/call_tool/ping/close` |
 | ① 协议客户端（HTTP/SSE） | ✅ | `MCPHttpTransport`：POST + JSON/SSE 回包、`Mcp-Session-Id` 复用、404 会话过期、202 无回包、超时/断连分类；`parse_sse_messages()` 独立可测 |
 | ② 生命周期 | ✅ | `MCPServerPool`：懒启动、按名复用、坏连接丢弃重建、`close/close_all`；**M4 补齐**空闲回收（`idle_ttl` + 30s 后台回收器）与 `apply_cgroup(pid)` 绑定（读回确认，降级只记录不失败） |
-| ③ 工具聚合进 `ToolRegistry` | ⏳ M3 | `ToolRegistry` 目前是静态 `ToolDefinition`（`ToolType` 是枚举），动态工具需要新机制；M2 先由 `mcp.tools.list` 提供运行时枚举 |
+| ③ 工具聚合进 `ToolRegistry` | ✅ M4.5 | `mcp_bridge.py`：远端工具以 `<server>__<tool>` 注册进 `ToolRegistry`（`ToolType.MCP_TOOLS_CALL`）；清单来自 `~/.trimum/mcp-tools.json` 缓存，**读它不启动任何进程**，M4 的懒启动 / 空闲回收不受影响；`trm tool list [--mcp]` 标注来源 |
 | ④ 授权接入 | ✅ 复用 | 调用与内置工具走同一层 ToolGateway 分层；MCP 已在 cwd jail 跳过表内（不碰工作目录） |
 | ⑤ 审计 | ✅ | 每次调用记 `mcp_call` 事件（server / tool / 耗时 / 结果 / 参数**键名**），`task.audit.mcp_call` 广播 |
 | ⑥ 策展白名单 | ✅ M3 | `config/mcp-catalog.yaml` + `trm mcp catalog import/list`（见 §5.1） |
@@ -219,6 +219,7 @@ trm mcp catalog list --unreviewed
 | **M2** ✅ | `mcp_registry.py` + `MCPDispatcher` 实装 + ToolGateway 审计回填 + `mcp_call` 事件（2026-09-20 完成） | `tests/test_mcp_registry.py`（27）/ `test_mcp_dispatcher.py`（30）；`trm mcp list/tools/call/paths` 可用 |
 | **M3** ✅ | 策展导入器（姿势 B）+ `config/mcp-catalog.yaml` + 审核流程文档（2026-09-20 完成，用法见 §5.1） | `tests/test_mcp_catalog.py`（52 项：离线 fixture + 真实快照）→ 232 条候选，红线逐条可解释 |
 | **M4** ✅ | HTTP/SSE 传输 + 空闲回收 + cgroup 绑定 + 常驻池接线 + `trm mcp status/restart` + 运维文档（2026-09-20 完成，见 §6.1） | 新增 **71** 项测试（`test_mcp_http_transport.py` 29 / `test_mcp_lifecycle.py` 18 / `test_mcp_daemon.py` 24）；真机 Ubuntu 隔离 daemon 验收 **16 PASS / 0 FAIL**；全量 825 passed / 8 failed（本地，8 项为既有 Windows 沙箱基线）/ 827 passed / 11 failed（真机，11 项为既有宿主状态基线） |
+| **M4.5** ✅ | 远端工具聚合进 `ToolRegistry`：`mcp_bridge.py` + `ToolRegistry.load_mcp_tools()` + 聚合名调用 + `trm tool list --mcp`（2026-09-20 完成，见 §6.2） | `tests/test_mcp_bridge.py`（87 项）；本地全量 915 passed / 5 failed / 7 skipped（5 项为既有基线）；真机 Ubuntu 914 passed / 11 failed / 2 skipped（同机对照 M4 终态基线 827/11/2，失败名单逐条相同） |
 
 ### 6.1 M4 落地（2026-09-20）
 
@@ -242,6 +243,25 @@ trm mcp catalog list --unreviewed
    `MCPRegistry._ensure_fresh()` 按目录指纹（名字 / mtime / 大小）重读（`TestDropInDefinitions` 覆盖）。
 3. 定义被删掉 / 写坏后，已在跑的 client 要等 `DEFAULT_IDLE_TTL`（300s）才被收回，而此刻 dispatcher 已经查不到它，
    进程纯属残留：`reap()` 改为对「定义已消失」直接回收（`test_a_deleted_definition_closes_the_running_client`）。
+
+### 6.2 M4.5 落地（2026-09-20）
+
+| 子项 | 落点 |
+|---|---|
+| 命名与失效 | `mcp_bridge.py`：`flat_name` / `split_name`（按**第一个** `__` 切）、`fingerprint`（只取 `env` / `headers` 的**键名**，密钥不入盘）、`MCPToolIndex`（原子写、坏文件当空缓存、`record` / `forget` / `prune`） |
+| 注册 | `ToolRegistry.load_mcp_tools()` 把条目注册成 `ToolType.MCP_TOOLS_CALL` 定义；`mcp_binding()` / `list_mcp_tools()` 给出处；同名时**本地工具优先** |
+| 调用 | `MCPDispatcher._split_call()`：`mcp.tools.call <server>__<tool> [json]` 与经典两参数等价；「server 名里恰好含 `__`」时由注册表裁决 |
+| daemon | `api_server.build_mcp_tool_index()` / `prune_mcp_index()` / `wire_mcp_index()` + `AppState.mcp_index`；`start_mcp()` 里**一个**实例同时交给 dispatcher（写）与注册表（读） |
+| CLI | `trm tool list [--mcp]` 标注 `source: local\|mcp` 与 `mcp.{server,tool,transport,trust}`；`trm tool info <name>` 同理 |
+| 测试隔离 | `tests/conftest.py` 把 `TRIMUM_HOME` 指到临时目录，整套测试不再写真实 `~/.trimum`（顺带修掉 3 个长期因沙箱拒绝写宿主 home 而失败的用例） |
+
+关键取舍：**聚合的是缓存，不是实时拉取**。M4 之后 server 是懒启动 + 空闲回收的，「列出远端工具」
+若要求先把每个 server 拉起来，懒启动就白做了。所以清单只在上一次成功 `tools/list` 时写下，读它
+不启动任何进程；`reap()` 回收进程时**不动**缓存 —— 清单是信息不是许可证，调用仍走 `mcp.tools.call`
+的完整分层与审计。
+
+测试：`tests/test_mcp_bridge.py`（87 项）—— 命名 / 指纹 / 缓存读写与损坏容错 / `prune` / 注册表
+注册与刷新 / 两种调用写法等价 / 审计里的 server+tool / `trm tool list` 的来源标注 / daemon 接线。
 
 ## 7. 风险与未决问题
 
