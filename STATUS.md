@@ -962,6 +962,21 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 值得借鉴的两点已落文档：适配器自带 `example / domain`、`snapshot -i` 的 `@N` 稳定元素编号
 （`docs/TOOL-DEVELOPER-GUIDE.md` §11 + `TODO.md`）。完整报告：`docs/BB-BROWSER-EVALUATION.md`。
 
+### 真机核验与待办（2026-09-20 21:33）
+
+- 开发树 `/home/guzhujushi/trimum` 已用新 tar 同步（`src/trimum_core/install_fn.py` = `2ce5e92e…`、
+  `mcp_registry.py` = `2d86a39d…`，与本地 HEAD 一致；`tests/test_install_fn.py` 落树）。
+  全量 `pytest tests -q` → **939 passed / 11 failed / 2 skipped**，失败名单与真机基线**逐条相同**
+  （`test_skill_integration` 7 + `test_tool_file_loading` 1 + `test_other_dispatchers` 1 +
+  `test_depends_on` 1 + `test_llm_integration` 1）→ **无回归**。
+- **待用户执行两条 sudo**：
+  1. `sudo bash /tmp/sync_opt_tree.sh` —— 把本轮修复同步进部署树 `/opt/trimum`
+     （开发树已单独同步过，所以**不需要** `--fix-home`）；
+  2. `sudo bash /tmp/trm_env_install_real.sh` —— `trm env install` 的 root 真执行路径（全是已装包、幂等）。
+- **临时物已清**：真机 `/tmp` 147 → 46 项（只留上面两个脚本 + `trimum-sync.tar` + 缓存备份
+  `mcp-tools.json.bak-20260920`；systemd / snap 私有目录不动）；本地删掉 `tmp/m45/` 整目录与
+  `tmp/commit-msg*.txt`。清理脚本一次一用，不入库。
+
 ## M4.5 远端工具聚合（2026-09-20）
 
 > E2 差距表第 ③ 项（`docs/MCP-INTEGRATION-PLAN.md` §2.2）：让远端工具以 `<server>__<tool>`
