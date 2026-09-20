@@ -115,10 +115,34 @@ trm mcp call <server> <tool> '{"k":"v"}'   # 调用（完整 ToolGateway 分层 
   审计 `trm log audit --json`（`event_type=mcp_call`，只记参数**键名**，不记值）。
 - IPC 方法：`mcp.status`、`mcp.restart`（JSON-RPC over Unix socket，与 CLI 同源）。
 
+### 工具聚合与缓存（M4.5）
+
+远端工具以 `<server>__<tool>` 出现在 `trm tool list` 里（该行 `source: mcp`），可以直接按这个名字调用：
+
+```bash
+trm tool list --mcp                       # 只看远端聚合进来的
+trm tool info echo__echo                  # 看它来自哪个 server
+trm mcp call echo__echo '{"text": "hi"}'  # 与 `trm mcp call echo echo '...'` 等价
+```
+
+- 清单是**缓存**（`~/.trimum/mcp-tools.json`，`TRIMUM_MCP_INDEX` 可覆盖）：只有成功跑过一次
+  `trm mcp tools` 的 server 才会出现在里面 —— 这是刻意的，否则「列一下远端工具」就得把每个
+  server 拉起来，M4 的懒启动 / 空闲回收就白做了。
+- 缓存可以随时删（下次列工具会重建）；文件写坏只会被当成「还没有缓存」，不影响任何调用。
+- server 定义删掉后，缓存里的名字会在 daemon **下次启动**时被 `prune` 清掉；在那之前调用它会得到
+  `MCP server not found: <server>`（参数已解成 server + tool），不会静默失败。
+- 缓存里**不含密钥**（`env` / `headers` 只记键名），可以放心 `cat`。
+- 名字撞上本地工具时**本地工具赢**（远端工具少一个入口，比覆盖本地工具安全）。
+
 ### 部署（`/opt/trimum` 需要 sudo）
 
-- `sudo bash /tmp/sync_opt_m4.sh --check` 先看差异 → `sudo bash /tmp/sync_opt_m4.sh` 安装
-  （脚本带 sha256 校验；仓库副本 `scripts/sync_opt_m4.sh`）。
+- `sudo bash /tmp/sync_opt_tree.sh --dry-run` 先看要做什么 → `sudo bash /tmp/sync_opt_tree.sh` 真同步
+  （源优先 `/tmp/trimum-sync.tar`，逐文件 `install -D -o root -g root`，不做递归 chown；
+  仓库副本 `scripts/sync_opt_tree.sh`）。
+- `sudo bash /tmp/sync_opt_m4.sh` 是 M4 那一轮的**增量**补丁脚本（带 sha256 校验），现在已被全树同步
+  取代：M4 遗留的 `reap()` 修复随全树同步一起进部署树。判断依据 ——
+  `sha256sum /opt/trimum/src/trimum_core/mcp_registry.py` 应等于开发树同名文件（2026-09-20 实测未同步前
+  是 `fe0166cd…`，开发树 `86447a65…`）。
 - 装完以 guzhujushi 身份重启 daemon：`bash /home/guzhujushi/trimum/scripts/restart_trmd.sh`。
 - 无人值守验收：`scripts/accept_m4.py`（起 8323 端口的隔离 daemon，跑 16 项断言，
   不碰生产 daemon；本机 `python scripts/accept_m4.py` 亦可）。

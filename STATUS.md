@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-20（M4 传输与生命周期完成 + 真机验收 16 PASS / 0 FAIL + 两处真缺陷修复）
+> 最后更新：2026-09-20（M4 传输与生命周期 → **M4.5 远端工具聚合**）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -766,8 +766,8 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 
 ### 遗留
 
-- [ ] **M4**：HTTP/SSE 传输、`idle_ttl` 空闲回收、`apply_cgroup(pid)`、`trm mcp status/restart`、`docs/OPERATIONS.md` 补 MCP 章节
-- [ ] **工具聚合**：远端工具注册进 `ToolRegistry`（`<server>__<tool>`），Agent 不必先 `mcp.tools.list` 再 `mcp.tools.call`
+- [x] **M4**：HTTP/SSE 传输、`idle_ttl` 空闲回收、`apply_cgroup(pid)`、`trm mcp status/restart`、`docs/OPERATIONS.md` 补 MCP 章节（见文末「M4 传输与生命周期」）
+- [x] **工具聚合**：远端工具注册进 `ToolRegistry`（`<server>__<tool>`），Agent 不必先 `mcp.tools.list` 再 `mcp.tools.call`（M4.5，见文末）
 - [ ] **人工审核尚未开始**：232 条候选 `reviewed` 全为 false（设计如此，不是缺陷）；§2.3 的首批「非它不可」用例还没落到 `~/.trimum/mcp/`
 - [x] 真机已跑（2026-09-20：739 passed / 11 failed / 2 skipped，11 项为宿主状态基线，无回归；见文末「M3 真机验证 + 两处真实缺陷修复」）
 
@@ -915,3 +915,75 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 | M4 文档 + 验收脚本 | `19561e0` | `8778a40` | `76a2dee` | `5ff33b9` |
 
 四分支 cherry-pick 后 `git diff --name-status <target>..server` 均为空，已推送。
+
+## M4.5 远端工具聚合（2026-09-20）
+
+> E2 差距表第 ③ 项（`docs/MCP-INTEGRATION-PLAN.md` §2.2）：让远端工具以 `<server>__<tool>`
+> 进 `ToolRegistry`，Agent 从一张表里就能看到「本地 + 远端」全部工具。
+
+### 交付内容
+
+| 子项 | 落点 |
+|---|---|
+| 命名 / 指纹 / 缓存 | `src/trimum_core/mcp_bridge.py`（新增）：`flat_name` / `split_name`（按**第一个** `__` 切）、`fingerprint`（只取 `env` / `headers` 键名）、`MCPToolIndex`（原子写、坏文件当空缓存、`record` / `forget` / `prune`） |
+| 注册表 | `tool_gateway.py`：`ToolRegistry(mcp_index=…)` + `load_mcp_tools()` / `mcp_binding()` / `list_mcp_tools()`；`register()` / `unregister()` 撤掉同名聚合来源；同名冲突时本地工具优先 |
+| 分发器 | `tool_dispatchers.py`：`MCPDispatcher(tool_index=…)` + `tool_index` 属性、`_list_tools()` 成功后 `record()`、`_split_call()` 让聚合名与经典两参数等价 |
+| daemon | `api_server.py`：`build_mcp_tool_index()` / `prune_mcp_index()` / `wire_mcp_index()` + `AppState.mcp_index`；`start_mcp()` 把**一个**实例同时交给 dispatcher（写）与注册表（读） |
+| CLI | `cli/commands/tool.py`：`trm tool list [--mcp]` 标注 `source: local\|mcp` 与 `mcp.{server,tool,transport,trust}`；`trm tool info` 同理 |
+| 测试隔离 | `tests/conftest.py`（新增）：`TRIMUM_HOME` 指到临时目录，整套测试不再写真实 `~/.trimum` |
+| 运维文档 | `docs/OPERATIONS.md` 新增「工具聚合与缓存（M4.5）」；`ARCH.md` / `docs/MCP-INTEGRATION-PLAN.md`（§2.2 ③ 转 ✅ + §6.2）同步 |
+
+### 验证
+
+- 新增 `tests/test_mcp_bridge.py`（**87 项**）：命名 / 指纹（含「密钥不落盘」）/ 缓存读写与损坏容错 /
+  `forget` + `prune` / 注册表注册与刷新 / 同名冲突 / 两种调用写法等价 / 审计里的 server + tool /
+  `trm tool list --mcp` 的来源标注 / daemon 接线（含 `prune_mcp_index` 的「读不到目录 ≠ 清空缓存」护栏）。
+- 本地全量 `pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider` → **915 passed / 5 failed / 7 skipped**。
+  本轮前基线是 825/8/7：新增 87 项，另 **3 项由红转绿** —— `test_depends_on` 1 项 + `test_integration` 2 项
+  长期失败的原因正是「往真实 `~/.trimum` 写被沙箱拒绝」，`tests/conftest.py` 的隔离把病根去掉了。
+  剩余 5 项是既有基线（Windows 沙箱 + LLM 断网），逐条未变，**无回归**。
+- 本轮踩到的坑（提交前已修）：`start_mcp()` 里 `prune_mcp_index()` 抛异常会被 daemon 的
+  `try/except` 吞成一条 warning，现象是「池子没接上线但 daemon 照常起来」，靠
+  `test_mcp_daemon.py::TestDaemonPoolInUse` 两项由绿转红才暴露。**加在 `start_mcp()` 里的步骤必须能被
+  这两项看见** —— 这条教训值得记住。
+
+### 真机（Ubuntu）
+
+- 开发树 `/home/guzhujushi/trimum` 全量 `pytest tests -q -p no:cacheprovider` →
+  **914 passed / 11 failed / 2 skipped**。同机对照基线（`git archive 889e538~1` →
+  `/tmp/trimum_m4base`，即 M4 终态）→ **827 passed / 11 failed / 2 skipped**，
+  **失败名单逐条相同**：`test_skill_integration` 7 项（宿主 `~/.trimum/skills` 缺失）+
+  `test_tool_file_loading::test_get_executor_exists`（宿主 `~/.trimum/tools/mcp` 缺失）+
+  `test_other_dispatchers::test_env_list_sorted`（宿主 env 顺序）+ `test_depends_on` 1 项 +
+  `test_llm_integration` 1 项（断网）。+87 全绿 → **无回归**。
+- 端到端冒烟（开发树 + `TRIMUM_MCP_DIR` / `TRIMUM_MCP_INDEX` 指向 `/tmp`，真实 MCP 子进程，
+  不碰生产 daemon）：
+
+  1. `trm mcp tools demo-echo` → 起 server 列出 4 个工具，并写下 `mcp-tools.json`（1305 bytes）；
+  2. `trm --json tool list --mcp` → 4 条 `source=mcp`，名字为 `demo-echo__<tool>`；
+  3. `trm --json mcp call demo-echo__echo '{"text":"hi"}' --yes` 与
+     `trm --json mcp call demo-echo echo '{"text":"hi"}' --yes` 返回**同一份 JSON**
+     （`server=demo-echo`、`tool=echo`、`text="echo: hi"`）；不带 JSON 的聚合名也能调通；
+  4. 把定义的 `command` 改成 `/nonexistent/binary` 后，`tool list --mcp` 仍列 4 条
+     （读缓存不启动进程），而调用立刻报 `MCP server ...` —— 证明调用真的走到了 server，
+     注册表里那 4 条不是一份自欺欺人的名单。
+- 冒烟时暴露并修掉的两个 CLI 缺陷（都在 `trm mcp call` 这条路上，见 commit 说明）：
+  1. 聚合名没法单独用：`tool` 是必填位置参数，而工具本身可能不要参数
+     （`trm mcp call filesystem__list_dir`）→ 改 `nargs="?"`；
+  2. `_confirm()` 的 docstring 写着「piped run 不提示」，实现只挡 `EOFError`：stdin 是
+     **仍然打开**的管道时（`ssh host 'trm mcp call …'`、CI、包装脚本）`input()` 一直等下去
+     —— 本轮实测挂死两次。现在先看 `isatty()`，无人值守只认 `--yes`。
+
+### 部署状态
+
+- `/opt/trimum`：本轮用**全树同步**（`sudo bash /tmp/sync_opt_tree.sh`），它一并补上 M4 遗留的
+  `reap()` 修复 —— 同步前 `/opt/trimum/src/trimum_core/mcp_registry.py` 是 `fe0166cd…`，开发树是
+  `86447a65…`，两者不同即证明那处修复还没进部署树。
+- `/home/guzhujushi/trimum`（开发树）：本轮已同步，复测结果见上。
+
+### 提交与分支
+
+| 内容 | server | main | ubuntu | arch-linux |
+|---|---|---|---|---|
+| M4.5 代码 + 测试 | `889e538` | | | |
+| M4.5 文档 + 运维记录 | `__HASH_DOCS__` | | | |
