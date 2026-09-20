@@ -1,11 +1,11 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → **W1 workflow 执行语义**）
+> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点**）
 > 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5 + E4**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；**E4 三个导入器（CLI / workflow / skill）已落地**；E5 / E7 待做
 > 测试：本地 **1099 passed / 5 failed / 7 skipped**（E4 前是 940 passed，本轮 +159 用例；5 项失败 = 既有基线：Windows 沙箱 + PATH 缺 `python.exe` + LLM 断网）。基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
 > 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固/M4 均已推送四分支（M4：server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）；**M4.5 收口小项提交号见 `STATUS.md` 的「提交与分支」表**（幽灵条目 `9e63a81` / env+网关确认 `d34054a` / install 向导 `bd00990`，四分支已同步）。
 > ✅ **真机部署已完成（2026-09-20 20:52）**：`sudo bash /tmp/sync_opt_tree.sh` 全树同步落地，`/opt/trimum` 三个关键文件与本地 HEAD 逐文件对上（`mcp_bridge.py` `f503f505…` / `mcp_registry.py` `86447a65…` / `tool_gateway.py` `47d8a205…`），部署树 `[4b/5]` 自检通过；daemon 20:52:27 启动 → 跑的就是新代码（`trm status` 的 `source: rpc`，PID 23850）。真机聚合实测 4 条 `source=mcp`（`echo__echo` / `echo__fail` / `echo__slow` / …），总数 17；幽灵缓存已清（备份 `/tmp/mcp-tools.json.bak-20260920`），清后 `tool list --mcp` 为 0 条、总数 13。
-> ▶ **下次继续从这里开始（2026-09-20 W1 之后）**：W1 workflow 执行语义（监听 Event Bus → 驱动执行）代码 + 测试 + 文档已闭环，**E4 遗留的那条 `instruction` 已修** → 下一步 = **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`；W1 遗留见 STATUS「W1 遗留」（`WorkflowListener` 未接线 / 运行记录只在内存 / 内置剧本只有落盘式开关）。
+> ▶ **下次继续从这里开始（2026-09-20 EventBus 审计之后）**：W1 已闭环（真机 `accept_w1.py` 48/0）；只读审计发现**安全响应链未接线**——拦得住，但不会响应、不会记录、不会通知（见下方「EventBus 通信缺口」）→ 下一步 = **P0 安全链接线**（三条动作，顺序不能乱）→ 然后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`；W1 遗留见 STATUS「W1 遗留」（`WorkflowListener` 未接线 / 运行记录只在内存 / 内置剧本只有落盘式开关）。
 
 ---
 
@@ -58,6 +58,67 @@
 | **P2** | **SonarQube 重扫 / 真机 Arch Linux 验证** | docs P3-19/P3-20，仓库内无结果 | 收尾执行一次重扫 + 真机 smoke |
 
 > 说明：P0/P1 已全部闭环（2026-09-19），并于 2026-09-20 在真机 Ubuntu 上验证通过；「CLI-Anything 接入」经调研否决，新方向为 **MCP 接入**（见 `docs/MCP-INTEGRATION-PLAN.md`）。
+
+---
+
+## 🔴 EventBus 通信缺口（2026-09-20 只读审计，按优先级）
+
+> 方法：通读 `docs/` 里与事件相关的文档（`SECURITY-DEFENSE-PLAN.md` §11、`security-agent-implementation-plan.md` §2/§3、
+> `TARL-SPEC.md` §7、`SYSTEM-MONITOR.md`、`ERROR-CODE-SPEC.md`、`WORKFLOW-EXECUTION-PLAN.md`），
+> 再对 `src/` 全量扫**生产者**（`emit_event` / `emit_task` / `SystemEvent(event_type=...)`）与**订阅者**（`subscribe`）逐条对照。
+> 本轮**只读**，未改代码。结论：总线骨架是通的（pub/sub + `*` 通配 + 100 条环形历史 + replay），**缺的是生产端**。
+
+### P0 — 安全响应链未接线（拦得住，但不会响应 / 记录 / 通知）
+
+| 事实 | 证据 |
+|---|---|
+| L4 命中威胁只 `logger.warning` + 返回 denied，**不发 `security.monitor_result`、不调 SecExecutor** | `tool_gateway.py:715` |
+| `security.monitor_result` 唯一生产者 `SecMonitor._dispatch()`，只被 `_on_executing()` 调用；而它订阅的 `agent.executing` **全库无生产者** | `sec_monitor.py:418 / 457 / 487` |
+| payload 契约不符：生产端发嵌套 `{"threat": {...}, "original_event": {...}}`，16 条内置剧本的条件是扁平 `payload.get('threat_name') == '...'` | 实测 `builtin_workflows()` 打印 condition |
+| `SecExecutor`（阻断 / 冻结 / 隔离 + SecAudit + SecNotif）只在这条死链路上被调用 | `sec_executor.py:182` |
+| **后果** | 16 条威胁响应剧本在真机上**永远不会被自动触发**（只能手动 `trm workflow run --event`）；`security.blocked` / `security.alert` 从不出现 |
+
+**建议动作（顺序不能乱）**：
+
+1. **统一 payload 契约** —— 扁平化 `security.monitor_result`，或把剧本条件改成 `payload["threat"]["threat_name"]`；否则接上也不触发。
+2. **L4 改走 `_dispatch`** —— 一条命令同时完成「发事件 + 调 SecExecutor」（顺带决定 `agent.executing` 的 EventSnoop 路径是补上还是删掉死订阅）。
+3. **定 `workflow.trigger` 的归属** —— 要么让 `WorkflowListener` 上线当生产者，要么让剧本直接听 `security.monitor_result`；**不要两套约定并存**（现在一边扁平带 `workflow_name`、一边嵌套带 `threat`）。
+
+### P1 — 逐条缺环
+
+| 事件 | 生产者 | 消费者 | 状态 |
+|---|---|---|---|
+| `agent.executing` / `.executed` | 无 | SecMonitor | 死订阅（Defense Plan §11.1 要求 ToolGateway 出口发，实际是直调 `scan_command()`） |
+| `security.ebpf_alert` / `security.fuse_triggered` / `security.audit_breach` | 无 | 无 | **子系统未开工**（只有常量 + 文档）；`SecAudit.verify_chain()` 已实现但无人定期调用 |
+| `workflow.trigger` | `workflow_listener`（未实例化）+ `sec_executor`（死链路） | W1 Runtime 可消费 | 从未产生过 |
+| `workflow.threat_response` | 无 | 无 | 文档称「已有事件」，代码里不存在 |
+| `event.transform.completed` | 无 | `WorkflowListener`（未实例化） | TARL 三段式整条未接线（W1 遗留） |
+| `system.alert` / `system.heartbeat` | `SystemMonitor` 从未被实例化（且是回调式） | `daily-check` 剧本听 `system.heartbeat` | 空转；`docs/SYSTEM-MONITOR.md` 示例用的 `event_bus.emit()` 这个 API 不存在 |
+| `memory.*` | `experience_learner`（未实例化） | `MemoryBridge`（未实例化） | 记忆桥整条空转 |
+| `planner.*` | `planner_agent` ✅ | 无 | 发了没人听（`planner.task_created` 的消费者是没启动的 `WorkflowListener`） |
+| `agent.status_changed` | `agent_runtime.py:143` ✅ | 无 | `agent_runtime` 只在测试里被实例化，daemon 里没有 |
+| `task.assigned` | 无 | `agent_runtime.py:219` 注释「Stub: in Phase 3」 | STATUS 旧表里标 ✅ 的 `TASK_ASSIGNED` 名不副实 |
+
+### P1 — 总线自身的硬化项
+
+- `EventBus._safe_call` **静默吞掉订阅者异常**（注释自称 production 会 surface，实际既不打日志也不抛）；`models.py:109` 定义的 `TRM-9005 EventBusDispatchFailed` 全库无人 raise → 订阅者写错只表现为「事件没反应」。
+- `event_index.EventIndex`（首段分桶 + 保序 + 已有测试 + 已导出）**没接进 `EventBus`**，`publish` 仍是全订阅表线性扫描 + `ensure_future` 扇出。
+- 匹配规则两套：总线 `_matches`（`*` 浮动匹配 1+ 段）vs workflow trigger（去前缀 + `fnmatch`），没有统一入口。
+- `LiveConsole.subscribe_events()` 在 `agent_loop.py:300` 以 `"task"` 订阅（pattern `task.*`），回调却拿 `event_type == "task.started"` 全等比较，真实类型是 `task.node.started` / `task.workflow.started` → 进度永远不亮。
+- SDK 侧 `src/agent-sdk/trimum_agent.py:167` 是 `publish("tool.executing", {...})` —— `publish()` 只收 `SystemEvent`，事件名也对不上 SecMonitor 订阅的 `agent.executing`；异常被 `except Exception: pass` 吃掉。
+- 历史只有内存 100 条（重启即丢）、无优先级 / 背压 / ack / 重试 / 死信。
+
+### 优先级结论
+
+1. 🔴 **P0 安全链接线** > **E5 官方分发渠道**：安全响应是 trimum 的招牌能力，现在「拦截」能跑而「响应 / 审计 / 通知」是空的，等于 16 条剧本 + SecExecutor 全是摆设；分发渠道再顺，发的也是链条断的产品。且改动点只有 3 处，工作量可控。
+2. 🔴 **E5**（与 E6 遗留的证书 `capabilities` 运行期合并同源，一起做）。
+3. 🟠 **总线硬化**：属于 P0 的配套 —— `_safe_call` 静默是排障黑洞，接完线要能看见事件到底发没发出去。
+4. 🟠 **W1 遗留的 `WorkflowListener` / TARL 三段式接线**：比 P0 大（要把 TransformAgent 接进 daemon + 决策 + 确认），排其后。
+5. 🟡 **P2 杂项**随时穿插（低风险、互相独立）：见「下一步（优先级排序）」。
+6. 🅿️ **E7 自研 coding Agent**：大工程，等前面收口。
+
+> ⏸️ **明确「未开工」的子系统**（别误判为 bug）：eBPF 告警（`security.ebpf_alert`）、性能熔断（`security.fuse_triggered`）、
+> 审计断链检测（`security.audit_breach`）—— 这三样在 `docs/SECURITY-DEFENSE-PLAN.md` 有完整设计，代码里只有常量占位，从未动工。
 
 ---
 

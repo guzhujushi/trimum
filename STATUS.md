@@ -1,26 +1,62 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-20（M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → **W1 workflow 执行语义**）
+> 最后更新：2026-09-20（M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信审计**）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
-> 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3/M4**（见文末「M4 传输与生命周期」），下一项是**远端工具聚合进 `ToolRegistry`**（`<server>__<tool>`）；其余为 P2（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）。
-> 真机：M4 已在 Ubuntu 真机验收（2026-09-20，隔离 daemon **16 PASS / 0 FAIL**；全量 827 passed / 11 failed / 2 skipped，11 项为既有宿主状态基线，无回归）。
+> 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3/M4** 与**远端工具聚合**（`<server>__<tool>` 进 `ToolRegistry`），
+> E4 三个导入器已落地，W1 workflow 执行语义已闭环（真机 48/0）。
+> **下一项 = P0 安全响应链接线**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，16 条威胁响应剧本在真机上永远不会被自动触发）；
+> 之后是 **E5 官方分发渠道**；P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
+> 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
+> E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
+> 失败项均为既有宿主状态基线（Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网），与本轮各次开工前同名同数，无回归。
 
 ---
 
-## E4 广接入（进行中，2026-09-20）
+## EventBus 通信审计（2026-09-20，只读分析）
 
-> 计划与设计：`docs/E4-PLAN.md`（生态四层缺口 #4 通用 CLI 适配器 / #6 workflow 目录 / #7 统一 schema，
-> 外加 E3 顺延的 `trm skill import`）。
+> 用户诉求原文：「请阅读一下 docs 文件夹里的文件，分析有关 EventBus 的通信，还有哪些没完成」。
+> 方法：通读 `docs/` 里与事件相关的文档（`SECURITY-DEFENSE-PLAN.md` §11、`security-agent-implementation-plan.md` §2/§3、
+> `TARL-SPEC.md` §7、`SYSTEM-MONITOR.md`、`ERROR-CODE-SPEC.md`、`WORKFLOW-EXECUTION-PLAN.md`），
+> 再对 `src/` 全量扫**生产者**（`emit_event` / `emit_task` / `SystemEvent(event_type=...)`）与**订阅者**（`subscribe`）逐条对照。
+> **本轮只读，未改任何代码**；完整清单与优先级落在 `TODO.md`「EventBus 通信缺口」（避免两处各写一份互相漂移）。
 
-- [ ] S1 `ecosystem.py`：生态条目 schema（trust/risk/requires/source_url/author/enabled）+ 风险分级器 + 校验器
-- [ ] S2 `cli_adapter.py` + `trm tool import-cli|enable|disable`：`--help` 探测 → 工具条目 + 风险分级 → 生成 manifest
-- [ ] S3 `workflow_catalog.py` + `trm workflow import`：Warp 式 YAML → 编译进 `WorkflowDefV2`
-- [ ] S4 `skill_import.py` + `trm skill import`：本地路径 / git URL → `~/.trimum/skills/`
-- [ ] S5 `tool_file_loader` 支持 `enabled`（第三方默认不启用）+ `trm tool list --all`
-- [ ] S6 文档同步（ARCH / TODO / ECOSYSTEM-STRATEGY 缺口表 / OPERATIONS）
-- [ ] S7 真机验证 + 提交
+### 一句话结论
+
+总线骨架是通的（pub/sub + `*` 通配 + 100 条环形历史 + replay），**缺的是生产端** —— daemon 里真正在跑的订阅者只有
+`SecMonitor` / `WorkflowEventDriver` / W1 `WorkflowRuntime`，而多个关键事件「有订阅没生产」。
+
+### P0：安全响应链未接线（拦得住，但不会响应 / 记录 / 通知）
+
+| 事实 | 证据 |
+|---|---|
+| L4 命中威胁只 `logger.warning` + 返回 denied，**不发 `security.monitor_result`、不调 SecExecutor** | `tool_gateway.py:715` |
+| `security.monitor_result` 唯一生产者 `SecMonitor._dispatch()` 只被 `_on_executing()` 调用，而 `agent.executing` **全库无生产者** | `sec_monitor.py:418 / 457 / 487` |
+| payload 契约不符：生产端嵌套 `{"threat": {...}, "original_event": {...}}`，16 条内置剧本条件是扁平 `payload.get('threat_name')` | 实测 `builtin_workflows()` 的 condition |
+| **后果** | 16 条威胁响应剧本永不自动触发（只能手动 `trm workflow run --event`）；`security.blocked` / `security.alert` 从不出现；`SecExecutor` 从未真正执行 |
+
+### 其余缺环（速览，明细见 TODO）
+
+- **零生产零消费**：`security.ebpf_alert` / `security.fuse_triggered` / `security.audit_breach`（子系统未开工）、`workflow.threat_response`（文档称「已有事件」，代码里没有）。
+- **有生产没消费**：`planner.*`、`agent.status_changed`（`agent_runtime` 只在测试里被实例化）。
+- **有订阅没生产**：`agent.executing` / `.executed`（SecMonitor 死订阅）、`memory.*`（MemoryBridge 未实例化）、`system.alert`（SystemMonitor 未实例化）、`event.transform.completed`（WorkflowListener 未实例化）。
+- **总线自身**：`_safe_call` 静默吞异常 + `TRM-9005` 从未 raise；`event_index.EventIndex` 没接进 `EventBus`；`LiveConsole.subscribe_events` 订阅 `task.*` 却全等比对 `task.started`（永远不亮）；SDK `trimum_agent.py:167` 的 `publish("tool.executing", {...})` 签名与事件名都错（异常被吞）。
+- **文档过期**：`docs/SYSTEM-MONITOR.md` 的示例用 `event_bus.emit()`（该 API 不存在）；旧 STATUS 表里 `TASK_ASSIGNED` 标 ✅，但 `task.assigned` 从未落地。
+
+### 优先级判断
+
+**P0 安全链接线 > E5 官方分发渠道**：安全响应是 trimum 的招牌能力，「拦截」能跑而「响应 / 审计 / 通知」是空的，
+等于 16 条剧本 + `SecExecutor` 全是摆设；分发渠道再顺，发的也是链条断的产品。改动点只有 3 处（统一 payload 契约 /
+L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线硬化是它的配套（`_safe_call` 静默是排障黑洞）。
+
+---
+
+## E4 广接入（✅ 已完成，2026-09-20）
+
+> 计划与设计：`docs/E4-PLAN.md`；明细见文末「E4 广接入：生态导入器（2026-09-20）」。
+> 提交：计划 `fdee6d5` / S1+S2+S5 `be5198d` / S3 `861126e` / S4 `05bb1ee` / S6 文档 `be604e8` / S7 验收 `b5b2121`。
+> 遗留「`to_workflow_definition()` 不搬运 `instruction`」→ 已由 **W1** 修掉（见文末「W1 Workflow 执行语义」）。
 
 ---
 
@@ -179,21 +215,21 @@
 
 ## 下一步（优先级排序）
 
-> 2026-09-20 重写：此节原为 2026-09-01 的旧清单，多数项已完成或已废弃。历史遗留说明：
-> SafeMind 红蓝对抗（仓库内无 `safe_lab.py` / `red_team.py`，从未动工）、OpenCLI 桥接（已弃用）、
-> CLI 流式输出（已实现）、`tmp/` 清理（已完成）、`src/trimum-mvp/`（已删除）、
-> 「296/297 pass 修 AuditEvent 导出」（已被本地 482 passed 取代）。
+> 2026-09-20 二次重写：E4 / W1 闭环 + EventBus 审计之后，按「哪个缺口让已有能力变成摆设」重排。
+> 更早的 2026-09-01 旧清单里多数项已完成或已废弃 —— SafeMind 红蓝对抗（仓库内无 `safe_lab.py` / `red_team.py`，从未动工）、
+> OpenCLI 桥接（已弃用）、CLI 流式输出（已实现）、`tmp/` 清理（已完成）、`src/trimum-mvp/`（已删除）、
+> 「296/297 pass 修 AuditEvent 导出」（已被本地 1156 passed 取代）。
 
-1. 🔴 **MCP 接入 M3 策展导入器** —— `tmp/research/awesome-README.md`（4,117 条）→ `config/mcp-catalog.yaml` 候选清单（人工审核后才启用）；解析规则见 `docs/MCP-INTEGRATION-PLAN.md` §3，红线：优先 `uvx` / `pip install` / 单二进制，`npx` 派系默认不收（M0/M1/M2 已于 E2 完成）
-2. 🔴 **桌面/WebSocket 确认通道**（P2）—— `SecurityAgent.confirm()` 目前只有 CLI 交付手段
-3. 🟡 **`trm security revoke <token_id>`** —— security 命令组最后一块缺口
-4. 🟡 **`trm ask -i` 中断处理** —— `ask.py` 无 `KeyboardInterrupt` / `EOFError` 处理
-5. 🟡 **`trm memory import|export`** —— 记忆迁移（CLI 进阶）
-6. 🟡 **`src/agent-sdk` 端到端测试与打包验证**（P2）—— `tests/` 无覆盖
-7. 🟡 **Policy Engine 升级（正则→LLM 混合）** —— `LlmPolicyEngine` 已有骨架，未接线
-8. 🟡 **3.5 confidence 三级分流** —— `transform_agent` 只有 confidence 字段，无「直接执行 / 确认 / 转 Planner」分流
-9. 🟢 **SonarQube 重扫** —— 确认修复效果，无回归
-10. 🟢 **daemon 部署形态二选一** —— `trmd.service`（root）或用户态路径
+1. 🔴 **P0 安全响应链接线**（2026-09-20 审计新立）—— `tool_gateway.py:715` 的 L4 只拦不报：命中威胁不发 `security.monitor_result`、不调 `SecExecutor`，且生产端 payload（嵌套 `threat`）与 16 条内置剧本条件（扁平 `threat_name`）对不上 → 剧本永不自动触发。三条动作（统一契约 → L4 走 `_dispatch` → 定 `workflow.trigger` 归属）见 `TODO.md`「EventBus 通信缺口」
+2. 🔴 **E5 官方分发渠道** —— `.trmpkg`（manifest + 逐文件 sha256 + 签名 + 证书链）→ 内置根验证 → `trm install <name>` / `--file <pkg>`；含 E6 遗留的证书 `capabilities` 运行期合并（设计见 `docs/ECOSYSTEM-STRATEGY.md` §7）
+3. 🟠 **总线硬化**（P0 的配套）—— `_safe_call` 别静默吞异常 + 兑现 `TRM-9005`；`EventIndex` 接进 `EventBus`；修 `LiveConsole.subscribe_events` 的订阅 / 比对不匹配；清死订阅与过期文档
+4. 🟠 **W1 遗留：`WorkflowListener` / TARL 三段式接线** —— `event.transform.completed` 无生产者、`TransformAgent` 无调用点、`WorkflowListener` 未实例化（要把 TransformAgent 接进 daemon + 决策 + 确认，比 P0 大）；另：运行记录只在内存、内置剧本只有落盘式开关
+5. 🟡 **桌面/WebSocket 确认通道**（P2）—— `SecurityAgent.confirm()` 目前只有 CLI 交付手段
+6. 🟡 **CLI 小缺口三连** —— `trm security revoke <token_id>` / `trm ask -i` 的中断处理（`ask.py` 无 `KeyboardInterrupt` / `EOFError`）/ `trm memory import|export`
+7. 🟡 **引擎侧两个半成品** —— `src/agent-sdk` 端到端测试与打包验证（`tests/` 无覆盖）；Policy Engine 正则→LLM 混合（`LlmPolicyEngine` 骨架未接线）；`transform_agent` 的 confidence 三级分流
+8. 🟢 **SonarQube 重扫** / **daemon 部署形态二选一**（`trmd.service` root 或用户态路径）
+9. ⏸️ **未开工子系统**（别误判为 bug）—— eBPF 告警 `security.ebpf_alert`、性能熔断 `security.fuse_triggered`、审计断链检测 `security.audit_breach`（`SecAudit.verify_chain()` 已实现但无人调用）
+10. 🅿️ **E7 自研 coding Agent** —— 大工程，等前面收口（调研件见 `tmp/research/ecosystem/ecc-*`）
 
 ---
 
