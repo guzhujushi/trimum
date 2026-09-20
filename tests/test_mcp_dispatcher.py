@@ -229,8 +229,13 @@ class TestCallTool:
 class TestAudit:
     async def test_successful_call_writes_an_mcp_call_event(self, tmp_path):
         store = AuditStore(tmp_path / "audit.jsonl")
+        # 哨兵要用不可能撞上路径/用户名的串：短串 "hi" 会出现在 tmp_path 的
+        # 用户名里（例如 guzhujushi），让「参数值不入审计」的断言假失败。
+        secret = "argument-value-must-not-be-audited"
         async with dispatcher(tmp_path, audit_store=store) as node:
-            await node.execute(request(ToolType.MCP_TOOLS_CALL, "echo", "echo", '{"text": "hi"}'))
+            await node.execute(
+                request(ToolType.MCP_TOOLS_CALL, "echo", "echo", json.dumps({"text": secret}))
+            )
 
         events = store.read()
         assert len(events) == 1
@@ -245,7 +250,7 @@ class TestAudit:
         assert details["duration_ms"] >= 0
         assert details["argument_keys"] == ["text"]
         # 参数值绝不入审计（可能含密钥）
-        assert "hi" not in json.dumps(event, ensure_ascii=False)
+        assert secret not in json.dumps(event, ensure_ascii=False)
 
     async def test_denied_call_is_audited_and_never_reaches_the_server(self, tmp_path):
         store = AuditStore(tmp_path / "audit.jsonl")
