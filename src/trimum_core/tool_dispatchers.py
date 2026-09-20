@@ -777,6 +777,25 @@ class MCPDispatcher:
         """Registry view for ``trm mcp list`` (no server is started)."""
         return self.registry.describe()
 
+    def set_pool(self, pool: Any) -> None:
+        """Adopt a shared pool — the daemon builds one and hands it over.
+
+        Idempotent by design: ``MCP_TOOLS_LIST`` and ``MCP_TOOLS_CALL`` are two
+        keys onto a *single* dispatcher instance, so startup walks the type
+        table and may well hand the same pool over twice.  The daemon does this
+        before the first call, so nothing is connected yet when it happens.
+        """
+        if pool is not None and pool is not self._pool:
+            self._pool = pool
+
+    async def pool_status(self) -> list[dict[str, Any]]:
+        """Live view of the pool: what is running, idle for how long, bound."""
+        return await self.pool.status()
+
+    async def restart_server(self, name: str) -> bool:
+        """Stop and reconnect one server, leaving the others alone."""
+        return await self.pool.restart(name)
+
     async def close(self) -> None:
         """Stop every server this dispatcher started."""
         if self._pool is not None:
