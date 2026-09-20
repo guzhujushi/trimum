@@ -32,6 +32,7 @@ from trimum_core.mcp_registry import (  # noqa: E402
     MCPServerDefinition,
     MCPServerPool,
     MCPRegistry,
+    definitions_readable,
 )
 from trimum_core.models import (  # noqa: E402
     ExecuteRequest,
@@ -638,6 +639,40 @@ class TestToolListCli:
         payload = cli_json(capsys)
         assert payload["tools"] and all(row["source"] == "local" for row in payload["tools"])
 
+class TestDefinitionsReadable:
+    """清缓存前的三种「一个 server 都没有」必须分得开。"""
+
+    def test_a_populated_directory_is_readable(self, tmp_path):
+        write_server(tmp_path / "mcp")
+        assert definitions_readable(tmp_path / "mcp") is True
+
+    def test_an_empty_directory_is_readable(self, tmp_path):
+        directory = tmp_path / "mcp"
+        directory.mkdir()
+        assert definitions_readable(directory) is True
+
+    def test_a_missing_directory_counts_as_no_definitions(self, tmp_path):
+        assert definitions_readable(tmp_path / "does-not-exist") is True
+
+    def test_a_path_that_is_not_a_directory_is_not_readable(self, tmp_path):
+        """`TRIMUM_MCP_DIR` 指到一个普通文件：配错了，不能拿它去清缓存。"""
+        path = tmp_path / "mcp"
+        path.write_text("not a directory", encoding="utf-8")
+        assert definitions_readable(path) is False
+
+    def test_a_directory_that_raises_oserror_is_not_readable(self, tmp_path, monkeypatch):
+        directory = tmp_path / "mcp"
+        directory.mkdir()
+
+        import trimum_core.mcp_registry as registry_module
+
+        def boom(*args, **kwargs):
+            raise OSError(5, "Input/output error")
+
+        monkeypatch.setattr(registry_module.os, "scandir", boom)
+        assert definitions_readable(directory) is False
+
+
 # ---------------------------------------------------------------------------
 # daemon wiring (api_server)
 # ---------------------------------------------------------------------------
@@ -680,11 +715,27 @@ class TestDaemonWiring:
         assert prune_mcp_index(index, MCPRegistry(directory)) == 1
         assert {e["server"] for e in index.entries().values()} == {"echo"}
 
-    def test_prune_keeps_everything_when_the_directory_cannot_be_read(self, tmp_path):
-        """读不到目录 ≠ 一个 server 都没有；按后者处理会把缓存清空。"""
+    def test_prune_clears_the_cache_when_the_whole_directory_is_gone(self, tmp_path):
+        """目录整个没了 = 一个 server 都没配 → 缓存里每条都是幽灵条目。"""
         index = index_at(tmp_path)
         index.record(definition(), ECHO_TOOLS)
-        assert prune_mcp_index(index, MCPRegistry(tmp_path / "does-not-exist")) == 0
+        assert prune_mcp_index(index, MCPRegistry(tmp_path / "does-not-exist")) == 1
+        assert index.entries() == {}
+
+    def test_prune_keeps_everything_when_the_directory_cannot_be_listed(self, tmp_path, monkeypatch):
+        """目录在、却列不出来（权限 / IO）才是「不知道」；那时别碰缓存。"""
+        directory = tmp_path / "mcp"
+        directory.mkdir()
+        index = index_at(tmp_path)
+        index.record(definition(), ECHO_TOOLS)
+
+        import trimum_core.mcp_registry as registry_module
+
+        def boom(*args, **kwargs):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(registry_module.os, "scandir", boom)
+        assert prune_mcp_index(index, MCPRegistry(directory)) == 0
         assert set(index.entries()) == {"echo__echo", "echo__fail"}
 
     def test_prune_without_a_directory_to_check(self, tmp_path):
