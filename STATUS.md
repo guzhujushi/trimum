@@ -1320,6 +1320,8 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 ---
 
 ## 2026-09-21 根目录文档合并与清理（PRD / ARCH → `docs/`，tmp 清空）
+>
+> 提交：`9096e9a`（server 分支）。
 
 > 诉求：核对 `PRD.md` / `ARCH.md` 与 `TODO.md` / `STATUS.md` 的重复度，重复则合并清除，并清理临时文件与过期文件。
 > 结论：**`PRD.md` 重复度 ≈ 95%（直接删除）；`ARCH.md` 约 1/3 是与 `docs/` 专题文档重复的规划快照，去重后移入 `docs/ARCH.md`。**

@@ -438,6 +438,7 @@ trm config set <key> <value>       # 设置配置项
 | 分支 | 状态 | 备注 |
 |------|------|------|
 | `server` | ✅ 已同步 | 当前工作分支；E1 `779c0e0` / E6 `ab26edf` / 清理+证书 `1456aba` / E3 `4331437` / E2 `634e62a` / **M3 `e7a30f5`** / **真机修复轮 `209c98e`** |
+| `server`（2026-09-21 文档合并与清理） | ✅ 已提交 | `9096e9a` 删除 `PRD.md`、`ARCH.md` → `docs/ARCH.md`、清 `tmp/`（留 `research/`） |
 | `server`（E4，2026-09-20） | ✅ 已推送 | E4 计划 `fdee6d5` / S1+S2+S5 `be5198d` / S3 `861126e` / S4 `05bb1ee` / S6 文档 `be604e8` / S7 验收 + `scripts/accept_e4.py` 见 `STATUS.md`「E4 提交与分支」 |
 | `main` / `ubuntu` / `arch-linux`（E4） | ⏸ 未同步（设计如此） | `AGENTS.md` 分支纪律改判：**日常只推 `server`**，这三个分支只在收尾阶段统一同步推送（E4 之前的 M4.5 收口已同步过） |
 | `main` | ✅ 已同步 | E1 `49b2ef4` / E6 `e0e8f0b` / 清理+证书 `2b88561` / E3 `2b4e9b2` / E2 `8af7d5d` / **M3 `74b563f`** / **真机修复轮 `e0ad16f`** |
