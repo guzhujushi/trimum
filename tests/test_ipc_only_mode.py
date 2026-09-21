@@ -210,6 +210,46 @@ class TestIpcFailureWithoutHttp:
             await teardown(app, state)
 
 
+class TestFatalAbortIsImmediate:
+    """`abort_startup(hard=True)` 必须**立刻**终止进程。
+
+    回归（真机实测，见 docs/SANDBOX-PLAN.md §9.3.8）：致命判定发生在启动**中途**时，
+    `ContextManager` 的 aiosqlite 连接线程已经活着，而它是非 daemon 线程 ——
+    `sys.exit(3)` 之后解释器会卡在 `threading._shutdown()` 等它，
+    `timeout 90` 只能 SIGKILL 收场，退出码 124 而不是 3。
+    """
+
+    def test_hard_abort_does_not_wait_for_non_daemon_threads(self):
+        import subprocess
+
+        src = str(Path(__file__).resolve().parents[1] / "src")
+        code = (
+            "import sys, threading, time\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "from trimum_core.main import abort_startup\n"
+            "threading.Thread(target=time.sleep, args=(300,)).start()\n"
+            "abort_startup('boom', 'hint', hard=True)\n"
+        )
+
+        proc = subprocess.run(
+            [sys.executable, "-c", code, src],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert proc.returncode == 3
+        assert "启动中止" in proc.stderr
+
+    def test_soft_abort_still_raises_system_exit(self):
+        from trimum_core.main import abort_startup
+
+        with pytest.raises(SystemExit) as excinfo:
+            abort_startup("boom", "hint")
+
+        assert excinfo.value.code == 3
+
+
 class TestIpcOnlyRunner:
     """`main._serve_without_http` 走的必须是与 uvicorn 同一条 lifespan。"""
 

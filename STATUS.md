@@ -71,7 +71,21 @@ journal 显示 20:50:01 起、20:50:02 停，只隔 1 秒。
 version）与 `test_cli_commands.py`（RPC 优先 + pid 来自 health）同步改。全量 **1519 passed / 2 failed / 10 skipped**
 （2 项 = 既有宿主基线：PATH 缺 `python.exe`、LLM 断网；与开工前逐条同名同数）。
 
-**未做**：真机切换（`http_enabled` 默认仍 `true`，生产单元没动）；部署树整体同步；S2～S5。**未安装任何包。**
+**真机验证（隔离环境，2026-09-21 第四轮）**：`scripts/accept_ipc_only.sh` —— 不碰生产 daemon、不碰
+`~/.trimum`、不用 sudo，用整棵 HEAD `src` 起一个 `http_enabled: false` 的 daemon，**15 PASS / 0 FAIL**
+（status 走 RPC 且 http=false/ipc=true/pid 对得上；`security learning|tokens|learn` 在 HTTP 关闭下全通；
+本进程没有任何 HTTP 监听；socket 起不来 → `exit 3`；SIGTERM 干净收摊；`TRIMUM_HTTP=1` 可反向打开）。
+
+**真机抓到两件事**（详见 `docs/SANDBOX-PLAN.md` §9.3.8）：
+① **真 bug 已修**：致命路径用 `sys.exit(3)` 会挂住（`timeout 90` 只能 SIGKILL，退出码 124 而不是 3）——
+  真因是 `ContextManager` 的 **aiosqlite 非 daemon 线程**，startup 失败时 lifespan 的 `__aexit__` 不会跑、
+  连接没人关，解释器停在 `threading._shutdown()`（faulthandler 栈为证）。改用
+  `abort_startup(..., hard=True)`（flush + `logging.shutdown()` + `os._exit(3)`），并加子进程回归测试。
+  同类风险 uvicorn 路径也有，未动，记进 `TODO.md`。
+② **开发树 `~/trimum/src` 也落后 HEAD 一大截**（缺 `SecurityRuntime`）—— 只覆盖「本轮改的几个文件」装不上，
+  与 §9.3.6 的部署树问题同源 ⇒ 两棵树都要整体同步；导入预演那条护栏确实有用。
+
+**未做**：真机切换（`http_enabled` 默认仍 `true`，生产单元没动）；两棵树整体同步；S2～S5。**未安装任何包。**
 
 ## 2026-09-21 编码智能体调研：ECC 适合吗？（✅ 已完成，**只调研不改代码**）
 

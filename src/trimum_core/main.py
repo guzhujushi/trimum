@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import signal
 import socket
@@ -54,10 +55,28 @@ def check_tcp_port(host: str, port: int) -> str | None:
         binder.close()
 
 
-def abort_startup(reason: str, hint: str) -> None:
-    """启动预检失败：打印清晰提示后退出，不再让 uvicorn 抛底层 errno。"""
+def abort_startup(reason: str, hint: str, *, hard: bool = False) -> None:
+    """启动预检失败：打印清晰提示后退出，不再让 uvicorn 抛底层 errno。
+
+    `hard=True` 留给**启动中途**才判定致命的情形（HTTP 关掉时 IPC socket 起不来）：
+    那时 `ContextManager` 的 aiosqlite 连接线程已经是活的，而它是**非 daemon** 线程 ——
+    `SystemExit` 只会让解释器停在 `threading._shutdown()` 里等它，进程反而不退。
+    真机实测：`timeout 90` 之后靠 SIGKILL 收场，退出码 124 而不是 3；
+    faulthandler 线程栈见 docs/SANDBOX-PLAN.md §9.3.8。这条路上一件东西都在服务之外，
+    直接 `os._exit` 才是最诚实的行为。
+    """
     print(f"trmd: 启动中止 —— {reason}", file=sys.stderr)
     print(f"      建议：{hint}", file=sys.stderr)
+
+    if hard:
+        try:
+            logging.shutdown()
+        except Exception:  # pragma: no cover - 收尾失败也要退
+            pass
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(EXIT_STARTUP_PRECONDITION)
+
     sys.exit(EXIT_STARTUP_PRECONDITION)
 
 
@@ -206,6 +225,7 @@ def run() -> None:
                 "检查 core.socket_path 的父目录是否存在且可写（系统单元用 "
                 "/run/trimum/trimum.sock + RuntimeDirectory=trimum）；"
                 "临时 `TRIMUM_HTTP=1 trmd` 可先把 HTTP 面打开",
+                hard=True,
             )
         return
 

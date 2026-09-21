@@ -511,6 +511,51 @@ trm agent list; trm security tokens; trm security learning; trm security learn
 ③ 上面四条 CLI 全绿之后，才把 `/etc/trimum/config.yaml` 的 `http_enabled` 设成 `false`（
 `scripts/install.sh` 生成的模板已带这一行，默认 `true`）。**这一轮没做，等 S1 验收。**
 
+#### 9.3.8 真机验证：隔离环境 15 PASS / 0 FAIL，并抓到两件事（2026-09-21 第四轮）
+
+**做法**（落成 `scripts/accept_ipc_only.sh`，全程不用 sudo、不碰生产 daemon、不碰 `~/.trimum`）：
+把 HEAD 的**整棵** `src` 解到 `/tmp/ipconly-head`，再把 `XDG_CONFIG_HOME` / `XDG_DATA_HOME` /
+`XDG_RUNTIME_DIR` / `TRIMUM_HOME` / `TRIMUM_SOCKET` 全部指到 `/tmp/ipconly`，用
+`/opt/trimum/venv/bin/python`（真机系统 python3 没有 fastapi 等依赖）起一个
+`core.http_enabled: false` 的 daemon，然后逐项断言。
+
+**结果：15 PASS / 0 FAIL。** 覆盖：socket 60s 内就绪；`trm status` 走 RPC 且 `http=false` /
+`ipc=true` / `pid` 与 socket 路径都对得上自己的 daemon；`security learning / tokens / learn`
+三个命令在 HTTP 关闭下**全部走通**；本进程没有任何 HTTP 端口监听（只有 workflow driver 的临时端口）；
+socket 起不来时 `exit 3`；SIGTERM 干净收摊（socket 文件被收走、日志有 `mode=ipc-only` 与
+`trimum_core_stopped`）；`TRIMUM_HTTP=1` 能把 HTTP 反向打开（开关可逆）。
+
+**发现 1（真 bug，已修）：致命路径的 `exit 3` 会挂住。** 第一版沿用 `sys.exit(3)`，真机上
+`timeout 90` 之后只能 SIGKILL，拿到的是退出码 **124 而不是 3**。faulthandler 线程栈直接指出真因：
+
+```
+Current thread 0x… (most recent call first):
+  File "/usr/lib/python3.12/threading.py", line 1622 in _shutdown
+Thread 0x…:
+  File "/opt/trimum/venv/lib/python3.12/site-packages/aiosqlite/core.py", line 59 in _connection_worker_thread
+Thread 0x…:
+  File "/opt/trimum/venv/lib/python3.12/site-packages/aiosqlite/core.py", line 59 in _connection_worker_thread
+```
+
+`ContextManager` 的 aiosqlite 连接线程是**非 daemon** 线程；startup 失败时 lifespan 的 `__aexit__`
+根本不会跑（`__aenter__` 就抛了），连接没人关 → 解释器停在 `threading._shutdown()` 里等它。
+**修法**：`abort_startup(..., hard=True)` —— 先 `logging.shutdown()` + flush，再 `os._exit(3)`；
+预检那两条路（端口被占 / socket 被别人听）保持 `sys.exit`，因为那时什么都还没起。
+回归测试在子进程里放一个故意 `sleep(300)` 的非 daemon 线程（旧写法会挂到超时）。
+
+**同一类风险 uvicorn 路径也有**（启动失败时是 uvicorn 自己 `sys.exit(3)`，同样可能被非 daemon
+线程拖住）—— 本轮没动，记进 `TODO.md`。
+
+**发现 2（部署面事实，重要）：开发树 `/home/guzhujushi/trimum/src` 也落后 HEAD 一大截。**
+第一次真机验证直接翻车：只覆盖本轮 7 个文件之后 daemon 起不来，
+
+```
+ImportError: cannot import name 'SecurityRuntime' from 'trimum_core.sec_executor'
+```
+
+即 `sec_executor.py` 也是旧版 —— §9.3.6 踩的是**部署树**缺 `workflow_runtime.py`，这次是**开发树**缺
+`SecurityRuntime`。**两条结论**：① 两棵树都需要一次「整体同步到 HEAD」（`scripts/sync_opt_tree.sh`）；
+② §9.3.6 那条**导入预演**是真有用的护栏 —— 谁再想「只挑几个文件装上去」，先跑预演。
 ### 9.4 材料与缺口
 
 | 材料 | 位置 |
@@ -521,6 +566,7 @@ trm agent list; trm security tokens; trm security learning; trm security learn
 | 真机探测脚本（4 个） | `tmp/probe_sandbox_host{,2,3}.sh`、`tmp/probe_systemd_enforce{,2,3}.sh`、`tmp/probe_mounts.sh` |
 | Landlock PoC | `tmp/poc_landlock.py`（真机跑通，输出见 §5） |
 | 落地脚本 | `scripts/setup_ubuntu_toolchain.sh`、`scripts/check_sandbox_caps.sh`、`scripts/check_sandbox_caps_root.sh`、`scripts/harden_trmd_unit.sh` |
+| TCP 收口真机验收脚本（隔离环境，15 项断言） | `scripts/accept_ipc_only.sh`（2026-09-21 第四轮新增，结果见 §9.3.8） |
 | S1 真机探测（只读，本轮新增） | `tmp/probe_daemon_runtime.sh` / `tmp/probe_daemon_health.sh` / `tmp/probe_deploy_layout.sh` / `tmp/probe_deploy_writes.sh` / `tmp/probe_syscall_filter.sh` / `tmp/parse_syscall_groups.py`（解析 `systemd-analyze syscall-filter` 的分组传递闭包）/ `tmp/verify_seccomp_names.sh` / `tmp/verify_denylist_effect.sh`（黑名单实际拦截效果）/ `tmp/verify_harden_dryrun.sh` |
 
 **明确的材料缺口（不许脑补）**：Windows 侧的等价机制（Job Object / AppContainer）没有一手材料；Docker 29 对应的默认 seccomp profile 原件 404（只拿到 v28）；gVisor rootless 文档 404；nsjail 非特权可用性没有一手材料；`packages.ubuntu.com` 两次抓取失败（包版本以真机 `apt-cache` 为准）。
@@ -537,4 +583,5 @@ trm agent list; trm security tokens; trm security learning; trm security learn
 > 下一步（顺序不能反）：① `sudo bash /tmp/trmd_hotfix_restore.sh` ② `sudo bash /tmp/sync_opt_socket_patch.sh`
 > ③ `sudo bash /tmp/harden_trmd_unit.sh --apply`；过了再按 §9.3.5 收掉 TCP。裁决记录见 §9.1 / §9.2。
 > **第四轮（同日）：§9.3.5 的四条前置已在代码侧落地**（`core.http_enabled` 默认仍 `true`，生产单元未切）——
-> 改法、测试与真机切换顺序见 §9.3.7。
+> 改法、测试与真机切换顺序见 §9.3.7；隔离环境的真机验收（15 PASS / 0 FAIL）与两个真发现见 §9.3.8。
+> 生产单元仍未切 —— 只差「在 drop-in 里写一行 `Environment=TRIMUM_HTTP=0` 然后重启 trmd」。

@@ -32,6 +32,11 @@ S1 试装过两次，**两次都被冒烟抢跑误判回滚**（真因是断言�
 | `685d03a` / `9d28e38` / `ff9aa14` | **socket 收口**：路径契约收敛到 `TRIMUM_SOCKET`、客户端按「能连通」挑、bind 失败不再静默、`await ipc.start()`、S1 脚本改版（默认 `@debug` / 不加只读 / 就绪门 / 失败留证）+ 测试 11 → 20；随后自检改 `utf-8-sig`、事故修复 + 导入预演护栏 |
 | `b7d474e` | **TCP 收口**（§9.3.7）：`health` 自报 `pid`/`uptime`/`http`/`ipc` + `trm status` 认它 → 新增 `security.tokens/learning/learn` 三个 RPC（`trm security *` 改 RPC 优先）→ `core.http_enabled`（默认 `true`；关掉时不启 uvicorn，改由 `_serve_without_http()` 驱同一段 lifespan）→ 无 HTTP 时 socket 失败升级为 `exit 3`；新增 `tests/test_ipc_only_mode.py` **14 项** |
 
+**真机验证（隔离环境）15 PASS / 0 FAIL**：`scripts/accept_ipc_only.sh`（本轮新增，见 `docs/SANDBOX-PLAN.md` §9.3.8）。
+抓到两件事：① 致命路径 `sys.exit(3)` 会被 **aiosqlite 非 daemon 线程**拖住（真机退出码 124 而非 3）→ 已改
+`abort_startup(hard=True)`（`os._exit`）+ 子进程回归测试；② **开发树 `~/trimum/src` 也落后 HEAD**（缺
+`SecurityRuntime`）⇒ 与 §9.3.6 同源：两棵树都要整体同步，别只挑几个文件装。
+
 细节：`STATUS.md`「2026-09-21 TCP 收口」「2026-09-21 穿插项步骤 C」「2026-09-21 E7 规格与设计」「2026-09-21 沙箱前置片」「2026-09-21 S1：daemon 系统级加固」五节；
 下方「🔧 穿插项实施计划」与「🌐 生态战略」E7 项。
 
@@ -91,7 +96,12 @@ Landlock / Seccomp 沙箱、记忆桥（`memory_bridge` + `experience_learner` �
 - 内置剧本只有落盘式开关（`trm workflow enable <id>`），没有「原地开关」。
 - 确认通道目前只有命令行（桌面 / WebSocket 未做）。
 - 真机：`trm env install` 的 root 真执行路径待跑；`/opt/trimum` 部署树还有几处待同步（见下方「其他待办」）。
-- 真机验收脚本：`scripts/accept_w1.py`（48/0）、`scripts/accept_e4.py`（43/0）；E7 的 `scripts/accept_e7.py` 待写。
+- 真机验收脚本：`scripts/accept_w1.py`（48/0）、`scripts/accept_e4.py`（43/0）、`scripts/accept_ipc_only.sh`（15/0，2026-09-21）；E7 的 `scripts/accept_e7.py` 待写。
+- **启动失败时的退出路径**：TCP 预检那两条是 `sys.exit(3)`（什么都还没起），中途致命那条（HTTP 关 + IPC 起不来）已改 `os._exit(3)`；
+  但 **HTTP 开着的 daemon 启动失败仍走 uvicorn 自己的 `sys.exit(3)`** —— 同样可能被 `ContextManager` 的
+  aiosqlite 非 daemon 线程拖住（真机实测同类现象见 `docs/SANDBOX-PLAN.md` §9.3.8 发现 1）。收 S1 时一并核。
+- **两棵树整体同步**：`/opt/trimum` 与 `~/trimum` 都落后 HEAD（分别缺 `workflow_runtime.py` / `SecurityRuntime`），
+  同步脚本要跑导入预演；在此之前 `api_server.py` 不能加回 `sync_opt_socket_patch.sh` 的文件集。
 
 ### 真机
 
