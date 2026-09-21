@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -46,6 +46,31 @@
 武装剧本无处置步骤 / 节点带闸门 / 事件运行只跑取证 / 处置剧本事件不唤醒 / 人工运行不受限 / 强制全关全开）；
 改 3 处旧断言（`test_workflow_runtime.py` 两条 + `test_api_server_startup.py` 一条 —— 它们锁的正是旧口径），
 `test_gateway_layer4.py` 的端到端步骤改成取证命令。全量 **1365 passed / 5 failed / 8 skipped**（5 项 = 既有基线）。
+
+---
+
+## 2026-09-21 穿插项步骤 B：总线硬化（✅ 已完成）
+
+> 计划：`TODO.md`「🔧 穿插项实施计划」步骤 B。问题源头：2026-09-20 的只读总线审计 ——
+> `_safe_call` 静默吞订阅者异常（`TRM-9005` 全库无人 raise）、`EventIndex` 没接进 `publish`、
+> `LiveConsole.subscribe_events` 订阅与比对不匹配（进度永远不亮）。
+
+| 缺口 | 落地 |
+|---|---|
+| 订阅者异常静默 | 记 `WARNING` 日志（订阅者名 + 事件类型 + 堆栈）+ `dispatch_failures` 计数 + `last_failure` 快照 + 广播 `event.eventbus.dispatch_failed`（它自己再失败只记不播，防转圈） |
+| `TRM-9005` 没人 raise | 严格模式（`TRIMUM_BUS_STRICT=1` 或 `EventBus(strict=True)`）抛 `TrimumError(TRM-9005)`，由 `await bus.wait_for_handlers()` 收集（`publish` 是 fire-and-forget，异常得有地方收）；默认关 |
+| `EventIndex` 没接线 | `publish` 走首段分桶索引；通配匹配实现收敛到 `event_index.matches()` 一处（`EventBus._matches` / `EventIndex._matches` 都转发它）。**workflow 触发器口径仍故意分开**（剥 `event.`/`task.` 前缀 + `fnmatch`），两条都由测试钉住 |
+| `LiveConsole` 不亮 | 改按**段**匹配（`task.node.started` / `task.workflow.started` 都算 `started`）；同一步骤的重复事件去重（直接调用与事件订阅会撞车）；**补订 `security.*`** —— 告警分支以前从没被喂到过 |
+| SDK 侧错用法 | `src/agent-sdk/trimum_agent.py`：`publish("tool.executing", {...})` → `emit_event("tool.executing", "agent-sdk", {...})`；异常从 `pass` 改成记日志 |
+
+**观测面**（排障用）：`bus.stats()`（patterns / subscribers / history / in_flight / dispatch_failures / strict）
+与 `await bus.wait_for_handlers(timeout=...)`。
+
+**测试**：新增 `tests/test_event_bus.py`（103 项：通配口径三处一致 + 索引与旧「整表扫描」逐条等价 +
+失败可观测 / 严格模式 / 退订同步索引 / `stats`）+ `tests/test_live_console.py`（7 项：进度按段点亮 / 重复去重 /
+告警两种前缀 / 退订停订 / 无总线只告警）。全量 **1475 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线）。
+文档：`docs/ARCH.md` 新增「事件总线（`event_bus.py`，2026-09-21 硬化）」一节；`docs/ERROR-CODE-SPEC.md` 的
+`TRM-9005` 补接线说明。
 
 ---
 
@@ -361,7 +386,7 @@ L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线
 
 1. ✅ **P0 安全响应链接线**（2026-09-20 审计新立，**2026-09-21 闭环**）—— L4 只拦不报 → 现在「扫描 → 广播（扁平载荷）→ SecExecutor（审计/通知/阻断）→ 网关处置（deny/kill/freeze/isolate → 拒绝，confirm → 确认）→ 剧本被 `security.monitor_result` 驱动」一条链全通，且**任何入口**的网关都过 L4。四个提交（统一契约 `087a476` → L4 走 `inspect()` `d5393a6` → 装配/处置/签名 `dbc411e` → 定 `workflow.trigger` 归属 `f6ecfe4`）见 `TODO.md`「EventBus 通信缺口」
 2. 🟠 **E5 官方分发渠道**（分发面已闭环，剩第三片）—— 第一片 `9b40be2`（`.trmpkg` 包格式 + 校验器）；第二片 `2aec23b` → `4e29b4e`（`trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + E6 遗留的证书 `capabilities` 运行期交集）。剩：`trm install --remove`（卸载 + 注销登记）、官网服务端与目录托管（`DEFAULT_INDEX_URL` 仍是占位）、多用户边界（`docs/ECOSYSTEM-STRATEGY.md` §7.2）；**逐条实施计划（红线 + 测试清单）见 `TODO.md`「🚚 E5 第三片实施计划」**
-3. 🟠 **总线硬化**（P0 的配套）—— `_safe_call` 别静默吞异常 + 兑现 `TRM-9005`；`EventIndex` 接进 `EventBus`；修 `LiveConsole.subscribe_events` 的订阅 / 比对不匹配；清死订阅与过期文档
+3. ✅ **总线硬化**（2026-09-21 完成，穿插项步骤 B，见上）—— `_safe_call` 不再吞异常（计数 + 广播 `event.eventbus.dispatch_failed` + 严格模式抛 `TRM-9005`）；`EventIndex` 接进 `EventBus.publish`；`LiveConsole.subscribe_events` 改按段匹配并补订 `security.*`；SDK 侧 `publish(...)` 误用改 `emit_event(...)`
 4. 🟠 **W1 遗留：`WorkflowListener` / TARL 三段式接线** —— `event.transform.completed` 无生产者、`TransformAgent` 无调用点、`WorkflowListener` 未实例化（要把 TransformAgent 接进 daemon + 决策 + 确认，比 P0 大）；另：运行记录只在内存、内置剧本只有落盘式开关
 5. 🟡 **桌面/WebSocket 确认通道**（P2）—— `SecurityAgent.confirm()` 目前只有 CLI 交付手段
 6. 🟡 **CLI 小缺口三连** —— `trm security revoke <token_id>` / `trm ask -i` 的中断处理（`ask.py` 无 `KeyboardInterrupt` / `EOFError`）/ `trm memory import|export`

@@ -103,6 +103,22 @@
 - **学习旁路**：行为采样（`_observe_behavior`）在 `_record_audit()` 开头执行、先于 `enable_audit`
   早退，因此学习不依赖审计开关。
 
+## 事件总线（`event_bus.py`，2026-09-21 硬化）
+
+- **匹配口径只有一处实现**：`event_index.matches()`（首段分桶 + `*` 浮动匹配 1+ 段）。`EventBus.publish`
+  走 `EventIndex.match()`（按首段分桶，不再整表线性扫描），`EventBus._matches` / `EventIndex._matches`
+  都转发到它。**workflow 触发器匹配故意不同**（`WorkflowRuntime.type_matches` 先剥 `event.` / `task.`
+  前缀再 `fnmatch` —— 那是给写 YAML 的人看的宽松口径）：两套口径都由测试钉住，别顺手「统一」。
+- **失败可观测**：订阅者抛异常 → `WARNING` 日志（订阅者名 + 事件类型 + 堆栈）+ `dispatch_failures` 计数 +
+  `last_failure` 快照（事件类型 / 订阅者 / 错误 / 时间）+ 向总线广播 `event.eventbus.dispatch_failed`
+  （这条事件自己失败时只记不播，防转圈）。坏的订阅者仍然不影响别人、也不影响发事件的人（各自一个 Task）。
+- **严格模式**：`TRIMUM_BUS_STRICT=1`（或 `EventBus(strict=True)`）→ 订阅者异常抛 `TrimumError(TRM-9005)`，
+  由 `await bus.wait_for_handlers()` 收集 —— `publish` 是 fire-and-forget，异常得有地方收。默认关。
+- **观测面**：`bus.stats()`（patterns / subscribers / history / in_flight / dispatch_failures / strict）与
+  `await bus.wait_for_handlers(timeout=...)`；`LiveConsole.subscribe_events()` 按**段**判进度
+  （`task.node.started` 也算 `started`）并对重复的同一（种类, 名字）去重，安全告警另订 `security.*` /
+  `event.security.*`。
+
 ## 策略学习反馈环
 
 ```

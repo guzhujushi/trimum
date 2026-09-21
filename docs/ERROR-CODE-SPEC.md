@@ -152,6 +152,10 @@ TRM-<Category><Number>
 | TRM-9004 | InternalStateCorrupted | Internal data structure in an inconsistent state |
 | TRM-9005 | EventBusDispatchFailed | Failed to dispatch event to registered listeners |
 
+> `TRM-9005` 于 2026-09-21 接线（穿插项步骤 B）：`EventBus` 严格模式（`TRIMUM_BUS_STRICT=1` 或
+> `EventBus(strict=True)`）下，订阅者异常由 `await bus.wait_for_handlers()` 抛出；默认模式下只记日志 +
+> 计数（`dispatch_failures`）+ 广播 `event.eventbus.dispatch_failed`。见 `docs/ARCH.md`「事件总线」。
+
 ---
 
 ## 4. Usage in Python Code

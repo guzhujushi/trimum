@@ -24,7 +24,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-from .event_bus import EventBus, SystemEvent
+from .event_bus import NAMESPACE_EVENT, EventBus, SystemEvent
 
 # Windows GBK 控制台不支持 emoji，自动降级
 import sys
@@ -57,8 +57,10 @@ class LiveConsole:
         self.event_bus = event_bus
         self._progress: Optional[Progress] = None
         self._live: Optional[Live] = None
-        self._subscription_pattern: Optional[str] = None
-        self._subscription_callback: Optional[Any] = None
+        # 订阅表：(pattern, callback) —— 进度（<namespace>.*）与安全告警（security.*）两棵命名空间
+        self._subscriptions: list[tuple[str, Any]] = []
+        # 同一个（种类, 名字）连播两次就不重复打印：直接调用与事件订阅会撞车
+        self._last_step_key: Optional[tuple[str, str]] = None
 
     # ── 基本输出 ──
 
@@ -127,16 +129,34 @@ class LiveConsole:
 
     # ── 步骤状态 ──
 
+    def _already_shown(self, kind: str, name: str) -> bool:
+        """同一个（种类, 名字）连着来两次 → 不重复打印。
+
+        为什么会有连着两次：``AgentLoop`` 既直接调 ``step_*``，又通过 Event Bus 订阅
+        ``task.*``（两条路都在，重复打印只是噪音）。
+        """
+        key = (kind, name)
+        if self._last_step_key == key:
+            return True
+        self._last_step_key = key
+        return False
+
     def step_start(self, name: str):
+        if self._already_shown("start", name):
+            return
         _console.print(f"   [{Text('进行中', style='bold cyan')}] {name}")
 
     def step_done(self, name: str, detail: str = ""):
+        if self._already_shown("done", name):
+            return
         msg = f"  ✅ [bold]{name}[/]"
         if detail:
             msg += f" — {detail}"
         _console.print(msg)
 
     def step_skip(self, name: str, reason: str = ""):
+        if self._already_shown("skip", name):
+            return
         _console.print(f"  ⏭ [{Text('跳过', style='dim')}] {name}"
                       f"{' — ' + reason if reason else ''}")
 
@@ -149,7 +169,15 @@ class LiveConsole:
     # ── Event 流订阅 ──
 
     async def subscribe_events(self, namespace: str = "agent"):
-        """订阅 Event Bus 的任务进度事件并显示。"""
+        """订阅 Event Bus 的任务进度事件并显示。
+
+        匹配按**段**判（``task.started`` / ``task.node.started`` / ``event.task.started``
+        都算 ``started``）：以前按全等比较，于是除了 ``AgentLoop`` 自己发的
+        ``task.started``，其余（含引擎的 ``task.node.started``）都点不亮。
+        安全告警按后缀判（``security.alert`` 与 ``event.security.alert`` 都收）。
+        订阅两棵命名空间：``<namespace>.*`` 收进度、``security.*`` 收告警 —— 以前只订前者，
+        于是告警那条分支从来没有被喂到过。
+        """
         if not self.event_bus:
             self.warning("Event Bus 未配置，无法订阅事件")
             return
@@ -157,31 +185,32 @@ class LiveConsole:
         async def _handler(event: SystemEvent):
             event_type = event.event_type
             payload = event.payload or {}
+            segments = event_type.split(".")
+            kind = segments[-1]
+            name = payload.get("name", "未知任务")
 
-            if event_type == "task.started":
-                name = payload.get("name", "未知任务")
+            if "task" in segments and kind == "started":
                 self.step_start(name)
-            elif event_type == "task.completed":
-                name = payload.get("name", "未知任务")
+            elif "task" in segments and kind == "completed":
                 self.step_done(name)
-            elif event_type == "task.skipped":
-                name = payload.get("name", "未知任务")
-                reason = payload.get("reason", "")
-                self.step_skip(name, reason)
-            elif event_type == "security.alert":
-                detail = payload.get("detail", "")
-                self.warning(f"安全告警: {detail}")
+            elif "task" in segments and kind == "skipped":
+                self.step_skip(name, payload.get("reason", ""))
+            elif event_type.endswith("security.alert"):
+                self.warning(f"安全告警: {payload.get('detail', '')}")
 
-        self._subscription_pattern = f"{namespace}.*"
-        self._subscription_callback = _handler
-        self.event_bus.subscribe(self._subscription_pattern, _handler)
+        # 告警两种前缀都有人发：SecExecutor 直接造 ``security.alert``，
+        # 走 emit_event 的则是 ``event.security.alert``
+        patterns = [f"{namespace}.*", "security.*", f"{NAMESPACE_EVENT}security.*"]
+        for pattern in patterns:
+            self.event_bus.subscribe(pattern, _handler)
+            self._subscriptions.append((pattern, _handler))
 
     def unsubscribe(self):
-        """取消事件订阅。"""
-        if self._subscription_pattern and self._subscription_callback and self.event_bus:
-            self.event_bus.unsubscribe(self._subscription_pattern, self._subscription_callback)
-        self._subscription_pattern = None
-        self._subscription_callback = None
+        """取消事件订阅（进度与安全告警一起摘）。"""
+        if self.event_bus:
+            for pattern, callback in self._subscriptions:
+                self.event_bus.unsubscribe(pattern, callback)
+        self._subscriptions = []
 
     # ── 进度条 ──
 

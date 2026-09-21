@@ -3,14 +3,34 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import time
 from collections import deque
 from typing import Any, Callable, Coroutine
 
-from trimum_core.models import EventSeverity, SystemEvent
+from trimum_core.event_index import EventIndex
+from trimum_core.event_index import matches as event_type_matches
+from trimum_core.models import EventSeverity, SystemEvent, TRMErrorCode, TrimumError
+
+log = logging.getLogger(__name__)
 
 
 Callback = Callable[[SystemEvent], Coroutine[Any, Any, None] | None]
+
+STRICT_ENV = "TRIMUM_BUS_STRICT"
+"""环境变量：置 1/true/yes/on → 订阅者异常直接抛出（默认只记一笔 + 广播失败事件）。"""
+
+
+def strict_from_env() -> bool:
+    """从环境变量读严格模式（daemon / CI 想「静默失败算失败」就打开）。"""
+    return os.environ.get(STRICT_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def callback_name(callback: Callable[..., Any]) -> str:
+    """订阅者的可读名字（日志与失败事件里点名用）。"""
+    name = getattr(callback, "__qualname__", None) or getattr(callback, "__name__", None)
+    return str(name) if name else repr(callback)
 
 
 # ── Namespace constants (consumed by planner_agent) ──────────
@@ -39,6 +59,7 @@ class EventBus:
         event_type: str,
         source: str,
         payload: dict | None = None,
+        severity: EventSeverity | str = EventSeverity.INFO,
     ) -> None:
         """Convenience: create and publish a SystemEvent in one call.
 
@@ -47,7 +68,7 @@ class EventBus:
         event = SystemEvent(
             event_type=f"{NAMESPACE_EVENT}{event_type}",
             source=source,
-            severity=EventSeverity.INFO,
+            severity=EventSeverity(severity),
             payload=payload or {},
             timestamp=time.time(),
         )
@@ -92,9 +113,19 @@ class EventBus:
 
     _MAX_HISTORY = 100
 
-    def __init__(self) -> None:
+    FAILURE_EVENT_TYPE = f"{NAMESPACE_EVENT}eventbus.dispatch_failed"
+    """订阅者抛异常时广播的事件类型（``event.eventbus.dispatch_failed``）。"""
+
+    def __init__(self, *, strict: bool | None = None) -> None:
+        """``strict=None`` 时看环境变量 ``TRIMUM_BUS_STRICT``（默认关）。"""
         self._subscribers: dict[str, list[Callback]] = {}
         self._history: deque[SystemEvent] = deque(maxlen=self._MAX_HISTORY)
+        # 首段分桶索引：publish 不再对整张订阅表线性扫描（2026-09-21 总线硬化）
+        self._index = EventIndex()
+        self._strict = strict_from_env() if strict is None else strict
+        self._dispatch_failures = 0
+        self._last_failure: dict[str, Any] | None = None
+        self._pending: list[asyncio.Task[None]] = []
 
     # ------------------------------------------------------------------
     # Publish
@@ -117,16 +148,13 @@ class EventBus:
         # Keep a copy for history
         self._history.append(event.model_copy(deep=True))
 
-        # Collect matching callbacks — iterate entire subscriber map
-        # since any pattern may be a wildcard.
-        targets: list[Callback] = []
-        for pattern, subs in self._subscribers.items():
-            if pattern == "*" or self._matches(pattern, event.event_type):
-                targets.extend(subs)
+        # 匹配走首段分桶索引（返回的听众与旧的全表扫描逐条相同，见 EventIndex.match）
+        targets = self._index.match(event.event_type)
 
-        # Fire each in its own Task, catching & logging errors silently
+        # 每条一个 Task（互不阻塞）；失败不再静默，见 _safe_call
+        self._pending = [task for task in self._pending if not task.done()]
         for cb in targets:
-            asyncio.ensure_future(self._safe_call(cb, event))
+            self._pending.append(asyncio.ensure_future(self._safe_call(cb, event)))
 
     # ------------------------------------------------------------------
     # Subscribe / Unsubscribe
@@ -138,6 +166,7 @@ class EventBus:
         Pass ``*`` to receive *all* events.
         """
         self._subscribers.setdefault(event_type, []).append(callback)
+        self._index.add_listener(event_type, callback)
 
     def unsubscribe(self, event_type: str, callback: Callback) -> None:
         """Remove a previously registered *callback* for *event_type*.
@@ -155,6 +184,9 @@ class EventBus:
         # Clean up empty subscriber lists
         if not subs:
             del self._subscribers[event_type]
+
+        # 索引跟着退订走（不然 publish 还会把事件发给已经退订的人）
+        self._index.remove_listener(event_type, callback)
 
     # ------------------------------------------------------------------
     # History
@@ -195,7 +227,7 @@ class EventBus:
 
     @staticmethod
     def _matches(pattern: str, actual: str) -> bool:
-        """通配符匹配，``*``  匹配任意单段，支持 pattern 短于 actual。
+        """通配符匹配（实现只有一处：``event_index.matches``，这里只是转发）。
 
         规则：
         - ``*`` 匹配任意单段
@@ -207,56 +239,121 @@ class EventBus:
             "confirm.*.required"  vs "confirm.wf1.A.required"  → True
             "node.*.completed"  vs "node.wf1.B.started"  → False
         """
-        if pattern == "*":
-            return True
-        pp = pattern.split(".")
-        ap = actual.split(".")
-        if len(pp) > len(ap):
-            return False
+        return event_type_matches(pattern, actual)
 
-        pi = 0  # pattern index
-        ai = 0  # actual index
-        while pi < len(pp) and ai < len(ap):
-            p = pp[pi]
-            if p == "*":
-                # * 在尾部：匹配剩余所有段
-                if pi == len(pp) - 1:
-                    return True
-                # * 在中间：找出剩余 pattern 能否在 actual 中匹配
-                # 把剩下的 pattern (pi+1 起) 对齐 actual 尾部
-                remaining = len(pp) - pi - 1
-                # 必须至少给 remaining 段留位置
-                ai_end = len(ap) - remaining
-                # * 匹配的段数 = ai_end - ai；至少 1 段
-                if ai_end <= ai:
-                    return False
-                # 跳过这 1+ 段，直接去匹配后面的段
-                ai = ai_end
-                pi += 1
-                continue
-            if p != ap[ai]:
-                return False
-            pi += 1
-            ai += 1
+    @classmethod
+    def matches(cls, pattern: str, actual: str) -> bool:
+        """公开口径：总线订阅匹配（segment 严格，**不**剥命名空间前缀）。
 
-        return pi == len(pp) and ai == len(ap)
+        与 workflow 触发器匹配（``WorkflowRuntime.type_matches``）**故意不同**：后者先去掉
+        ``event.`` / ``task.`` 前缀再 ``fnmatch``（写 YAML 的人写的是「人话」）。两层口径
+        都由测试钉住，别顺手「统一」—— 它们是给两种人写的两种宽松度。
+        """
+        return cls._matches(pattern, actual)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    async def _safe_call(callback: Callback, event: SystemEvent) -> None:
-        """Await *callback* and swallow any exception.
+    async def _safe_call(self, callback: Callback, event: SystemEvent) -> None:
+        """跑一个订阅者。**出错不再静默**（2026-09-21 总线硬化）：
 
-        Exceptions are intentionally suppressed so that one broken
-        subscriber never poisons the event bus for others.
+        - 记日志（订阅者名 + 事件类型 + 堆栈）+ 计数（:attr:`dispatch_failures`）；
+        - 广播 :attr:`FAILURE_EVENT_TYPE`，让「事件到底发没发出去」在总线上看得见；
+        - 严格模式（``TRIMUM_BUS_STRICT=1`` / ``EventBus(strict=True)``）把异常抛出去，
+          交给 :meth:`wait_for_handlers` 收集 —— 订阅者写错就是错，不该只表现为「事件没反应」。
+
+        坏的订阅者仍然**不会**影响别的订阅者、也不影响发事件的人：那些都在各自的 Task 里。
         """
         try:
             result = callback(event)
             if result is not None:
-                # It is a coroutine function — await it
+                # 协程函数 —— await 它
                 await result
-        except Exception:  # noqa: BLE001
-            # Logged / surfaced through a dedicated channel in production.
-            pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            await self._on_dispatch_failure(callback, event, exc)
+            if self._strict:
+                raise TrimumError(
+                    TRMErrorCode.EVENT_BUS_DISPATCH_FAILED,
+                    message=(
+                        f"subscriber {callback_name(callback)} failed on "
+                        f"{event.event_type}: {exc}"
+                    ),
+                    context={"event_type": event.event_type},
+                ) from exc
+
+    async def _on_dispatch_failure(
+        self, callback: Callback, event: SystemEvent, exc: BaseException
+    ) -> None:
+        """记一笔 + 广播失败事件（失败事件自己再失败时只记不播，防转圈）。"""
+        self._dispatch_failures += 1
+        self._last_failure = {
+            "event_type": event.event_type,
+            "callback": callback_name(callback),
+            "source": event.source,
+            "error": f"{type(exc).__name__}: {exc}",
+            "at": time.time(),
+        }
+        log.warning(
+            "event_bus.dispatch_failed event=%s callback=%s error=%s",
+            self._last_failure["event_type"],
+            self._last_failure["callback"],
+            self._last_failure["error"],
+            exc_info=exc,
+        )
+        if event.event_type == self.FAILURE_EVENT_TYPE:
+            return
+        if not self._index.match(self.FAILURE_EVENT_TYPE):
+            return  # 没人听就不发，省掉无谓的 Task
+        await self.emit_event(
+            "eventbus.dispatch_failed",
+            "event-bus",
+            dict(self._last_failure),
+            severity=EventSeverity.WARNING,
+        )
+
+    # ── 观测面（「事件到底发没发出去」） ──────────────
+
+    @property
+    def dispatch_failures(self) -> int:
+        """订阅者异常计数（进程内累计）。"""
+        return self._dispatch_failures
+
+    @property
+    def last_failure(self) -> dict[str, Any] | None:
+        """最近一次订阅者异常（``None`` = 还没坏过）。"""
+        return None if self._last_failure is None else dict(self._last_failure)
+
+    @property
+    def strict(self) -> bool:
+        """严格模式（订阅者异常会被抛出来）。"""
+        return self._strict
+
+    def stats(self) -> dict[str, Any]:
+        """总线自述（排障与观测面用）。"""
+        return {
+            "patterns": len(self._subscribers),
+            "subscribers": sum(len(subs) for subs in self._subscribers.values()),
+            "history": len(self._history),
+            "in_flight": sum(1 for task in self._pending if not task.done()),
+            "dispatch_failures": self._dispatch_failures,
+            "last_failure": self.last_failure,
+            "strict": self._strict,
+        }
+
+    async def wait_for_handlers(self, *, timeout: float | None = None) -> None:
+        """等「在飞的订阅者回调」跑完；异常按原样抛出（严格模式与测试用）。
+
+        ``publish`` 是 fire-and-forget（每个订阅者一个 Task），所以严格模式下的异常
+        得有个地方收 —— 就是这里。
+        """
+        pending = [task for task in self._pending if not task.done()]
+        if not pending:
+            return
+        gather = asyncio.gather(*pending)
+        if timeout is None:
+            await gather
+        else:
+            await asyncio.wait_for(gather, timeout)

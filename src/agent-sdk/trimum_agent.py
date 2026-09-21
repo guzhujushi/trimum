@@ -10,8 +10,11 @@ TrimumAgent — 在 Pydantic AI Agent 上包装 trimum 权限层。
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any, Optional
+
+log = logging.getLogger(__name__)
 
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai import RunContext
@@ -161,10 +164,12 @@ class TrimumAgent:
                         )
 
             # 3. 发布事件（如果有 Event Bus）
+            #    publish() 只收 SystemEvent —— 这里要用 emit_event()（自动补 event. 前缀）
             if self._event_bus is not None:
                 try:
-                    await self._event_bus.publish(
+                    await self._event_bus.emit_event(
                         "tool.executing",
+                        "agent-sdk",
                         {
                             "agent_id": self._agent_id,
                             "tool": fn.__name__,
@@ -172,8 +177,9 @@ class TrimumAgent:
                             "risk": getattr(decision, "risk_level", "low"),
                         },
                     )
-                except Exception:
-                    pass  # 事件发布失败不阻塞执行
+                except Exception as exc:
+                    # 事件发布失败不阻塞执行，但留痕（以前是 pass，出错等于没发生）
+                    log.warning("agent-sdk: 发布 tool.executing 事件失败: %s", exc)
 
             # 4. 执行实际 tool 函数
             return await fn(ctx, *args, **kwargs)

@@ -1,9 +1,9 @@
-"""Event Index — index layer reserved for optimizing EventBus listener matching.
+"""Event Index — first-segment bucket index for EventBus listener matching.
 
-The current ``EventBus._matches()`` performs a linear scan over all
-registered patterns. This module preserves those wildcard-matching
-semantics exactly while storing listeners in first-segment buckets so a
-future EventBus integration only has to inspect relevant buckets.
+``EventBus.publish()`` matches subscribers through this index instead of walking
+the whole subscriber map, and :meth:`EventIndex.match` returns exactly the
+listeners the old linear scan would have returned — the wildcard rules live in
+one place (:func:`matches`).
 
 Example:
     index = EventIndex()
@@ -21,6 +21,50 @@ from trimum_core.models import SystemEvent
 
 ListenerCallback = Callable[[SystemEvent], Coroutine[Any, Any, None] | None]
 """Type alias for an EventIndex listener callback."""
+
+
+def matches(pattern: str, actual: str) -> bool:
+    """事件类型通配匹配 —— **全库唯一实现**（``EventIndex`` 与 ``EventBus`` 都用它）。
+
+    规则（2026-09-21 收敛到一处，改这里就是改全部）：
+
+    - ``*`` 匹配任意单段；
+    - 尾部 ``*`` 匹配剩余所有段；
+    - 非尾部 ``*`` 浮动匹配 1+ 段（``node.*.completed`` 命中 ``node.wf1.A.completed``）；
+    - pattern 段数多于 actual 段数 → 不匹配；
+    - ``*`` 单独作为 pattern → 命中一切。
+
+    注意这**不是** workflow 触发器的口径：触发器匹配（``WorkflowRuntime.type_matches``）
+    会先剥掉 ``event.`` / ``task.`` 命名空间前缀再 ``fnmatch``（写 YAML 的人写的是「人话」）。
+    两层口径都由测试钉住，别顺手「统一」——它们是给两种人写的两种宽松度。
+    """
+    if pattern == "*":
+        return True
+    pp = pattern.split(".")
+    ap = actual.split(".")
+    if len(pp) > len(ap):
+        return False
+
+    pi = 0
+    ai = 0
+    while pi < len(pp) and ai < len(ap):
+        part = pp[pi]
+        if part == "*":
+            if pi == len(pp) - 1:
+                return True
+            remaining = len(pp) - pi - 1
+            ai_end = len(ap) - remaining
+            if ai_end <= ai:
+                return False
+            ai = ai_end
+            pi += 1
+            continue
+        if part != ap[ai]:
+            return False
+        pi += 1
+        ai += 1
+
+    return pi == len(pp) and ai == len(ap)
 
 
 class EventIndex:
@@ -101,39 +145,10 @@ class EventIndex:
     def _matches(pattern: str, actual: str) -> bool:
         """Return whether wildcard *pattern* matches *actual*.
 
-        This mirrors ``EventBus._matches`` semantics:
-        - ``*`` matches any single segment.
-        - A trailing ``*`` matches all remaining segments.
-        - A non-trailing ``*`` floats to match one or more segments.
-        - A pattern with more segments than *actual* never matches.
+        Thin alias of the module-level :func:`matches` — the wildcard rules
+        live in exactly one place (``EventBus._matches`` delegates here too).
         """
-        if pattern == "*":
-            return True
-        pp = pattern.split(".")
-        ap = actual.split(".")
-        if len(pp) > len(ap):
-            return False
-
-        pi = 0
-        ai = 0
-        while pi < len(pp) and ai < len(ap):
-            part = pp[pi]
-            if part == "*":
-                if pi == len(pp) - 1:
-                    return True
-                remaining = len(pp) - pi - 1
-                ai_end = len(ap) - remaining
-                if ai_end <= ai:
-                    return False
-                ai = ai_end
-                pi += 1
-                continue
-            if part != ap[ai]:
-                return False
-            pi += 1
-            ai += 1
-
-        return pi == len(pp) and ai == len(ap)
+        return matches(pattern, actual)
 
     async def _invoke(self, callback: ListenerCallback, event: SystemEvent) -> None:
         """Invoke a listener, awaiting async listeners when needed."""
