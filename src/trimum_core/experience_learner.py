@@ -34,6 +34,7 @@ import os
 import time
 from typing import Any, Optional
 
+from . import llm_router
 from .event_bus import EventBus
 from .models import SystemEvent, EventSeverity
 
@@ -158,6 +159,11 @@ class ExperienceLearner:
         self._model = model or os.environ.get(ENV_MODEL, DEFAULT_MODEL)
         self._base_url = base_url or os.environ.get(ENV_BASE_URL, DEFAULT_BASE_URL)
         self._api_key = api_key or os.environ.get(ENV_API_KEY) or os.environ.get(FALLBACK_ENV_API_KEY, "")
+        if not self._api_key:
+            # .env 里只写 TRIMUM_LLM_API_KEY_ENV=JIAOWOISAN_API_KEY 时也要能拿到 key
+            self._api_key = llm_router.resolve_env_api_key(
+                llm_router.ROLE_EXPERIENCE, default_env=ENV_API_KEY
+            )
         self._dedup_window = dedup_window
 
         # In-memory dedup cache: agent_id -> {fingerprint: last_seen}
@@ -304,9 +310,10 @@ class ExperienceLearner:
         user_prompt: str,
         timeout: float = 15.0,
     ) -> Optional[str]:
-        """Call OpenAI-compatible chat completions API via urllib.
+        """调 LLM 总结失败经验（经 llm_router：交我算为主、DeepSeek 兜底、限流）。
 
-        Runs in a thread executor to avoid blocking the event loop.
+        用 urllib 在**线程**里发请求，避免阻塞事件循环；任何失败都返回 None
+        —— 经验沉淀是尽力而为，不值得让调用方跟着炸。
         """
         if not self._api_key:
             log.warning(
@@ -317,32 +324,31 @@ class ExperienceLearner:
             )
             return None
 
-        url = f"{self._base_url.rstrip('/')}/chat/completions"
-        body = json.dumps({
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 512,
-        }).encode("utf-8")
-
         def _do_request() -> Optional[str]:
-            """Synchronous HTTP request via urllib."""
+            """同步 HTTP：由 llm_router 决定用哪个 provider、要不要等、失败了换谁。"""
             import urllib.error  # noqa: F811
             import urllib.request  # noqa: F811
 
-            req = urllib.request.Request(
-                url,
-                data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self._api_key}",
-                },
-                method="POST",
-            )
-            try:
+            def _attempt(target: "llm_router.LlmTarget") -> Optional[str]:
+                body = json.dumps({
+                    "model": target.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 512,
+                }).encode("utf-8")
+
+                req = urllib.request.Request(
+                    f"{target.base_url.rstrip('/')}/chat/completions",
+                    data=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {target.api_key}",
+                    },
+                    method="POST",
+                )
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                 # Navigate OpenAI-compatible response
@@ -350,16 +356,23 @@ class ExperienceLearner:
                 if not choices:
                     return None
                 return choices[0].get("message", {}).get("content", "")
-            except urllib.error.HTTPError as e:
-                log.warning(
-                    "ExperienceLearner: LLM HTTP %s — %s",
-                    e.code,
-                    e.read().decode("utf-8", errors="replace")[:200],
+
+            try:
+                content, target = llm_router.run_with_fallback(
+                    llm_router.ROLE_EXPERIENCE,
+                    _attempt,
+                    defaults={
+                        "model": self._model,
+                        "base_url": self._base_url,
+                        "api_key": self._api_key,
+                        "timeout": timeout,
+                    },
                 )
-                return None
-            except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
+            except llm_router.LlmCallError as e:
                 log.warning("ExperienceLearner: LLM request failed — %s", e)
                 return None
+            log.debug("ExperienceLearner: 本次经验来自 %s", target.label)
+            return content
 
         return await asyncio.to_thread(_do_request)
 

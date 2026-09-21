@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地，`docs/SANDBOX-PLAN.md` §9.3.7）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -16,6 +16,81 @@
 
 ---
 
+## 2026-09-21 真机切开关（TCP 收口落地）+ LLM 路由 / 限流 / 回退（✅ 真机已验；**改动未提交**）
+
+**这一轮干了两件事，都在真机上验收过。**
+
+### 1) TCP 收口（沙箱前置片 S0）：从「脚本就绪」到「生产已切」
+
+| 步骤 | 结果 |
+|---|---|
+| 整树同步 | `sudo bash /tmp/sync_opt_tree.sh --restart` ✅ 部署树 `/opt/trimum/src` **62 → 73 个模块**；备份 `/var/backups/trimum/src-20260921-224003`；重启后 `trm status` 正常 |
+| 切开关 | `sudo bash /tmp/switch_ipconly.sh --apply` ✅ **PASS=10 WARN=0 FAIL=0**（证据 `/tmp/switch-ipconly-*.log`） |
+| 验收口径 | `trm status` → `http: disabled` + `ipc socket: ok` + `source: rpc`；`ss -ltnp \| grep 8321` **无输出**；daemon 只持有 workflow driver 的临时端口 |
+
+**踩的坑（已进脚本与文档）**：第一次 `--apply` 只做了一半 —— 输出被 `head -32` 截断，写端吃到 **SIGPIPE**
+被打死，结果 **drop-in 写了但 `daemon-reload`/`restart` 没跑**（等于什么都没生效）。重跑改成
+**`setsid bash … > /tmp/apply.out 2>&1 </dev/null` 脱离会话**执行、再读文件看结论。
+更早那条：`fs.protected_regular=2` 下 **root 也不能 O_CREAT 覆盖 `/tmp` 里属主是别人的普通文件**
+（`/tmp/.trm-walk.py` 权限不够的真因），所以预演产物一律进「每次运行新建的 mktemp 目录」（§9.3.9）。
+
+一键退：`sudo bash /tmp/switch_ipconly.sh --rollback`；整树退：`sudo bash /tmp/sync_opt_tree.sh --rollback`。
+
+### 2) LLM 路由 / 限流 / 回退：从「5 个调用点各干各的」到「一处策略」
+
+**事实修正（实测，不再靠猜）**：
+- 交我算 `GET /api/v1/models` = `minimax, qwen, claw, deepseek-chat, deepseek-reasoner, minimax-m2.7, qwen3.8-27b`
+  → 用户口径的「QWEN3.6-27B」真实 id 是 **`qwen3.8-27b`**。
+- DeepSeek 官方只有 **`deepseek-flash` / `deepseek-v4-pro`** 两档 —— **`deepseek-chat` 已下架**，
+  而项目旧默认值写的正是它（本轮改成 `deepseek-flash`）。
+
+**分工（真机实测路由表）**：
+
+```
+policy / planner / transform / experience : 主 qwen3.8-27b @交我算（9 次/分，免费）  备 deepseek-flash
+agent（运行时会话 / 多步编排 / 流式）       : 主 deepseek-flash（要能力）            备 qwen3.8-27b
+```
+
+**代码（新/改，全部未提交）**
+
+| 文件 | 作用 |
+|---|---|
+| `src/trimum_core/llm_router.py`（新） | 唯一策略处：`resolve_targets`（选谁）/ 令牌桶（等多久）/ 失败分类 + 冷却（换谁）。**不碰 HTTP**，调用点自己发请求 |
+| `src/trimum_core/env_file.py`（新） | `.env` 加载器（此前**全仓没有任何代码读 .env**，install_fn 写进去也没人读）；按 key 叠加、已有环境变量优先 |
+| `scripts/llm_env_dropin.sh`（新） | 真机：给 trmd 加 `EnvironmentFile=-/opt/trimum/.env`；`--check / --apply / --smoke / --rollback`，验证只看键名不看键值 |
+| `llm_policy` / `planner_agent` / `transform_agent` / `experience_learner` / `agent_loop` | 5 个调用点全部改走路由（各自的降级路径一个没丢） |
+| `security_config.DEFAULT_SECURITY_YAML` | `llm:` 段 → 主 Qwen + `fallback:` 子段 deepseek-flash |
+| `tests/test_llm_router.py`(新) / `tests/test_env_file.py`(新) | 27 项 + 6 项；`tests/conftest.py` 加**两个**隔离 fixture（重置路由状态 + 快照/还原 `os.environ`）|
+| `docs/LLM-ROUTING.md`（新） | 交接文档：分工表 / env 键全表 / 限流与冷却表 / 降级表 / 运维命令 / 待办 |
+
+**真机证据（2026-09-21 22:41）**：`/opt/trimum/.env`(0600 root:guzhujushi) 与 `~/.trimum/.env`(0600) 各 18 键；
+daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`（读 `/proc/PID/environ` 键名）；
+网络冒烟 **`OK 走的 target：primary:qwen3.8-27b@models.sjtu.edu.cn 回复：可用`**；
+`trm doctor` → `LLM API connectivity: https://models.sjtu.edu.cn/api/v1` + 三个 key env 全 OK。
+
+**顺带修的老 bug**：`planner_agent` 里 `TrimumError/TRMErrorCode` **从没被 import**（那几条分支跑到就 NameError）；
+`agent_loop._chat_completion` 之前只认 `DEEPSEEK_API_KEY`（不看配置里的 `api_key`/`api_key_env`）。
+
+**跑测结果**：全量 **1547 passed / 2 failed / 10 skipped**；两条失败都是**环境基线**，非本改动引入
+（① 本机沙箱禁网 → 真调 LLM 的那条用例连接被拒；② `test_depends_on` 的 `python.exe` 不在 PATH ——
+放行网络后 ① 通过，② 与本次改动无关）。另有一条既有健壮性 bug 未修（不在本轮范围）：
+`learning_engine.load()` 用 stdlib logger 传 structlog 风格 kwargs（`profiles=`）→ 特定顺序下 TypeError。
+
+**提交前回归：修掉一处 `.env` 带出来的用例间污染。** `env_file.ensure_loaded()` 只在 CLI/daemon/client 入口调用，
+且是**模块级只跑一次** —— 只要全量跑里有一个用例跑了 `cli.main()`，开发机真实的 `~/.trimum/.env` 与仓库根 `.env`
+就会留在 `os.environ` 里，**后面所有用例都读到开发机的密钥与模型配置**。全量跑炸两条（**隔离跑都过**）：
+`test_transform_agent::test_request_contains_correct_payload`（构造参数的 `http://test.local` 被 `.env` 的
+`TRIMUM_LLM_BASE_URL` 顶掉）、`test_other_dispatchers::test_env_list_sorted`（首行变 `163_EMAIL=...`）；
+修完又暴露 `test_cli_commands::test_health_json_includes_api_key_presence`（断言「删掉 `GROQ_API_KEY` 就该缺席」，
+而 `.env` 里有它 —— 这是用例假定「环境 = `os.environ`」的旧口径，产品行为没错）。
+处理：`tests/conftest.py` 新增 `isolate_process_env`（按用例快照/还原 `os.environ` + `env_file.reset_loaded()`）、
+`env_file.reset_loaded()`、health 用例显式屏蔽 `.env`。全量回到 **1554 passed / 2 failed / 10 skipped**，
+两条失败仍是宿主基线（PATH 缺 `python.exe` + 本机沙箱断网），与本轮改动无关。
+
+**下一步**：S2 施加点收口（Landlock + `PR_SET_NO_NEW_PRIVS`，6 个 spawn 点，fail-closed + 审计）。
+LLM 侧剩余待办：跨进程限流 / token 维度计量 / `Retry-After` / `trm doctor` 显示路由表 / 成本账本（见 `docs/LLM-ROUTING.md` §8）。
+
+---
 ## 2026-09-21 S1 试装复盘 + socket 收口（✅ 代码与脚本已改；生产单元仍原样）
 
 **⚠️ 21:09 事故（同日第三轮）**：`sync_opt_socket_patch.sh` 把仓库 **HEAD 的 `api_server.py`** 装进了

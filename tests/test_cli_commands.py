@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from trimum_core.cli import main  # noqa: E402
 from trimum_core.cli.commands import doctor as doctor_mod  # noqa: E402
 from trimum_core.cli.commands import status as status_mod  # noqa: E402
+from trimum_core import env_file  # noqa: E402
 
 
 class FakeConfig:
@@ -114,6 +115,10 @@ class TestStatusCommand:
 
 class TestHealthCommand:
     def test_health_json_includes_api_key_presence(self, monkeypatch, capsys):
+        # CLI 入口会 env_file.ensure_loaded()：不挡住的话，开发机 .env 里的
+        # GROQ_API_KEY 会让「删掉就该缺席」的断言随机器变（有 .env 就挂）。
+        monkeypatch.setattr(env_file, "candidate_paths", lambda: [Path("no-such.env")])
+        monkeypatch.setattr(env_file, "_loaded", False)
         monkeypatch.setenv("DEEPSEEK_API_KEY", "present-for-test")
         monkeypatch.delenv("GROQ_API_KEY", raising=False)
 

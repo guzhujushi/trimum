@@ -47,6 +47,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from trimum_core.env_file import ensure_loaded
+
 from ._utils import fail, is_quiet, print_json, wants_json
 from .parser import build_parser
 
@@ -90,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
+    # .env 先加载：命令行里的 key 与模型路由都指望它（已存在的环境变量仍优先）
+    ensure_loaded()
     _route_diagnostics()
 
     parser = build_parser()

@@ -170,6 +170,10 @@ class RpcClient:
 
 
 def main() -> None:
+    from .env_file import ensure_loaded
+
+    ensure_loaded()
+
     parser = argparse.ArgumentParser(description="trimum JSON-RPC client")
     parser.add_argument("method", help="RPC method name (e.g. health, execute, agents.list)")
     parser.add_argument("--socket", "-s", default=None, help="Unix socket path")

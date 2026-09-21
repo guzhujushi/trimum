@@ -115,6 +115,11 @@ async def _serve_without_http(app, config) -> None:
 
 def run() -> None:
     """CLI entry point for trimum Core daemon."""
+    from .env_file import ensure_loaded
+
+    # .env 先加载：systemd 单元没配 EnvironmentFile 时，daemon 就靠这里拿到 key 与模型路由
+    ensure_loaded()
+
     parser = argparse.ArgumentParser(
         description="trimum Core Daemon - system-level AI agent runtime",
     )

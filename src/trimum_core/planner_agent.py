@@ -25,6 +25,8 @@ import yaml
 from .models import (
     EventSeverity,
     SystemEvent,
+    TRMErrorCode,
+    TrimumError,
 )
 from .workflow_engine import (
     EdgeCondition,
@@ -33,6 +35,7 @@ from .workflow_engine import (
     WorkflowDefinition,
 )
 from .event_bus import EventBus, NAMESPACE_EVENT, NAMESPACE_TASK
+from . import llm_router
 
 # ---------------------------------------------------------------------------
 # Agent SDK — 可选导入 (Planner 特有)
@@ -78,66 +81,67 @@ def _call_llm_api_fallback(
     api_key: str | None = None,
     timeout: float = 30.0,
 ) -> str:
-    """用 urllib 直接调用 OpenAI 兼容 API（Agent SDK 不可用时的回落）。"""
-    model = model or os.environ.get(PLANNER_ENV_MODEL) or os.environ.get(GLOBAL_ENV_MODEL, "deepseek-chat")
-    base_url = base_url or os.environ.get(PLANNER_ENV_BASE_URL) or os.environ.get(GLOBAL_ENV_BASE_URL,
-                                          "https://models.sjtu.edu.cn/api/v1")
-    api_key = api_key or os.environ.get(PLANNER_ENV_API_KEY) or os.environ.get(GLOBAL_ENV_API_KEY, "")
+    """用 urllib 直接调用 OpenAI 兼容 API（Agent SDK 不可用时的回落）。
 
-    if not api_key:
-        raise TrimumError(
-            TRMErrorCode.LLM_CALL_FAILED,
-            message="PlannerAgent: API Key not set (check PLANNER_LLM_API_KEY or TRIMUM_LLM_API_KEY)",
+    经 llm_router 定目标：交我算 qwen3.8-27b 为主（免费、节流 9 次/分）、DeepSeek 兜底；
+    传进来的 model/base_url/api_key 只当**默认值**，.env 的 PLANNER_LLM_* / TRIMUM_LLM_*
+    可以整体覆盖（这样换模型不用改代码）。
+    """
+    def _attempt(target: "llm_router.LlmTarget") -> str:
+        payload = json.dumps({
+            "model": target.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 4096,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            f"{target.base_url.rstrip('/')}/chat/completions",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {target.api_key}",
+            },
+            method="POST",
         )
+        with urllib.request.urlopen(req, timeout=target.timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
 
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    payload = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 0.3,
-        "max_tokens": 4096,
-    }).encode("utf-8")
+        choices = body.get("choices", [])
+        if not choices:
+            raise TrimumError(
+                TRMErrorCode.LLM_RESPONSE_INVALID,
+                message=f"LLM API returned empty choices: {json.dumps(body, ensure_ascii=False)[:300]}",
+            )
 
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        method="POST",
-    )
+        content = choices[0].get("message", {}).get("content", "")
+        if not content:
+            raise TrimumError(
+                TRMErrorCode.LLM_RESPONSE_INVALID,
+                message="LLM API returned empty content",
+            )
+
+        return content
 
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        raise TrimumError(
-            TRMErrorCode.LLM_CALL_FAILED,
-            message=f"LLM API HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:500]}",
-        ) from e
-    except Exception as e:
+        content, _target = llm_router.run_with_fallback(
+            llm_router.ROLE_PLANNER,
+            _attempt,
+            defaults={
+                "model": model,
+                "base_url": base_url,
+                "api_key": api_key,
+                "timeout": timeout,
+            },
+        )
+    except llm_router.LlmCallError as e:
         raise TrimumError(
             TRMErrorCode.LLM_CALL_FAILED,
             message=f"LLM API call failed: {e}",
         ) from e
-
-    choices = body.get("choices", [])
-    if not choices:
-        raise TrimumError(
-            TRMErrorCode.LLM_RESPONSE_INVALID,
-            message=f"LLM API returned empty choices: {json.dumps(body, ensure_ascii=False)[:300]}",
-        )
-
-    content = choices[0].get("message", {}).get("content", "")
-    if not content:
-        raise TrimumError(
-            TRMErrorCode.LLM_RESPONSE_INVALID,
-            message="LLM API returned empty content",
-        )
 
     return content
 
@@ -407,7 +411,7 @@ class PlannerAgent:
                 base_url=self._llm_kwargs.get("base_url"),
                 api_key=self._llm_kwargs.get("api_key"),
             )
-        except RuntimeError as e:
+        except (RuntimeError, TrimumError) as e:
             print(f"[PlannerAgent] LLM 调用失败: {e}")
             return None
 
@@ -634,3 +638,4 @@ class PlannerAgent:
 
 
 __all__ = ["PlannerAgent"]
+

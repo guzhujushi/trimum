@@ -556,6 +556,31 @@ ImportError: cannot import name 'SecurityRuntime' from 'trimum_core.sec_executor
 即 `sec_executor.py` 也是旧版 —— §9.3.6 踩的是**部署树**缺 `workflow_runtime.py`，这次是**开发树**缺
 `SecurityRuntime`。**两条结论**：① 两棵树都需要一次「整体同步到 HEAD」（`scripts/sync_opt_tree.sh`）；
 ② §9.3.6 那条**导入预演**是真有用的护栏 —— 谁再想「只挑几个文件装上去」，先跑预演。
+#### 9.3.9 真机切开关：第一次跑失败的两条真因（2026-09-21 第五轮）
+
+**第一次跑（21:54 / 21:56 两次 `sudo bash /tmp/sync_opt_tree.sh --restart`）都秒退**，生产一个字节没动
+（部署树仍 62 个模块、没有 `/var/backups/trimum/src-*`、daemon 仍是 21:15 起的那个）。查出来的两条真因
+都不在「加固」上，而在**脚本自己的失败路径设计**与 **`/tmp` 的跨用户语义**上：
+
+| # | 真因 | 证据 | 修法 |
+|---|---|---|---|
+| 1 | **`set -e` 把现场吃掉了**：预演命令失败（含「命令找不到」= 退出码 127）时 bash 立刻退出，**连 `ERR` trap 都不打**，用户只看到一屏无解释输出 | 本地最小复现：`set -e` + 函数里调一个不存在的命令 → 退出码 127、trap 不触发、后续 `echo` 不执行 | 预演命令用 `set +e … rc=$? … set -e` 包起来，打印退出码与原始输出；全局加 `STEP=` + `ERR` trap，中断时报出「哪一步、哪一行、什么码」 |
+| 2 | **「root 写、daemon 用户读」这条跨用户路径本来就不该存在**：预演脚本原先落地成 `/tmp/.trm-walk.py`（root 的 umask 一收紧就 `Permission denied`）；`rm -rf /tmp/trimum-sync-stage` 也会被**上一次 root 运行留下的 root 属主残留**挡住 | 真机：`/tmp/trimum-sync-stage` 属主 `root:root`；非 root 重跑时 `rm -rf` 逐文件刷「权限不够」（一次 500+ 行） | 预演代码**改走 stdin 喂给 python**，不再落地临时脚本；解出来的树 `chmod -R a+rX`；stage 删不掉就自动换 `mktemp` 新目录 |
+
+**顺带两条反向护栏**（「预演通过」必须是真通过）：① 预演输出第一行必须等于
+`ROOT <候选树>/trimum_core/__init__.py` —— venv 的 editable `.pth` 指向 `/opt/trimum/src`，
+不查这一行就可能「加载的其实是旧树」或「预演根本没跑」；② 预演命令非零退出先打 WARN，再被 ① 拦住 → `exit 3`。
+
+**真机实测（第五轮）**：正向 `--rehearse-only` **PASS**（HEAD 的 71 个模块全部 import 得过、相对旧树无新增失败）；
+反向（把 `TRIMUM_APP_DIR` 指到不存在的 venv）**正确报错并 `exit 3`**，一个字没碰生产。
+
+**本轮新增/改动的脚本**：
+
+- `scripts/switch_ipconly.sh`（新）：`--check` / `--apply` / `--rollback`。**另开**一个 drop-in
+  `20-http-off.conf`（只写 `Environment=TRIMUM_HTTP=0`，不碰已验收的 `10-hardening.conf`）；
+  `--apply` = 前置 fail-closed + 就绪门 + 三条决定性断言（daemon 自报、全机 8321 无监听、daemon 只持有临时端口）+ 失败自动回滚。
+- `scripts/sync_opt_tree.sh`（改）：装前**整树备份**到 `/var/backups/trimum/src-<时间戳>`、装前**导入预演**、
+  `--rollback` / `--restart` / `--rehearse-only`，以及上面两条真因对应的修法。
 ### 9.4 材料与缺口
 
 | 材料 | 位置 |
@@ -585,3 +610,6 @@ ImportError: cannot import name 'SecurityRuntime' from 'trimum_core.sec_executor
 > **第四轮（同日）：§9.3.5 的四条前置已在代码侧落地**（`core.http_enabled` 默认仍 `true`，生产单元未切）——
 > 改法、测试与真机切换顺序见 §9.3.7；隔离环境的真机验收（15 PASS / 0 FAIL）与两个真发现见 §9.3.8。
 > 生产单元仍未切 —— 只差「在 drop-in 里写一行 `Environment=TRIMUM_HTTP=0` 然后重启 trmd」。
+> **第五轮（同日）**：这一步做成了两个可验收脚本（整树备份 / 导入预演 / 回滚三条护栏 + 失败自动回滚），
+> 前置门已实测能拦住旧部署树（`--check` 两条 FAIL）；第一次真机跑失败的两条真因与修法见 §9.3.9。
+> 顺序：① `sudo bash /tmp/sync_opt_tree.sh --restart` ② `sudo bash /tmp/switch_ipconly.sh --check` ③ 再 `--apply`。

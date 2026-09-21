@@ -80,7 +80,7 @@ class TransformAgent:
     # ── LLM 调用 ──────────────────────────────────────────
 
     def _call_llm(self, instruction: str) -> TransformResult:
-        """调用 LLM 翻译指令。
+        """调用 LLM 翻译指令（经 llm_router：交我算为主、DeepSeek 兜底、限流）。
 
         输出格式约束（在 system prompt 中已定义，这里做二次校验）：
         1. 终端命令 → 以 SHELL: 开头
@@ -91,38 +91,42 @@ class TransformAgent:
         import urllib.error
         import urllib.request
 
-        url = f"{self._base_url.rstrip('/')}/chat/completions"
+        from trimum_core import llm_router
 
-        payload = json.dumps({
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": self._SYSTEM_PROMPT},
-                {"role": "user", "content": instruction},
-            ],
-            "temperature": self._temperature,
-            "max_tokens": 1024,
-        }).encode("utf-8")
+        def _attempt(target: "llm_router.LlmTarget") -> dict:
+            """发一次 HTTP；异常交给 llm_router 分类（重试还是换 provider）。"""
+            payload = json.dumps({
+                "model": target.model,
+                "messages": [
+                    {"role": "system", "content": self._SYSTEM_PROMPT},
+                    {"role": "user", "content": instruction},
+                ],
+                "temperature": self._temperature,
+                "max_tokens": 1024,
+            }).encode("utf-8")
 
-        req = urllib.request.Request(
-            url,
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self._api_key}",
-            },
-            method="POST",
-        )
+            req = urllib.request.Request(
+                f"{target.base_url.rstrip('/')}/chat/completions",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {target.api_key}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=target.timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
 
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            log.warning(f"transform.llm_http_error code={e.code}")
-            return TransformResult(
-                tarl=self._fallback_tarl(instruction),
-                confidence=0.2,
-                original=instruction,
-                error=f"LLM HTTP {e.code}",
+            body, target = llm_router.run_with_fallback(
+                llm_router.ROLE_TRANSFORM,
+                _attempt,
+                defaults={
+                    "model": self._model,
+                    "base_url": self._base_url,
+                    "api_key": self._api_key,
+                    "timeout": 15,
+                },
             )
         except Exception as e:
             log.warning(f"transform.llm_error error={e}")

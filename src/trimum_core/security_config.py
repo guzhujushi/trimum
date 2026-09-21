@@ -59,12 +59,21 @@ levels:
       max_processes: 20
 
 llm:
-  provider: "deepseek"
-  model: "deepseek-chat"
-  api_key_env: "DEEPSEEK_API_KEY"
-  base_url: "https://api.deepseek.com/v1"
-  timeout_seconds: 15
+  # 主模型：交我算（校园网内免费额度；硬限 10 次/分 → 客户端节流到 9 次/分）
+  provider: "jiaowoisan"
+  model: "qwen3.8-27b"
+  api_key_env: "JIAOWOISAN_API_KEY"
+  base_url: "https://models.sjtu.edu.cn/api/v1"
+  rpm: 9
+  timeout_seconds: 30
   max_retries: 2
+  # 回退：DeepSeek 官方（按量计费，只在主模型 429/5xx/超时/连不上时才用）。
+  # 想整体关掉回退：环境变量 TRIMUM_LLM_FALLBACK_ENABLED=0
+  fallback:
+    provider: "deepseek"
+    model: "deepseek-flash"
+    api_key_env: "DEEPSEEK_API_KEY"
+    base_url: "https://api.deepseek.com/v1"
 
 # Agent 级别的安全等级覆盖（可选）
 agents:

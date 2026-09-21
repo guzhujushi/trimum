@@ -123,19 +123,29 @@ class TestLLMPolicyIntegration:
         assert cached.risk == RiskLevel.HIGH
 
     @pytest.mark.asyncio
-    async def test_llm_fallback_on_no_key(self, policy, sec_config):
-        """无 API key → [llm-fallback]。"""
-        saved = os.environ.get("DEEPSEEK_API_KEY", "")
-        os.environ.pop("DEEPSEEK_API_KEY", None)
-        try:
-            llm_no_key = LlmPolicyEngine(policy_engine=policy, security_config=sec_config)
-            risk, action, reason = await llm_no_key.evaluate(
-                "rm test.txt", mode=SecurityMode.BALANCED
-            )
-            assert "[llm-fallback]" in reason
-        finally:
-            if saved:
-                os.environ["DEEPSEEK_API_KEY"] = saved
+    async def test_llm_fallback_on_no_key(self, policy, sec_config, monkeypatch):
+        """一把 key 都没有 → [llm-fallback]（主/备都不可用）。
+
+        注意：默认主 provider 是交我算（qwen3.8-27b）、备是 DeepSeek（deepseek-flash），
+        所以要**所有** key 都清掉；只清 DEEPSEEK_API_KEY 的话交我算仍然会顶上 —— 那才是
+        设计如此（免费额度优先）。
+        """
+        for name in (
+            "DEEPSEEK_API_KEY",
+            "JIAOWOISAN_API_KEY",
+            "API_KEY",
+            "TRIMUM_LLM_API_KEY",
+            "TRIMUM_LLM_API_KEY_ENV",
+            "POLICY_LLM_API_KEY",
+            "POLICY_LLM_API_KEY_ENV",
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+        llm_no_key = LlmPolicyEngine(policy_engine=policy, security_config=sec_config)
+        risk, action, reason = await llm_no_key.evaluate(
+            "rm test.txt", mode=SecurityMode.BALANCED
+        )
+        assert "[llm-fallback]" in reason
 
     @pytest.mark.asyncio
     async def test_api_server_state_injection(self):

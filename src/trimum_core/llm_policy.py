@@ -14,11 +14,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -198,26 +196,19 @@ class LlmPolicyEngine:
             return risk, action, f"[llm-fallback] {reason}"
 
     async def _call_llm(self, command: str) -> LLMDecision:
-        """调用 deepseek API 分析命令风险。
+        """调 LLM 裁决命令风险。
 
-        返回 LLMDecision 结构（风险等级 + 动作 + 理由 + 置信度）。
-
-        使用 httpx 直接调 OpenAI-compatible API，不依赖额外库。
+        经 llm_router：交我算 qwen3.8-27b 为主（免费，节流 9 次/分）、DeepSeek 兜底，
+        429/5xx/超时自动换 provider；候选链全不可用时抛 LlmCallError，
+        由 evaluate() 捕获后回落到正则结论（reason 带 [llm-fallback]）。
         """
         import httpx
 
+        from . import llm_router
+
         cfg = self._llm_config
-        base_url = cfg.get("base_url", _DEFAULT_BASE_URL)
-        model = cfg.get("model", _DEFAULT_MODEL)
-        api_key_env = cfg.get("api_key_env", _DEFAULT_API_KEY_ENV)
-        api_key = cfg.get("api_key") or os.environ.get(api_key_env, "")
-        timeout = cfg.get("timeout_seconds", 15)
-        max_retries = cfg.get("max_retries", 2)
+        fb_cfg = cfg.get("fallback") if isinstance(cfg.get("fallback"), dict) else {}
 
-        if not api_key:
-            raise ValueError(f"API key not found (env: {api_key_env})")
-
-        # 构建 prompt
         prompt = f"""分析以下命令的风险等级并返回 JSON。
 
 命令: {command}
@@ -235,57 +226,65 @@ class LlmPolicyEngine:
 - 写入/删除/安装（rm/mv/cp/dd/wget curl| chmod chown pip install 等）→ risk=medium/high, action=confirm
 - 破坏性操作（rm -rf /、dd if=/dev、mkfs、format 等）→ risk=critical, action=deny"""
 
-        last_error = None
-        for attempt in range(max_retries):
-            try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    resp = await client.post(
-                        f"{base_url.rstrip('/')}/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "model": model,
-                            "messages": [
-                                {"role": "system", "content": "You are a security risk analyzer. Return only JSON."},
-                                {"role": "user", "content": prompt},
-                            ],
-                            "temperature": 0.0,
-                            "max_tokens": 200,
-                        },
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    content = data["choices"][0]["message"]["content"].strip()
+        async def _attempt(target: "llm_router.LlmTarget") -> LLMDecision:
+            url = f"{target.base_url.rstrip('/')}/chat/completions"
+            async with httpx.AsyncClient(timeout=target.timeout) as client:
+                resp = await client.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {target.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": target.model,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "You are a security risk analyzer. Return only JSON.",
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.0,
+                        "max_tokens": 200,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
 
-                    # 提取 JSON（处理 markdown 围栏）
-                    if content.startswith("```"):
-                        content = content.split("\n", 1)[1]
-                        content = content.rsplit("```", 1)[0]
-                    content = content.strip()
+            content = data["choices"][0]["message"]["content"].strip()
+            if content.startswith("```"):
+                content = content.split("\n", 1)[1]
+                content = content.rsplit("```", 1)[0]
+            content = content.strip()
 
-                    result = json.loads(content)
-                    cmd_hash = hashlib.sha256(command.encode("utf-8")).hexdigest()[:8]
+            result = json.loads(content)
+            return LLMDecision(
+                command_hash=hashlib.sha256(command.encode("utf-8")).hexdigest()[:8],
+                risk=RiskLevel(result.get("risk", "medium")),
+                action=Action(result.get("action", "confirm")),
+                reason=result.get("reason", "LLM analysis"),
+                confidence=float(result.get("confidence", 0.5)),
+                expires_at=time.time() + self._get_cache(SecurityMode.BALANCED)._ttl,
+            )
 
-                    return LLMDecision(
-                        command_hash=cmd_hash,
-                        risk=RiskLevel(result.get("risk", "medium")),
-                        action=Action(result.get("action", "confirm")),
-                        reason=result.get("reason", "LLM analysis"),
-                        confidence=float(result.get("confidence", 0.5)),
-                        expires_at=time.time() + self._get_cache(SecurityMode.BALANCED)._ttl,
-                    )
-
-            except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError) as e:
-                last_error = e
-                if attempt < max_retries - 1:
-                    wait = (attempt + 1) * 1.0
-                    log.debug("LLM call attempt %d failed, retrying in %.1fs: %s", attempt + 1, wait, e)
-                    await asyncio.sleep(wait)
-                continue
-
-        raise last_error or RuntimeError("LLM call failed after all retries")
+        decision, target = await llm_router.arun_with_fallback(
+            llm_router.ROLE_POLICY,
+            _attempt,
+            defaults={
+                "model": cfg.get("model"),
+                "base_url": cfg.get("base_url"),
+                "api_key": cfg.get("api_key"),
+                "api_key_env": cfg.get("api_key_env"),
+                "timeout": cfg.get("timeout_seconds"),
+                "max_retries": cfg.get("max_retries"),
+                "rpm": cfg.get("rpm"),
+                "fallback_model": fb_cfg.get("model"),
+                "fallback_base_url": fb_cfg.get("base_url"),
+                "fallback_api_key_env": fb_cfg.get("api_key_env"),
+            },
+        )
+        log.debug("llm_policy: 本次决策来自 %s", target.label)
+        return decision
 
     def clear_cache(self, mode: Optional[SecurityMode] = None):
         """清空缓存。"""

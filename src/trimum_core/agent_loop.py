@@ -221,60 +221,85 @@ class AgentLoop:
         timeout: float,
         stream: bool = False,
     ) -> tuple[str, TokenUsage]:
-        """Call the configured chat-completion endpoint and return (text, usage)."""
-        import os
+        """Call the configured chat-completion endpoint and return (text, usage).
 
+        经 llm_router：agent 角色由 .env 决定用谁（本项目分工是主 deepseek-flash、
+        备交我算），429/5xx/超时自动换 provider，并按 RPM 限流；全都不可用时
+        返回空内容（调用方各自走正则/TARL 降级）。
+        """
         import httpx
 
-        llm_cfg = self.sec_config.get_llm_config()
-        base_url = llm_cfg.get("base_url", "https://api.deepseek.com/v1")
-        api_key = llm_cfg.get("api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
+        from . import llm_router
 
-        if not api_key:
+        llm_cfg = self.sec_config.get_llm_config()
+
+        async def _attempt(target: "llm_router.LlmTarget") -> tuple[str, TokenUsage]:
+            url = f"{target.base_url.rstrip('/')}/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {target.api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": target.model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            timeout_cfg = httpx.Timeout(target.timeout)
+
+            async with httpx.AsyncClient(timeout=timeout_cfg) as client:
+                if not (stream and self.stream_output):
+                    resp = await client.post(url, headers=headers, json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    content = data["choices"][0]["message"]["content"]
+                    return content, self._token_usage_from_payload(data)
+
+                async with client.stream("POST", url, headers=headers, json=payload) as resp:
+                    resp.raise_for_status()
+                    parts: list[str] = []
+                    usage = TokenUsage(calls=1)
+                    async for line in resp.aiter_lines():
+                        chunk = self._parse_sse_line(line)
+                        if chunk is None:
+                            continue
+                        delta = (chunk.get("choices") or [{}])[0].get("delta", {}).get("content", "")
+                        if delta:
+                            parts.append(delta)
+                            self._write_stream(delta)
+                        if chunk.get("usage"):
+                            usage = self._token_usage_from_payload({"usage": chunk["usage"]})
+
+                    content = "".join(parts)
+                    if content and not usage.total_tokens:
+                        usage = TokenUsage(
+                            prompt_tokens=0,
+                            completion_tokens=max(1, len(content) // 4),
+                            total_tokens=max(1, len(content) // 4),
+                            calls=1,
+                        )
+                    return content, usage
+
+        try:
+            result, target = await llm_router.arun_with_fallback(
+                llm_router.ROLE_AGENT,
+                _attempt,
+                defaults={
+                    "model": model,
+                    "base_url": llm_cfg.get("base_url", "https://api.deepseek.com/v1"),
+                    "api_key": llm_cfg.get("api_key"),
+                    "api_key_env": llm_cfg.get("api_key_env", "DEEPSEEK_API_KEY"),
+                    "timeout": timeout,
+                    "max_retries": llm_cfg.get("max_retries", 1),
+                    "rpm": llm_cfg.get("rpm"),
+                },
+            )
+        except llm_router.LlmCallError as e:
+            log.warning("chat completion failed: %s", e)
             return "", TokenUsage()
 
-        url = f"{base_url.rstrip('/')}/chat/completions"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        timeout_cfg = httpx.Timeout(timeout)
-
-        async with httpx.AsyncClient(timeout=timeout_cfg) as client:
-            if not (stream and self.stream_output):
-                resp = await client.post(url, headers=headers, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                return content, self._token_usage_from_payload(data)
-
-            async with client.stream("POST", url, headers=headers, json=payload) as resp:
-                resp.raise_for_status()
-                parts: list[str] = []
-                usage = TokenUsage(calls=1)
-                async for line in resp.aiter_lines():
-                    chunk = self._parse_sse_line(line)
-                    if chunk is None:
-                        continue
-                    delta = (chunk.get("choices") or [{}])[0].get("delta", {}).get("content", "")
-                    if delta:
-                        parts.append(delta)
-                        self._write_stream(delta)
-                    if chunk.get("usage"):
-                        usage = self._token_usage_from_payload({"usage": chunk["usage"]})
-
-                content = "".join(parts)
-                if content and not usage.total_tokens:
-                    usage = TokenUsage(
-                        prompt_tokens=0,
-                        completion_tokens=max(1, len(content) // 4),
-                        total_tokens=max(1, len(content) // 4),
-                        calls=1,
-                    )
-                return content, usage
+        log.debug("agent loop: 本次会话来自 %s", target.label)
+        return result
 
     # ── 主入口 ──
 
