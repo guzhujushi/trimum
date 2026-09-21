@@ -48,7 +48,7 @@
 | `trigger.event_type` 为空 | 只能手动跑（`run_now`） | 「没声明触发条件 = 不参与事件分发」，避免雾里执行 |
 | 重复触发 | 同一 workflow+step 已有在跑 → 跳过并记 `skipped` 事件 | 防止「事件风暴 / 自我触发」把循环跑成死循环 |
 | 事件环路 | 同一 workflow 每 10s 最多自动跑 20 次，超限发 `workflow.throttled` 并跳过（手动不受限） | 「同一 step 不并发」拦不住 `A.finished → B → A` 这种环；`workflow.finished` 又在仍算「在跑」时发出，所以自我续命也走不出第二步 |
-| builtin 威胁剧本 | `enabled: false`：能列、能手动跑、不自动触发 | 响应剧本里有 `kill` / `firewall-cmd`，自动执行等于把确认环节删掉；要自动化得用户显式 `enable` |
+| builtin 威胁剧本 | **取证类武装、处置类不武装**：`auto_trigger` 数据位说了算 | 处置剧本里有 `kill` / `firewall-cmd`，自动执行等于把确认环节删掉；且自动触发的运行里非取证步骤一律 `skipped`（不派子 Agent）—— 细节见 `docs/SECURITY-DEFENSE-PLAN.md` §三「自动触发按剧本性质分档」 |
 | 条件表达式 | 受限 `eval`（空 `__builtins__`，命名空间只有 `payload` / `event` / `true` / `false`） | 沿用引擎既有约定；YAML 是本地文本，等价于本地配置 |
 | 事件类型匹配 | 精确 → 去命名空间前缀（`event.` / `task.` 等）→ `fnmatch` 通配 | 触发器写 `security.monitor_result`，总线上的实际类型是 `event.security.monitor_result` |
 

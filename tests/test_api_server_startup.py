@@ -93,8 +93,10 @@ class TestWorkflowRuntimeWiring:
 
             ids = {item["id"] for item in runtime.list_workflows()}
             assert "threat-cron-audit" in ids
-            # 内置剧本登记但不自动触发（`trm workflow enable` 才落盘启用）
-            assert runtime.get("threat-cron-audit").enabled is False
+            # 剧本自动触发策略：取证类武装、处置类不武装（细节见
+            # tests/test_playbook_auto_trigger.py）
+            assert runtime.get("threat-cron-audit").enabled is True
+            assert runtime.get("threat-revshell-cleanup").enabled is False
 
             await runtime.stop()
             assert runtime.running is False

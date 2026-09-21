@@ -557,6 +557,25 @@ class WorkflowEngine:
 
     # ── 单节点执行 ────────────────────────────────────────
 
+    @staticmethod
+    def _auto_run_block(node: NodeDefinition, context: dict[str, Any]) -> str:
+        """事件自动触发的运行里，非取证步骤不执行；返回拦下的理由（空串 = 放行）。
+
+        剧本自动触发策略（2026-09-21 定）：剧本步骤是「命令 + 散文」混合的，散文步骤要派子
+        Agent，而子 Agent 会干什么不由剧本决定 —— 所以自动触发只放行**只读取证命令**步骤
+        （``config.auto_run=True``）。人工运行（``triggered_by != "event"``）不受此限：
+        人已经明确点了。``auto_run`` 缺省为 True，因此用户自己的 workflow 行为不变。
+        """
+        if context.get("triggered_by") != "event":
+            return ""
+        if node.config.get("auto_run", True):
+            return ""
+        kind = node.config.get("step_kind") or "非取证"
+        return (
+            f"auto_run_blocked:{kind} —— 自动触发只跑取证命令步骤，"
+            "这一步留人工（trm workflow run）"
+        )
+
     async def _execute_single_node(
         self,
         workflow_id: str,
@@ -584,6 +603,16 @@ class WorkflowEngine:
                 "workflow_id": workflow_id, "node_id": nid,
                 "reason": "workflow_cancelled",
             }, severity="warning")
+            return
+
+        # ── 自动触发的步骤闸门（剧本自动触发策略，2026-09-21）──
+        blocked = self._auto_run_block(node, context)
+        if blocked:
+            runtime.status = NodeStatus.SKIPPED
+            runtime.completed_at = time.time()
+            await self._bus.emit_task("node.skipped", {
+                "workflow_id": workflow_id, "node_id": nid, "reason": blocked,
+            })
             return
 
         # ── 检查入边条件 ──

@@ -199,10 +199,20 @@ class TestBuiltinPlaybooks:
         assert len(builtins) == len(threat_workflows.THREAT_WORKFLOWS)
         assert all(wf.id and wf.steps for wf in builtins)
 
-    def test_builtins_are_disabled_by_default(self):
+    def test_only_forensic_playbooks_are_armed(self):
+        """剧本自动触发策略（2026-09-21）：取证类武装、含处置步骤的不武装。
+
+        步骤级判据与红线见 ``tests/test_playbook_auto_trigger.py``。
+        """
+        armed: list[str] = []
         for workflow in threat_workflows.builtin_workflows():
-            assert workflow_enabled(workflow) is False
             assert workflow.config["builtin"] is True
+            assert workflow_enabled(workflow) is workflow.config["auto_trigger"]
+            if workflow_enabled(workflow):
+                armed.append(workflow.id)
+        assert sorted(armed) == sorted(threat_workflows.auto_trigger_workflows())
+        assert "threat-cron-audit" in armed
+        assert "threat-revshell-cleanup" not in armed
 
     def test_builtin_playbooks_listen_to_the_fact_chain_only(self):
         """归属（P0 步骤 3）：剧本只监听 ``security.monitor_result``（L4 事实事件）与
@@ -618,7 +628,7 @@ class TestCli:
         assert data["workflows"][0]["id"] == "demo"
         assert data["workflows"][0]["source"] == "file"
 
-    def test_list_all_includes_builtins_disabled(self, tmp_path, capsys):
+    def test_list_all_shows_builtin_arming_state(self, tmp_path, capsys):
         from trimum_core.cli import main
 
         root = self._root(tmp_path)
@@ -627,7 +637,8 @@ class TestCli:
         by_id = {item["id"]: item for item in data["workflows"]}
         assert by_id["demo"]["enabled"] is True
         assert by_id["threat-cron-audit"]["source"] == "builtin"
-        assert by_id["threat-cron-audit"]["enabled"] is False
+        assert by_id["threat-cron-audit"]["enabled"] is True  # 取证类：事件来了自动跑
+        assert by_id["threat-revshell-cleanup"]["enabled"] is False  # 处置类：要人点
 
     def test_dry_run_executes_nothing(self, tmp_path, capsys, monkeypatch):
         from trimum_core.cli import main

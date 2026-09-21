@@ -484,7 +484,8 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 |---|---|
 | step 之间不串行等待 | 「监听器 → 执行组」的字面语义；要串行就把任务写进同一个 `execute` 组（组内是串行 DAG） |
 | 同一 step 已在跑 → 跳过 | 防止「事件风暴 / 自我触发」滚成死循环；跳过时发 `event.workflow.skipped`（`reason=already_running`）。收尾事件 `workflow.finished` 在运行仍算「在跑」时发出，所以「监听自己的 finished」的 workflow 不会自我续命 |
-| 内置剧本默认 `enabled: false` | 剧本里有 `kill` / `firewall-cmd`，自动触发等于把确认环节删掉；`trm workflow enable <id>` 落盘成用户自己的文件后才常驻触发，手动 `run` 不受限 |
+| 内置剧本按性质分档武装 | **取证类 8 条**（`auto_trigger: True`）事件来了自动跑，**处置类 8 条**（含 `kill` / `firewall-cmd` / 快照写入 / 改基线）不武装 —— 处置要人点，不做「半自动处置」；`trm workflow enable <id>` 落盘成用户自己的文件后照旧常驻触发 |
+| 自动触发只跑取证步骤 | 事件触发的运行里，非取证步骤 `skipped`（`task.node.skipped`，`reason=auto_run_blocked:<kind>`）**且不派子 Agent**：散文步骤的子 Agent 会干什么不由剧本决定，所以「只读剧本」≠「只读运行」；人工 `run` 不受限。判据 `threat_workflows.step_kind()`（看不懂的散文当处置） |
 | 失败节点阻断后继 | 沿用引擎 DAG 语义（后继要求前驱 `completed` / `skipped`）——响应剧本前一步失败时不该继续动手 |
 | 运行记录只在内存 | 环形 200 条，进程重启即丢；`trm workflow status/log` 仍是桩，持久化留给后续一轮 |
 | 事件广播、退出码收窄 | 一次事件会触发**所有**命中的 workflow（运行时按 workflow 各自判定，不做独占）。但 `trm workflow run <id> --event ...` 的退出码只认 `<id>` 自己的运行，其余进 `other_triggered`；点名的那份没被命中而别的被命中 → 退出码 1 并回报实际触发到的 id |

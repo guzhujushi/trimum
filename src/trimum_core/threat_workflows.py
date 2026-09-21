@@ -15,12 +15,14 @@ from typing import Any
 # trigger:  触发器事件类型
 # filter:   可选的事件 payload 过滤条件
 # steps:    执行步骤列表（字符串命令或结构化操作）
+# auto_trigger: 事件来了要不要**自动跑**（取证类 True / 处置类 False；判据见 step_kind）
 # ─────────────────────────────────────────────────
 
 THREAT_WORKFLOWS: list[dict[str, Any]] = [
     # ─── 权限逃逸类 ─────────────────────────────
     {
         "name": "threat-prelink-check",
+        "auto_trigger": True,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "ld_preload"},
         "steps": [
@@ -33,6 +35,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     },
     {
         "name": "threat-ebpf-scan",
+        "auto_trigger": True,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "ebpf_hijack"},
         "steps": [
@@ -45,6 +48,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     },
     {
         "name": "threat-kernel-scan",
+        "auto_trigger": True,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "kernel_module"},
         "steps": [
@@ -57,6 +61,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     # ─── 恶意软件类 ─────────────────────────────
     {
         "name": "threat-revshell-cleanup",
+        "auto_trigger": False,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "reverse_shell"},
         "steps": [
@@ -68,6 +73,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     },
     {
         "name": "threat-crypto-scan",
+        "auto_trigger": True,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "crypto_miner"},
         "steps": [
@@ -81,6 +87,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     },
     {
         "name": "threat-pipe-download-check",
+        "auto_trigger": False,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "curl_pipe_bash"},
         "steps": [
@@ -93,6 +100,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     # ─── 数据窃取/勒索类 ─────────────────────────
     {
         "name": "threat-ransomware-response",
+        "auto_trigger": False,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "ransomware"},
         "steps": [
@@ -106,6 +114,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     },
     {
         "name": "threat-btrfs-snapshot-protect",
+        "auto_trigger": False,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "ransomware"},
         "steps": [
@@ -117,6 +126,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     },
     {
         "name": "threat-ssh-audit",
+        "auto_trigger": True,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "ssh_key_steal"},
         "steps": [
@@ -130,6 +140,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     # ─── 持久化类 ───────────────────────────────
     {
         "name": "threat-cron-audit",
+        "auto_trigger": True,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "cron_persistence"},
         "steps": [
@@ -141,6 +152,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     },
     {
         "name": "threat-systemd-audit",
+        "auto_trigger": True,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "systemd_persistence"},
         "steps": [
@@ -152,6 +164,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     },
     {
         "name": "threat-persistence-sweep",
+        "auto_trigger": False,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "persistence"},
         "steps": [
@@ -170,6 +183,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     # ─── 供应链类 ───────────────────────────────
     {
         "name": "threat-supply-chain-audit",
+        "auto_trigger": False,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "supply_chain"},
         "steps": [
@@ -183,6 +197,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     # ─── LLM 攻击面 ─────────────────────────────
     {
         "name": "threat-prompt-injection-check",
+        "auto_trigger": False,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "prompt_injection"},
         "steps": [
@@ -195,6 +210,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     # ─── 审计完整性 ─────────────────────────────
     {
         "name": "threat-audit-integrity-check",
+        "auto_trigger": False,
         "trigger": "cron",
         "steps": [
             "验证审计日志 hash 链",
@@ -206,6 +222,7 @@ THREAT_WORKFLOWS: list[dict[str, Any]] = [
     # ─── 内存执行类 ─────────────────────────────
     {
         "name": "threat-memfd-scan",
+        "auto_trigger": True,
         "trigger": "security.monitor_result",
         "filter": {"threat_name": "memfd_exec"},
         "steps": [
@@ -241,7 +258,9 @@ def get_workflows_by_trigger(trigger: str) -> list[dict[str, Any]]:
 #   （策略 / 风险 / 审计 / 脱敏照常生效）
 # - 散文式步骤（「比对上次 hash 基线」这种要判断的）→ `agent_type: trm-agent`，
 #   交给子 Agent；没有 driver / 没装 Agent 脚本时节点**明确失败**，不装成功
-# - `config.enabled = False`：剧本里有 kill / firewall-cmd，默认不自动触发
+# - `config.enabled`：取证类剧本（`auto_trigger=True`）事件来了自动跑；含处置步骤的剧本
+#   默认不武装 —— 处置要人点，不做「半自动处置」
+# - 步骤闸门：自动触发只跑**只读取证命令**步骤；要判断的散文步骤不派子 Agent（见 step_kind）
 # ─────────────────────────────────────────────────────────────────────────
 
 #: 本地命令步骤（与 workflow_catalog 同值：都是 `agent_type: shell` 这个约定）
@@ -255,6 +274,111 @@ _COMMAND_HEAD_RE = re.compile(r"^[A-Za-z0-9_./~$@-]+$")
 
 #: 剧本里这几个词是「动作代称」（写手册时的简写），不是能跑的命令
 PROSE_STEPS = frozenset({"report", "audit"})
+# ─── 步骤性质与「自动触发」判据（2026-09-21 定）────────────────────────
+#
+# 背景：剧本步骤是混合的 —— 命令式步骤（`cat /etc/ld.so.preload`）走网关，散文式步骤
+# （「比对上次 hash 基线」/「kill 对应 PID」）派子 Agent。子 Agent 会干什么不由剧本决定，
+# 所以「只读剧本」不等于「只读运行」，自动触发必须**按步骤**放行。三种性质：
+#
+#   auto   —— 只读取证命令：事件自动触发时照跑（仍走网关 / 策略 / 审计）
+#   review —— 要判断的散文：自动触发不派子 Agent，留人工
+#   action —— 处置（散文含处置动词，或命令不在只读白名单里）：留人工
+#
+# 看不懂的散文一律当 `action`（保守），新增剧本请让测试来判。
+
+#: 只读取证命令白名单：白名单之外一律不自动跑
+READONLY_COMMANDS = frozenset({
+    "cat", "ls", "stat", "file", "head", "tail", "sha256sum", "md5sum",
+    "find", "grep", "sort", "uniq", "wc",
+    "ps", "ss", "lsof", "ip", "who", "w", "id", "uname", "env", "printenv",
+    "lsmod", "modinfo", "bpftool", "systemctl", "crontab", "journalctl",
+    "df", "du", "getent", "systemd-analyze", "rpm", "dpkg",
+})
+
+#: 出现这些参数 → 判为写操作（`find -delete`、`... > file`）
+MUTATING_FLAGS = ("-delete", "-exec", "-execdir", "-ok", ">", ">>")
+
+#: 白名单里这几个命令还要看子命令 / 参数才算只读
+READONLY_SUBCOMMANDS: dict[str, tuple[str, ...]] = {
+    "systemctl": (
+        "list-units", "list-unit-files", "list-timers", "status", "show", "is-enabled",
+    ),
+    "crontab": ("-l",),
+    "bpftool": ("list", "show"),
+}
+
+#: 散文里的处置动词（命中即 `action`）
+RESPONSE_MARKERS = (
+    "kill", "pkill", "killall", "firewall", "iptables", "nft ", "sigstop", "冻结", "隔离",
+    "阻断", "拦截", "删除", "清理", "恢复", "回滚", "重启", "停止", "禁用", "更新基线",
+    "写入", "落盘", "snapper", "snapshot", "创建", "修改", "修复", "加固", "卸载", "安装",
+    "启用", "关闭", "开启", "注入",
+)
+
+#: 散文里的取证动词（先看处置动词，再看这个；都不命中 = `action`）
+REVIEW_MARKERS = (
+    "比对", "检查", "审查", "核对", "记录", "汇总", "验证", "评估", "统计", "查看",
+    "报告", "列出", "枚举", "清点",
+)
+
+
+def _first_segment(step: str) -> list[str]:
+    """取管道第一段的 token（`ps aux | grep x` → `["ps", "aux"]`）。"""
+    return (step or "").strip().split("|")[0].split()
+
+
+def command_head(step: str) -> str:
+    """这一步跑的是哪个命令（`/usr/bin/cat` → `cat`；`sudo ls` → `ls`）。"""
+    tokens = _first_segment(step)
+    if not tokens:
+        return ""
+    head = tokens[0].split("/")[-1]
+    if head == "sudo" and len(tokens) > 1:
+        head = tokens[1].split("/")[-1]
+    return head
+
+
+def is_readonly_command(step: str) -> bool:
+    """命令式步骤是不是「只读取证」？白名单 + 子命令 + 危险参数三关。"""
+    head = command_head(step)
+    if not head or head not in READONLY_COMMANDS:
+        return False
+    tokens = _first_segment(step)
+    if any(flag in tokens for flag in MUTATING_FLAGS):
+        return False
+    subcommands = READONLY_SUBCOMMANDS.get(head)
+    if subcommands:
+        return any(token in subcommands for token in tokens[1:])
+    return True
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    low = text.lower()
+    return any(marker in low for marker in markers)
+
+
+def step_kind(step: str) -> str:
+    """这一步算什么：``auto``（取证命令，自动跑）/ ``review``（判断，人工）/ ``action``（处置）。"""
+    text = (step or "").strip()
+    if text.lower() in PROSE_STEPS:
+        return "review"
+    if is_local_command(text):
+        return "auto" if is_readonly_command(text) else "action"
+    if text and _contains_any(text, RESPONSE_MARKERS):
+        return "action"
+    if _contains_any(text, REVIEW_MARKERS):
+        return "review"
+    return "action"
+
+
+def step_runs_automatically(step: str) -> bool:
+    """事件自动触发时这一步跑不跑（``auto`` 才跑）。"""
+    return step_kind(step) == "auto"
+
+
+def auto_trigger_workflows() -> list[str]:
+    """取证类剧本的名字（`auto_trigger=True`，会被 daemon 武装）。"""
+    return [entry["name"] for entry in THREAT_WORKFLOWS if entry.get("auto_trigger")]
 
 
 def is_local_command(step: str) -> bool:
@@ -290,12 +414,15 @@ def to_workflow_def_v2(entry: dict[str, Any]) -> Any:
 
     name = entry["name"]
     threat = (entry.get("filter") or {}).get("threat_name", "")
+    auto_trigger = bool(entry.get("auto_trigger"))
     tasks = [
         AgentTask(
             task_id=f"{name}_step_{index}",
             agent_type=SHELL_AGENT if is_local_command(step) else REVIEW_AGENT,
             instruction=step,
             timeout_seconds=STEP_TIMEOUT_SECONDS,
+            # 步骤性质落到节点 config：引擎在事件自动触发的运行里据此放行 / 跳过
+            config={"step_kind": step_kind(step), "auto_run": step_runs_automatically(step)},
         )
         for index, step in enumerate(entry.get("steps") or [])
     ]
@@ -311,13 +438,17 @@ def to_workflow_def_v2(entry: dict[str, Any]) -> Any:
             execute=tasks,
         )],
         config={
-            "enabled": False,
+            "enabled": auto_trigger,
             "builtin": True,
+            "auto_trigger": auto_trigger,
             "threat_name": threat,
             "source": "threat_workflows",
             "note": (
-                "内置剧本默认不自动触发：trm workflow run <id> 手动执行，"
-                "或 trm workflow enable <id> 落盘成自己的 workflow 后常驻触发"
+                "取证类剧本：事件来了自动跑取证命令步骤（仍走网关 / 策略 / 审计），"
+                "要判断的散文步骤自动触发时不派子 Agent，留 trm workflow run 人工跑"
+                if auto_trigger else
+                "处置类 / 无自动步骤的剧本：默认不武装（处置要人点），"
+                "trm workflow run <id> 手动跑全流程"
             ),
         },
     )

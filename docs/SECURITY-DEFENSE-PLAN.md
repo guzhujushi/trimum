@@ -194,11 +194,35 @@ L4 常开的前提是签名不误报 —— 否则正常操作、以及**内置�
 - **`SecExecutor` 不再发 `workflow.trigger`**（2026-09-21 删）：它的载荷约定（`workflow_name`）
   与 Listener 的（`cmd` / `tarl` / `decision`）本来就不同，且当前无消费者 —— 留着只会让将来
   有人写 `trigger: workflow.trigger` 时被「威胁命中」和「意图匹配」重复触发。
-- 内置剧本**默认不自动跑**（`config.enabled = False`，因为剧本里有 `kill` / `firewall-cmd`）：
-  `trm workflow run <id>` 手动跑，或 `trm workflow enable <id>` 落盘后常驻。
-- 归属由测试锁住：`tests/test_gateway_layer4.py::TestLayer4DrivesTheScript`（L4 的广播真的
-  把剧本跑起来）+ 断言 `workflow.trigger` 不再发出；`tests/test_workflow_runtime.py`
-  锁「内置剧本的触发器只有 `security.monitor_result` / `cron`」。
+### 自动触发按剧本性质分档（2026-09-21 定：剧本自动触发策略）
+
+「要不要让剧本自己跑」不是一个开关，而是**按剧本性质 + 按步骤**两层的判断：
+
+| 档 | 剧本 | 事件来了怎么办 |
+|---|---|---|
+| **取证类（8 条，武装）** | `threat-prelink-check` / `-ebpf-scan` / `-kernel-scan` / `-crypto-scan` /
+  `-ssh-audit` / `-cron-audit` / `-systemd-audit` / `-memfd-scan` | 自动跑，**但只跑取证命令步骤**（仍走网关 / 策略 / 审计） |
+| **处置类 / 无自动步骤（8 条，不武装）** | `-revshell-cleanup` / `-ransomware-response` /
+  `-btrfs-snapshot-protect` / `-persistence-sweep` / `-supply-chain-audit` /
+  `-prompt-injection-check` / `-audit-integrity-check` / `-pipe-download-check` | 不自动跑：`trm workflow run <id>` 手动跑全流程 |
+
+为什么处置类不武装：**处置要人点** —— 「半自动处置」（前几步自动、处置步骤跳过）会制造
+「已经响应了」的错觉，比不响应更危险。
+
+**步骤闸门（第二层）**：自动触发的运行里，非取证步骤一律 `skipped`（发 `task.node.skipped`，
+`reason = auto_run_blocked:<kind>`），**不派子 Agent** —— 剧本步骤是「命令 + 散文」混合的，
+散文步骤要派子 Agent，而子 Agent 会干什么不由剧本决定，**所以「只读剧本」不等于「只读运行」**。
+人工运行（`trm workflow run` / `run_now`）不受闸门限制：人已经明确点了。
+
+判据在 `threat_workflows.step_kind()`：`auto`（只读取证**白名单命令**）/ `review`（要判断的散文）/
+`action`（处置：散文含处置动词，或命令不在白名单 / 带 `-delete`·`>` 这类参数）；**看不懂的散文
+一律当 `action`**（保守方向，宁可少跑）。红线：`enabled` 只决定「事件要不要跑」，
+**不能**用来放宽步骤闸门。
+
+- 归属与策略由测试锁住：`tests/test_gateway_layer4.py::TestLayer4DrivesTheScript`（L4 的广播真的
+  把剧本跑起来，步骤是取证命令）+ 断言 `workflow.trigger` 不再发出；`tests/test_workflow_runtime.py`
+  锁「内置剧本的触发器只有 `security.monitor_result` / `cron`」；`tests/test_playbook_auto_trigger.py`
+  锁「数据位 ↔ 步骤性质一致」「武装的剧本没有处置步骤」「事件运行只跑取证步骤」「人工运行不受限」。
 
 ### 上下文追踪（操作序列检测）
 

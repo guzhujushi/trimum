@@ -16,6 +16,39 @@
 
 ---
 
+## 2026-09-21 穿插项步骤 A：剧本自动触发策略（✅ 已完成）
+
+> 计划：`TODO.md`「🔧 穿插项实施计划」步骤 A。问题源头：P0 把「L4 → 总线 → 剧本」接通了，
+> 但 16 条内置剧本 `config.enabled=False` + `register_builtin(enabled=False)` 双重压死 ——
+> **一条剧本都没武装**，真机上仍然不会自动响应。
+
+**查代码得到的关键事实**：剧本步骤是「命令 + 散文」混合的 —— 命令式步骤（`cat /etc/ld.so.preload`）
+走网关，散文式步骤（「比对上次 hash 基线」/「kill 对应 PID」）**派子 Agent**。子 Agent 会干什么
+不由剧本决定，**所以「只读剧本」不等于「只读运行」**，自动触发必须按步骤放行。
+
+**裁决三条**
+
+| 裁决 | 落地 |
+|---|---|
+| 取证类 8 条武装（prelink / ebpf / kernel / crypto / ssh / cron / systemd / memfd） | 数据位 `auto_trigger: True` → `config.enabled` 跟着它 |
+| 处置类 8 条不武装（revshell / ransomware / btrfs / persistence / supply-chain / prompt-injection / audit-integrity / pipe-download） | `auto_trigger: False`：处置要人点，不做「半自动处置」（会制造「已经响应了」的错觉） |
+| 自动触发不派子 Agent | 事件运行里非取证步骤 `skipped`（`task.node.skipped`，`reason=auto_run_blocked:<kind>`）；人工 `run` 不受限 |
+
+**判据**（`threat_workflows.step_kind()`）：`auto`（**只读取证白名单命令**，白名单外一律不自动跑）/
+`review`（要判断的散文）/ `action`（处置：散文含处置动词，或命令不在白名单 / 带 `-delete`·`>`）；
+**看不懂的散文一律当 `action`**（保守）。红线：`enabled` 只决定「事件要不要跑」，**不能**放宽步骤闸门。
+
+**改动面**：`threat_workflows.py`（16 条数据位 + 三分类 + 编译时把 `step_kind`/`auto_run` 写进节点 config）、
+`workflow_runtime.py`（`register_builtin(enabled=None)` / `register_all(builtin_enabled=None)` 改按剧本自己的位；
+运行上下文补 `triggered_by`）、`workflow_engine.py`（`_auto_run_block()` 闸门，`auto_run` 缺省 True）。
+
+**测试**：新增 `tests/test_playbook_auto_trigger.py`（40 项：三分类参数化 / 数据位与步骤性质双向一致 /
+武装剧本无处置步骤 / 节点带闸门 / 事件运行只跑取证 / 处置剧本事件不唤醒 / 人工运行不受限 / 强制全关全开）；
+改 3 处旧断言（`test_workflow_runtime.py` 两条 + `test_api_server_startup.py` 一条 —— 它们锁的正是旧口径），
+`test_gateway_layer4.py` 的端到端步骤改成取证命令。全量 **1365 passed / 5 failed / 8 skipped**（5 项 = 既有基线）。
+
+---
+
 ## E5 第三片（✅ 步骤 1 卸载 + 步骤 2 发布方闭环 + 步骤 3 多用户边界，2026-09-21）
 
 > 计划与红线：`TODO.md`「🚚 E5 第三片实施计划」；口径：`docs/ECOSYSTEM-STRATEGY.md` §7.6、

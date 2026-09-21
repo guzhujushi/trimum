@@ -287,7 +287,9 @@ class TestLayer4DrivesTheScript:
             "name": "test-ld-preload-script",
             "trigger": "security.monitor_result",
             "filter": {"threat_name": "ld_preload"},
-            "steps": ["echo hit"],
+            # 步骤得是**取证命令**：事件自动触发的运行只放行取证命令步骤
+            # （剧本自动触发策略，见 tests/test_playbook_auto_trigger.py）
+            "steps": ["crontab -l"],
         }
         runtime.register(
             threat_workflows.to_workflow_def_v2(entry), source="test", enabled=True
@@ -308,4 +310,4 @@ class TestLayer4DrivesTheScript:
         # L4 用 ``publish(SystemEvent(...))`` 直发，没有 ``emit_event`` 的 ``event.`` 命名空间
         # 前缀；匹配端两种写法都认（见 workflow_runtime.type_matches）
         assert records[0].trigger_event == "security.monitor_result"
-        assert [request.args for request in runner.requests] == [["echo hit"]]
+        assert [request.args for request in runner.requests] == [["crontab -l"]]

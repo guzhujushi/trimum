@@ -346,11 +346,13 @@ class WorkflowRuntime:
             ids.append(self.register(workflow, source=source, enabled=enabled))
         return ids
 
-    def register_builtin(self, *, enabled: bool = False) -> list[str]:
+    def register_builtin(self, *, enabled: bool | None = None) -> list[str]:
         """注册内置威胁响应剧本（触发器 = ``security.monitor_result``，见 ``threat_workflows``）。
 
-        默认 ``enabled=False``：剧本里有 ``kill`` / ``firewall-cmd``，自动触发等于
-        把确认环节删掉。手动 ``run_now()`` 不受此限（人已经明确点了）。
+        ``enabled=None``（默认）= **按剧本自己的 ``config.enabled``**：取证类（``auto_trigger=True``）
+        武装、含处置步骤的不武装 —— 判据与红线见 ``threat_workflows`` 的「步骤性质」注释块。
+        ``enabled=True/False`` 是**强制**口径（测试与「全关」场景用），不走剧本自己的位。
+        手动 ``run_now()`` 永远不受 ``enabled`` 影响（人已经明确点了）。
         """
         from .threat_workflows import builtin_workflows
 
@@ -364,12 +366,14 @@ class WorkflowRuntime:
         root: str | None = None,
         *,
         include_builtin: bool = True,
-        builtin_enabled: bool = False,
+        builtin_enabled: bool | None = None,
     ) -> dict[str, list[str]]:
         """文件目录 + 内置剧本一次性注册（daemon 与 CLI 共用这个口径）。
 
         先内置后文件：**同名时本地文件覆盖内置**（用户把内置剧本 ``enable`` 成
         自己的文件后，那份是生效的那份）。
+
+        ``builtin_enabled=None``（默认）走剧本自己的启用位（见 :meth:`register_builtin`）。
         """
         result: dict[str, list[str]] = {"builtin": [], "file": []}
         if include_builtin:
@@ -650,6 +654,8 @@ class WorkflowRuntime:
             "step_index": step_index,
             "trigger_event": trigger_event,
             "trigger_payload": record.payload,
+            # 事件自动触发的标记：引擎据此执行步骤闸门（非取证步骤不跑）
+            "triggered_by": triggered_by,
         })
 
         cancelled = False
