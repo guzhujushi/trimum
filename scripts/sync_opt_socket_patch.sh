@@ -80,13 +80,19 @@ need = {
 }
 bad = 0
 for rel, tokens in need.items():
-    src = open(os.path.join(root, rel), encoding="utf-8").read()
+    path = os.path.join(root, rel)
+    # 必须用 utf-8-sig 解码：仓库里 api_server.py / secrets_redactor.py 带 UTF-8 BOM
+    # （既有状态，Python 自己编译没问题，但 ast.parse 会把 U+FEFF 当非法字符）。
+    # 用 encoding="utf-8" 读会把 BOM 留在字符串里 —— 自检会假报语法错，把人挡在门外。
+    raw = open(path, "rb").read()
+    has_bom = raw.startswith(b"\xef\xbb\xbf")
+    src = raw.decode("utf-8-sig")
     ast.parse(src)
     for token in tokens:
         if token not in src:
             print("  缺改动点：%s ← %r" % (rel, token))
             bad = 1
-    print("  OK   %s" % rel)
+    print("  OK   %s%s" % (rel, "（带 UTF-8 BOM，既有状态）" if has_bom else ""))
 sys.exit(bad)
 PY
 if [ "$?" -ne 0 ]; then echo "自检不过，不装。" >&2; exit 1; fi
