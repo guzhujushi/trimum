@@ -166,9 +166,11 @@ daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`�
 网络冒烟 **OK 走的 target：`primary:qwen3.8-27b@models.sjtu.edu.cn`，回复「可用」**；
 `trm doctor` → `LLM API connectivity: https://models.sjtu.edu.cn/api/v1` OK + 三个 key env 全 OK。
 
-**剩余待办**：① 跨进程限流（桶在进程内，daemon 与 CLI 各 9 次/分；文件锁方案见 `docs/LLM-ROUTING.md` §8）；
-② token 维度计量（300k/分、1B/周 还没管）；③ 429 的 `Retry-After`；④ `trm doctor` 直接显示路由表；
-⑤ 成本账本（agent 角色走收费的 deepseek-flash）。
+**剩余待办**：①【DS】跨进程限流（桶在进程内，daemon 与 CLI 各 9 次/分；文件锁方案见 `docs/LLM-ROUTING.md` §8）；
+②【DS】token 维度计量（300k/分、1B/周 还没管）；③【Qwen】429 的 `Retry-After`；④【Qwen】`trm doctor` 直接显示路由表；
+⑤【Qwen】成本账本（agent 角色走收费的 deepseek-flash）；
+⑥**待裁决**：把 Codex 也接到路由上（本地 `trm codex-proxy`，免费 Qwen 撞 429 时自动降 deepseek-flash）
+—— 方案与代价见 `docs/CODEX-MODEL-POLICY.md` §4（Codex 自身没有这个开关）。
 
 ### ✅ 测试环境隔离（2026-09-21，配合 `.env` 加载器的收尾修复）
 
@@ -192,6 +194,23 @@ daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`�
 全量回到基线 **1554 passed / 2 failed / 10 skipped**（两条失败仍是宿主基线：PATH 缺 `python.exe` + 本机沙箱断网）。
 
 <!--SPLIT-->
+### 🤖 Codex 模型分工（2026-09-21 立：Qwen 免费 / deepseek-flash 收费）
+
+**怎么读标签**：`【Qwen】` = 单次小任务，够用且免费（`scripts/codex-model.ps1 qwen`）；
+`【DS】` = 上 deepseek-flash（`scripts/codex-model.ps1 ds`）。
+**为什么不能全靠 Qwen**：交我算 10 次/分，而 Codex 每次调用 ~15k tokens、一个 turn 十几次调用 ⇒ 几秒就撞 429；
+且 Codex **没有**「限流自动降级」的开关（证据 / 替代方案：`docs/CODEX-MODEL-POLICY.md`）。
+
+| 任务类型 | 模型 | 怎么跑 |
+|---|---|---|
+| 文档回填 / TODO-STATUS 同步 / 提交号 / 格式与行尾修正 | 【Qwen】 | `codex-model.ps1 qwen -Exec "..."` |
+| 加改单元测试、跑全量、单文件小重构（验收标准明确） | 【Qwen】 | 同上 |
+| 脚本语法自检、日志与证据整理、只读调研 | 【Qwen】 | 同上 |
+| 沙箱 S2 `sandbox_exec`（Landlock / fail-closed / 审计） | 【DS】 | `codex-model.ps1 ds` |
+| 并发与竞态（socket / IPC / 跨进程限流 / 文件锁） | 【DS】 | 同上 |
+| 真机切换与回滚、破坏性操作前的设计与复核 | 【DS】 | 同上 |
+| 架构裁决、跨模块重构、长链路调试 | 【DS】 | 同上 |
+
 ### 下一步：S1 落地 → S2
 
 **六条裁决（2026-09-21，全部已定）**：① eBPF → **CAP_BPF + root helper**；② 非特权 userns → **不全局放开**（需要时定向给 `bwrap` 写 AppArmor profile）；
@@ -213,7 +232,7 @@ sudo bash /tmp/harden_trmd_unit.sh --verify    #    事后复查
 sudo bash /tmp/check_sandbox_caps_root.sh      #    系统级能力核对（顺带回答 helper 那条）
 ```
 
-**之后**：S2 施加点收口（新增 `sandbox_exec`，6 个 spawn 点全改走它，Landlock + fail-closed）→ S3 seccomp 三档 → S4 子 Agent systemd transient → S5 可选档（helper / Docker / bwrap profile）。
+**之后**：S2 施加点收口【DS】（新增 `sandbox_exec`，6 个 spawn 点全改走它，Landlock + fail-closed）→ S3 seccomp 三档【DS】→ S4 子 Agent systemd transient【DS】→ S5 可选档【DS】（helper / Docker / bwrap profile）。
 **S1 过了再收 TCP**：四步（`docs/SANDBOX-PLAN.md` §9.3.5）的**代码侧已在第四轮落地**（§9.3.7）；
 真机只差「开开关」：`trm status` 看到 `ipc socket: ok` → drop-in 写 `Environment=TRIMUM_HTTP=0` 重启试跑一轮
 （`trm status` / `trm agent list` / `trm security tokens|learning|learn`）→ 全绿再把 `config.yaml` 的
@@ -510,17 +529,17 @@ trm config set <key> <value>       # 设置配置项
   - `set <key> <value>`：写入并自动分类
   - `search <query>`：调用 `memory_search` 语义检索
   - `stats`：显示各分类记忆数量统计
-- [ ] **B4. `trm security` 命令组扩展**（部分完成：`status`/`tokens` 已实现，`revoke` 待做）
+- [ ] **B4. `trm security` 命令组扩展**（部分完成：`status`/`tokens` 已实现，`revoke` 待做） 【Qwen】
   - 现有 `allow-once` 保留
   - [x] 新增 `status`（策略状态）
   - [x] 新增 `tokens`（列出有效 token）
-  - [ ] 新增 `revoke <token_id>`（撤销 token）
+  - [ ] 新增 `revoke <token_id>`（撤销 token） 【Qwen】
 
 #### Phase C：Agent 交互命令（P2）
 - [x] **C1. `trm ask` 体验优化**
   - 单次提问模式：`trm ask "..."` → SSE 流式输出 → 显示 token 统计
   - `--interactive` 模式：Rich prompt 多轮循环（未引入 prompt_toolkit）
-  - [ ] Ctrl+C 中断处理
+  - [ ] Ctrl+C 中断处理 【Qwen】
   - 会话记忆挂载（`ContextManager.register_session/update_session`）
 - [x] **C2. `trm agent` 命令组**
   - `list`：列出所有注册 agent
@@ -555,7 +574,7 @@ trm config set <key> <value>       # 设置配置项
 - [x] **F1. CLI 单元测试**（2026-09-20 核实已完成：`tests/test_cli.py` 32 项 + `tests/test_cli_commands.py`）
   - `tests/test_cli.py`：每个子命令的参数解析、返回值
   - Mock daemon/RPC 层，不依赖真实服务
-- [ ] **F2. 集成测试**（待补 CLI↔daemon 端到端）
+- [ ] **F2. 集成测试**（待补 CLI↔daemon 端到端） 【Qwen】
   - `tests/test_integration.py` 目前只覆盖 gateway / workflow / event_bus，无 CLI 侧用例
   - 真实起 daemon 后 `trm status` / `trm health` 连通性
   - `trm ask` 端到端流程
@@ -644,7 +663,7 @@ trm config set <key> <value>       # 设置配置项
   - [x] 官方 Agent 证书：`cert_type=official` + `capabilities` 能力块；`discover_bundled_agents()` / `ensure_official_certs()`；
     向导新增 `official` 步骤（trimum 自研 Agent 全部免确认；用户自签 `scope=local` 不被覆盖）
   - [x] 已接线（2026-09-21 E5 第二片）：证书 `capabilities` 与策略的**运行期交集**已落地（`capability.py` + 网关 Layer 2.6，多来源取最严、只收紧不放宽）；详见 `STATUS.md`「E5 第二片」
-- [ ] **E7. 自研编码智能体**（2026-09-21 出规格与设计，**待裁决**）：定位 / 现状勘察 / 红线 / 五步分片计划 → `docs/CODING-AGENT-PLAN.md`
+- [ ] **E7. 自研编码智能体**（2026-09-21 出规格与设计，**待裁决**）：定位 / 现状勘察 / 红线 / 五步分片计划 → `docs/CODING-AGENT-PLAN.md` 【DS】
   - 参考对象（**2026-09-21 调研后建议改口径**，见 `docs/CODING-AGENT-REUSE-RESEARCH.md`）：
     **主参考改为 `Aider-AI/aider`**（Python、编码智能体、13 种编辑格式与真实失败回灌；源码级事实见该文 §3.3），
     ECC 降级为**内容素材来源**（MIT 文本可改写）。
@@ -884,10 +903,10 @@ shell 真的过网关（`args==["echo hi"]` + `raw_command`）/ 被拒上报 / *
 ## 🟡 后续方向（CLI 完成后）
 
 ### CLI 进阶
-- [ ] `trm ask` 墨迹/屏幕截图输入支持
-- [ ] `trm memory import` / `export`（记忆迁移）
-- [ ] CLI 别名自定义（`.trimumrc` 配置文件）
-- [ ] 自动补全脚本（bash/zsh/fish）
+- [ ] `trm ask` 墨迹/屏幕截图输入支持 【Qwen】
+- [ ] `trm memory import` / `export`（记忆迁移） 【Qwen】
+- [ ] CLI 别名自定义（`.trimumrc` 配置文件） 【Qwen】
+- [ ] 自动补全脚本（bash/zsh/fish） 【Qwen】
 
 ### 其他待办（承接之前）
 - [x] **浏览器工具备选 `epiral/bb-browser` 评估完成（2026-09-20）→ 结论：不接入**：本体是 Node/TS（与「去 Node」冲突）；MCP server 源码不在公开仓库（与它自己的 `PRIVACY.md` 「可审计」矛盾）；`site` 社区适配器在页面上下文 `eval` 第三方 JS，绕开 `ToolGateway` / 策略 / 审计；上游 4 个月无 push。借鉴项已落 `docs/TOOL-DEVELOPER-GUIDE.md` §11（适配器自带 example/domain、`@N` 稳定元素编号）。完整报告：`docs/BB-BROWSER-EVALUATION.md`
@@ -897,10 +916,10 @@ shell 真的过网关（`args==["echo hi"]` + `raw_command`）/ 被拒上报 / *
 - [x] **开发树 `.venv/bin/trm` 入口失效**（2026-09-20 修）：脚本仍是旧的 `from trimum_core.main import cli_dispatch`（`cli_dispatch` 早已不存在）→ 改成 `from trimum_core.cli import main` 后 `trm --version` / `trm commands --check`（63 条）均正常。注意该 venv **没装 setuptools**，`pip install -e . --no-build-isolation` 会 `BackendUnavailable`，要正规重装得先装 setuptools（需网络）
 - [x] **幽灵聚合条目的语义**（2026-09-20 收口）：原护栏「目录读不到就不动缓存」把「一个 server 都没配」和「不知道有哪些 server」混成了一件事。新增 `mcp_registry.definitions_readable()`：**目录不存在 → 照清**，**目录在但列不出来 → 不动并记 `mcp_index.prune_skipped`**；`tests/test_mcp_bridge.py` 87 → 93 项，全量 921 passed 无回归
 - [x] **`trm env install` 真机跑通**（2026-09-20）：dry-run / 已装幂等 / 非 root 报错三条路径已在真机验证，并修掉两个真缺陷（管道里 `_confirm()` 永久挂死、失败时不打原因）；`ToolGateway._prompt_confirm()` 同样修成 fail closed
-- [ ] **`trm env install` 的 root 真执行路径待跑**：`sudo bash /tmp/trm_env_install_real.sh`（全是已装包，幂等）
-- [ ] **`/opt/trimum` 部署树待同步本轮修复**（2026-09-20 21:33）：`sudo bash /tmp/sync_opt_tree.sh`（tar 已就位，含幽灵条目/prune、env+网关确认、install 向导三项；开发树已单独同步，无需 `--fix-home`）
+- [ ] **`trm env install` 的 root 真执行路径待跑**：`sudo bash /tmp/trm_env_install_real.sh`（全是已装包，幂等） 【Qwen】
+- [ ] **`/opt/trimum` 部署树待同步本轮修复**（2026-09-20 21:33）：`sudo bash /tmp/sync_opt_tree.sh`（tar 已就位，含幽灵条目/prune、env+网关确认、install 向导三项；开发树已单独同步，无需 `--fix-home`） 【Qwen】
 - [x] **`install_fn.py` 安装向导非交互挂死已修**（2026-09-20）：拆出 `_interactive()` / `_read_yes_no()`，非 TTY 不提问，三个可选步骤（LLM key / 开机自启 / 立即启动）一律跳过并提示；新增 `tests/test_install_fn.py` 14 项（含「管道里 `input()` 绝不被调用」）；实测管道场景 1.1s 退出（修前挂死）
-- [ ] **daemon 单实例与 socket 加固（2026-09-20 真机发现，P1；运维侧已闭环）**：
+- [ ] **daemon 单实例与 socket 加固（2026-09-20 真机发现，P1；运维侧已闭环）**： 【Qwen】
   - [x] 运维处置：`trmd.service`（enabled + `Restart=always`）与手工 daemon 抢 `127.0.0.1:8321`，单元每 5s `exit 3`（`NRestarts` 到 117）→ `scripts/fix_trmd_loop.sh`；执行方案A后 `trmd` 为 disabled/inactive、`Errno 98` 归零、`trm status` 回到 `source: rpc`
   - [x] 端口冲突应 fail-fast：端口/socket 被占时在触碰 socket 之前退出，并提示「已有 daemon 在跑」（现在只会抛 uvicorn 的 `[Errno 98]`）
   - [x] `ipc_handler._start_unix_socket()` 先 `unlink` 再 `bind`：短命进程会**抢走运行中 daemon 的 unix socket**，死后留下无人监听的 socket 文件 —— 这是 RPC 静默降级成 HTTP 的根因；应先探测是否有人监听再决定 unlink
@@ -909,9 +928,9 @@ shell 真的过网关（`args==["echo hi"]` + `raw_command`）/ 被拒上报 / *
   - **代码侧闭环（2026-09-20，server `2f6adbb` / main `2a80fb9` / ubuntu `9ecf111` / arch-linux `fe05347`）**：启动预检 fail-fast（`main.check_tcp_port()` connect+bind 双探测 → 端口被占 `exit 3`；`ipc_handler.socket_is_live()` 探到别人在听也 `exit 3`）；`_start_unix_socket()` 改为「先探测再决定 unlink」，有人在听则退让（`socket_held_by_other`）、只有 stale 文件才清理，`stop()` 不再 unlink 别人的 socket；`config.default_socket_path()` 跟随 `XDG_RUNTIME_DIR` → `/run/user/<uid>` → 数据目录（客户端 `socket_candidates()` 同序）；`/health` 统一取 `trimum_core.__version__`；顺带修 `Config.__init__` 浅拷贝污染全局 `DEFAULT_CONFIG`。回归测试：`tests/test_daemon_singleton.py`、`tests/test_socket_path_consistency.py`、`test_ipc_listener.py::TestSocketTakeoverGuard`、`test_api_server_startup.py::TestHealthVersion`
   - [x] **/opt 部署 + 真机验收（2026-09-20 16:49 完成）**：`sudo bash /tmp/sync_opt_singleton_fix.sh` 已执行（补丁进 `/opt/trimum`），daemon 以 guzhujushi 身份重启（PID 12271）；`trm status` → `source: rpc` + `version: 0.5.0`（原 `0.2.1`）；验收脚本 `/tmp/accept_singleton_fix.sh` **9 PASS / 0 FAIL**（版本统一、两种启动冲突都 exit 3、socket 未被抢占、冒烟全通、`trmd.service` 仍 disabled/inactive 且 `NRestarts=0`）
   - 运维侧已备 `scripts/fix_trmd_loop.sh`（`--check` / 默认停用单元 / `--use-systemd` 改 systemd 托管）
-- [ ] **Safety**: Landlock / Seccomp 沙箱（Phase 4）
-- [ ] **3.5 确定性字段 confidence 分级**：三级分流（直接执行 / 确认窗口 / 转 Planner）
-- [ ] **API Key Manager**：统一管理所有需要 API Key 的点
+- [ ] **Safety**: Landlock / Seccomp 沙箱（Phase 4） 【DS】
+- [ ] **3.5 确定性字段 confidence 分级**：三级分流（直接执行 / 确认窗口 / 转 Planner） 【Qwen】
+- [ ] **API Key Manager**：统一管理所有需要 API Key 的点 【Qwen】
 
 ---
 
