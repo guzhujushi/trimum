@@ -357,6 +357,44 @@ class TestSignerInit:
         assert "根私钥不存在" in capsys.readouterr().err
 
 
+class TestBuiltinRoot:
+    """The repository ships a real anchor — not a placeholder."""
+
+    def test_repo_ships_a_well_formed_root_certificate(self):
+        text = trmpkg.REPO_ROOT_CERT.read_text(encoding="utf-8")
+        cert = json.loads(text)
+
+        assert trmpkg.REPO_ROOT_CERT.is_file()
+        assert cert["role"] == "root"
+        assert cert["alg"] == trmpkg.ALG
+        assert cert["key_id"] == trmpkg.key_id(cert["public_key"])
+        assert "PRIVATE" not in text
+
+    def test_repo_root_rejects_a_chain_from_another_root(self, payload, tmp_path, keys):
+        package = make_package(payload, tmp_path / "demo.trmpkg", keys)
+
+        result = trmpkg.verify_package(package, root_path=trmpkg.REPO_ROOT_CERT)
+
+        assert not result.ok
+        assert any("不是本机内置根" in err for err in result.errors)
+        assert any("签名者证书不是内置根签发的" in err for err in result.errors)
+
+    def test_lookup_order_is_env_then_home_then_repo(self, monkeypatch, tmp_path):
+        home = tmp_path / "home"
+        monkeypatch.setenv("TRIMUM_HOME", str(home))
+        monkeypatch.delenv("TRIMUM_TRUST_ROOT", raising=False)
+
+        assert trmpkg.default_root_path() == trmpkg.REPO_ROOT_CERT
+
+        (home / "trust").mkdir(parents=True)
+        (home / "trust" / trmpkg.ROOT_CERT_NAME).write_text("{}\n", encoding="utf-8")
+        assert trmpkg.default_root_path() == home / "trust" / trmpkg.ROOT_CERT_NAME
+
+        override = tmp_path / "elsewhere.crt"
+        monkeypatch.setenv("TRIMUM_TRUST_ROOT", str(override))
+        assert trmpkg.default_root_path() == override
+
+
 class TestSignerCapabilitiesReachTheRuntimeContract:
     def test_package_carries_the_signers_capabilities(self, payload, tmp_path, keys, capsys):
         package = make_package(payload, tmp_path / "demo.trmpkg", keys)

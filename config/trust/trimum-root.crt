@@ -1,0 +1,8 @@
+{
+  "name": "trimum-root",
+  "role": "root",
+  "alg": "ed25519",
+  "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEApBTUb8gZ3aNF5akLWmT/1amjhXCw19cIbaQApR5YjdY=\n-----END PUBLIC KEY-----\n",
+  "key_id": "sha256:65da4663034583915402dd107ea7b0914d1d37fb936cb67c5fa7e67d07092565",
+  "created_at": "2026-09-21T07:07:48Z"
+}
