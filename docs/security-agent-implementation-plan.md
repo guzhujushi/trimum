@@ -116,6 +116,11 @@ EVENT_WORKFLOW_TRIGGER = "workflow.trigger"            # 触发应对工作流
 
 ## 3. SecMonitor（新建 sec_monitor.py）
 
+> ⚠️ 2026-09-21 现状：本节 §3 代码块描述的 `_on_executing` 订阅路径**已删除**。扫描入口
+> 改为 **ToolGateway L4 直连 `SecMonitor.inspect(event)`**（执行前闸门必须同步拿结论），
+> `start()` 不再订阅 `agent.executing` / `agent.executed`。契约与调用链见
+> `docs/SECURITY-DEFENSE-PLAN.md` §三。
+
 ### 核心职责
 - 订阅 `agent.executing` 事件
 - 调用 ThreatMatcher.match() → 输出 ThreatMatch

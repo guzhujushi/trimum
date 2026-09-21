@@ -1,13 +1,13 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理：删除 `PRD.md`、`ARCH.md` 去重后移入 `docs/`** → **P0 安全响应链步骤 1/3：`security.monitor_result` 载荷契约扁平化**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理：删除 `PRD.md`、`ARCH.md` 去重后移入 `docs/`** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`（拦截 + 响应 + 记录 + 通知）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
 > 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3/M4** 与**远端工具聚合**（`<server>__<tool>` 进 `ToolRegistry`），
 > E4 三个导入器已落地，W1 workflow 执行语义已闭环（真机 48/0）。
 > **P0 安全响应链接线已开工**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，剧本在真机上永远不会被自动触发）：
-> **步骤 1/3（`security.monitor_result` 载荷契约扁平化）2026-09-21 完成**，剩 步骤 2（L4 改走 `_dispatch`）与 步骤 3（定 `workflow.trigger` 归属）；
+> **步骤 1/3（载荷契约扁平化）与 步骤 2/3（L4 改走 `SecMonitor.inspect()`）2026-09-21 完成**，只剩 步骤 3（定 `workflow.trigger` 归属）；
 > 之后是 **E5 官方分发渠道**；P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
 > 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
 > E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
@@ -1406,3 +1406,39 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 
 2. **L4 改走 `_dispatch`** —— `tool_gateway.py:716` 命中威胁时发事件 + 调 `SecExecutor`（顺带决定 `agent.executing` 死订阅的去留）。
 3. **定 `workflow.trigger` 归属** —— 现在一边扁平带 `workflow_name`（`sec_executor.py`），一边（旧文档）嵌套带 `threat`；不要两套并存。
+
+---
+
+## 2026-09-21 P0 步骤 2/3：L4 改走 `SecMonitor.inspect()`（拦截 + 响应 + 记录 + 通知）
+
+> 来源：2026-09-20 只读审计 P0 第 2 条。步骤 1（载荷契约）见上一节；
+> 本次把「L4 只拦不报」接成「一条命令完成扫描 → 广播 → 执行 → 由网关决定拒绝」。
+
+### 改动
+
+| 位置 | 改动 |
+|---|---|
+| `src/trimum_core/sec_monitor.py` | 新增 `inspect(event) -> list[ThreatMatch]`（唯一扫描入口）：`scan_command()` + 命中则 `_dispatch()`（发 `security.monitor_result` + 调 SecExecutor），返回威胁列表给网关自行处置；**删除** `_on_executing` / `_on_executed` 与对应订阅，`start()` 只剩幂等生命周期钩子；模块 docstring 同步 |
+| `src/trimum_core/tool_gateway.py` | L4 由旁路 `scan_command()` 改为 `sec_monitor.inspect(SystemEvent(...))`，载荷带 `agent_id` / `command` / `sandbox` / `layer_hit: "L4"`；`DENY` 分支行为不变（`status=denied` / `exit_code=137` / `security_blocked` 审计），但这次事件与 SecExecutor 都会真的跑 |
+| `src/trimum_core/tool_gateway.py` | **修掉一颗地雷**：L4 原先传 `pid=os.getpid()`（daemon 自己的 PID）。接上 SecExecutor 之后，`FREEZE` / `KILL` 类威胁会 `SIGSTOP`/`SIGKILL` **daemon 自身** → 改为 `pid=0`（执行前闸门没有子进程），`SecBlocker` 对 `pid<=0` 已有 guard |
+| `tests/test_gateway_layer4.py` | **新建（9 项）**：DENY 命令被拦（status/exit_code/action）+ 扁平 `monitor_result` 带对上下文（`pid=0`、`layer_hit=L4`）+ SecExecutor 真的落了审计（临时文件）、发了 `security.blocked`、发了 `workflow.trigger`（`threat-prelink-check`）+ 载荷满足内置剧本条件；非 DENY（`supply_chain` / CONFIRM）只响应不拦（锁住当前取舍）；干净命令全程静默；没装监控的网关没有 L4（缺口陈述） |
+| `tests/test_sec_monitor.py` | `agent.executing` 发布驱动的用例改为 `inspect()` 直调；新增 2 项：干净命令不发任何事件 / 往总线发 `agent.executing` 不再触发扫描（锁住死订阅已删） |
+| `docs/SECURITY-DEFENSE-PLAN.md` §三、§11.2 | 扫描入口改写为「L4 直连 `inspect()`、不订阅事件、pid 传 0 的理由」；EventSnoop 一行标注未启用及原因 |
+
+### 验证
+
+- `python -m pytest tests/test_gateway_layer4.py tests/test_sec_monitor.py -q` → **20 passed**
+- 全量：`python -m pytest tests -q` → **1176 passed / 5 failed / 7 skipped**（+9 为本轮新增；5 项与既有基线逐条一致）
+- 关键断言（真链路，不是 mock）：`cat /etc/ld.so.preload` → `ld_preload` → `status=denied` + `security.monitor_result`（`threat_name=ld_preload`、`pid=0`、`layer_hit=L4`）+ `security.blocked` + `workflow.trigger(workflow_name=threat-prelink-check)` + 审计文件含 `ld_preload` / `deny`
+
+### 顺带发现（未修，记进 `TODO.md`）
+
+- **非 DENY 威胁今天只响应不拦**：`KILL` / `FREEZE` / `ISOLATE` / `CONFIRM` 类威胁在 L4 会被广播 + 交 SecExecutor，但网关仍放行（与改动前一致）。要真拦，需要「威胁等级 → 网关动作」的映射取舍，以及**执行后**拿到子进程 PID 才能做 FREEZE/KILL。
+- **只有 daemon 的网关挂了 sec_monitor**：`agent_loop.py:112`（`trm ask`）与 `workflow_runtime.py:823`（workflow 执行）各自 `ToolGateway(...)` 都没注入 → 那两条路上的命令不经过 L4。
+- `SecAudit()` 默认写 `~/.trimum/audit/security.log`（硬编码 `~`，不走 `TRIMUM_HOME` / `paths.trimum_home()`）；测试里必须显式传 `audit_path`，否则会写开发者真实家目录。
+- 设计里的 LLM 深度判断兜底（旧 `security.alert` + `needs_llm=True`）随本次删除失去唯一生产者，仍未开工。
+
+### 剩余（P0 步骤 3）
+
+3. **定 `workflow.trigger` 归属** —— 现在 `sec_executor.py` 扁平发 `workflow_name` + `threat_name`，
+   `workflow_listener` 未实例化；剧本要么听 `workflow.trigger`，要么直接听 `security.monitor_result`，**不要两套并存**。

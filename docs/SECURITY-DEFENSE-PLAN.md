@@ -98,23 +98,20 @@ ThreatMatcher 是"病毒名称 → 特征 → 防御动作"的映射表。输入
 SecMonitor 是常驻进程，监听 Event Bus，对接每个经过 ToolGateway 的请求。
 
 ```
-启动 → subscribe("agent.executing")
-       subscribe("agent.executed")
-       subscribe("security.mode_change")
-       subscribe("workflow.threat_response")
+入口（2026-09-21 定）：ToolGateway Layer 4 直连 SecMonitor.inspect(event)
 
-agent.executing 事件到达：
-  payload = { agent_id, command, tool, sandbox, source_type, user, cwd }
+  ToolGateway.execute()  →  L4: await SecMonitor.inspect(event)
+                              payload = { agent_id, command, pid: 0,
+                                          sandbox, layer_hit: "L4" }
+      ├─ Step 1: ThreatMatcher.match() + match_sequence() → 威胁列表（按置信度降序）
+      ├─ Step 2: 命中 → 发 security.monitor_result（扁平载荷，见下节契约）
+      │          并调 SecExecutor（SecAudit 落盘 / SecNotif 通知 / SecBlocker 动作 /
+      │                            威胁剧本 workflow.trigger）
+      └─ 返回威胁列表 → 网关按 threats[0].defense 决定放行或拒绝（DENY → status=denied）
 
-  Step 1: 调用 ThreatMatcher.match(agent_id, command, context)
-          返回威胁名列表 + 对应防御动作
-
-  Step 2: 执行优先级最高的防御动作
-          DENY → 发 security.blocked + SecExecutor.block()
-          CONFIRM → 发 security.alert + 等待回应
-          WORKFLOW → 触发对应工作流（如检查 pam.d hash）
-
-  Step 3: 记录到 SecAudit
+  **不订阅任何事件**：L4 是执行前闸门，必须同步拿到结论；留着 agent.executing 订阅
+  只会让同一条命令被扫两遍、甚至阻断两次（2026-09-20 审计里的「死订阅」即此处）。
+  pid 传 0：执行前还没有子进程，绝不拿 daemon 自己的 PID 冒充（FREEZE/KILL 会打到自己）。
 ```
 
 ### `security.monitor_result` 载荷契约（扁平，2026-09-21 冻结）
@@ -813,7 +810,7 @@ Agent/Terminal/Workflow 的命令
 | 监听器 | 挂载点 | 职责 |
 |--------|--------|------|
 | TerminalTap | ToolGateway.execute() 入口 | 实时捕获每一行命令 |
-| EventSnoop | Event Bus 订阅 *.executing/*.executed | 监听所有安全相关事件 |
+| EventSnoop | Event Bus 订阅 *.executing/*.executed | **未启用**（2026-09-21）：命令扫描改由 L4 直连 `SecMonitor.inspect()`，事件订阅已删，避免重复扫描 / 重复阻断；将来若恢复只能用于观测，不得再触发扫描 |
 | SecPolicyListener | PolicyEngine.evaluate() 结果 | 监听规则命中结果 |
 | SecMonitorListener | BehaviorMonitor.check_command() 结果 | 监听异常检测结果 |
 

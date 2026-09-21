@@ -4,8 +4,9 @@ Responsibilities:
 1. ThreatMatcher: regex-based threat signature matching.
 2. OpContextClassifier: per-agent command history and sequence analysis.
 3. AuditChainVerifier: HMAC-signed audit hash-chain integrity checks.
-4. SecMonitor: Event Bus subscriber that scans ``agent.executing`` events and
-   dispatches detected threats to SecExecutor.
+4. SecMonitor: scans a command (``inspect()``) and dispatches detected threats
+   to SecExecutor.  ToolGateway 的 Layer 4 直接调用 ``inspect()`` —— 执行前
+   闸门要拿得到结论，不能等事件总线异步扇出，因此本类今天不订阅任何事件。
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from .event_bus import EVENT_SEC_ALERT, EVENT_SEC_MONITOR, EventBus
+from .event_bus import EVENT_SEC_MONITOR, EventBus
 from .models import (
     DefenseAction,
     EventSeverity,
@@ -436,11 +437,12 @@ class SecMonitor:
         self._started = False
 
     async def start(self) -> None:
-        """Subscribe to Event Bus security-relevant events."""
-        if self._started:
-            return
-        self.event_bus.subscribe("agent.executing", self._on_executing)
-        self.event_bus.subscribe("agent.executed", self._on_executed)
+        """生命周期钩子（幂等）；今天不订阅任何事件。
+
+        扫描入口是 **ToolGateway L4 直连** :meth:`inspect` —— 执行前闸门必须同步拿到
+        结论。这里刻意**不订阅** ``agent.executing`` / ``agent.executed``：留着只会让
+        「有人发事件」和「网关直连」两条路把同一条命令扫两遍、甚至阻断两次。
+        """
         self._started = True
 
     async def scan_command(
@@ -468,41 +470,29 @@ class SecMonitor:
         threats.sort(key=lambda item: item.confidence, reverse=True)
         return threats
 
-    async def _on_executing(self, event: SystemEvent) -> None:
-        """Handle ``agent.executing`` events: scan command, dispatch threats."""
-        agent_id = event.payload.get("agent_id", "unknown")
-        command = event.payload.get("command", "")
-        pid = int(event.payload.get("pid", 0) or 0)
-        sandbox = event.payload.get("sandbox", "default")
-        layer_hit = event.payload.get("layer_hit", "L2")
+    async def inspect(self, event: SystemEvent) -> list[ThreatMatch]:
+        """扫描一条命令（唯一入口）：命中则发 ``security.monitor_result`` 并交 SecExecutor。
 
-        threats = await self.scan_command(agent_id, command, pid, layer_hit, sandbox)
+        ``event`` 只是**载体**（不要求它真的发到总线上）：从这里读 ``agent_id`` /
+        ``command`` / ``pid`` / ``sandbox`` / ``layer_hit``，命中后由 :meth:`_dispatch`
+        发布 ``security.monitor_result`` 并调用 SecExecutor（审计 / 通知 / 阻断 /
+        工作流触发）。
+
+        返回值是全部命中（按置信度降序），调用方（ToolGateway L4）按
+        ``threats[0].defense`` 决定自己的处置 —— ``DENY`` 就拒绝执行。
+        未命中不发任何事件：「没有威胁」不是告警；设计里的 LLM 深度判断兜底
+        （旧 ``security.alert`` + ``needs_llm``）目前没有生产者，留给后续一轮。
+        """
+        threats = await self.scan_command(
+            agent_id=event.payload.get("agent_id") or "unknown",
+            command=event.payload.get("command", ""),
+            pid=int(event.payload.get("pid", 0) or 0),
+            layer_hit=event.payload.get("layer_hit", "L2"),
+            sandbox=event.payload.get("sandbox", "default"),
+        )
         if threats:
             await self._dispatch(threats[0], event)
-            return
-
-        await self.event_bus.publish(
-            SystemEvent(
-                event_type=EVENT_SEC_ALERT,
-                source="sec_monitor",
-                severity=EventSeverity.INFO,
-                payload={
-                    "agent_id": agent_id,
-                    "command": command,
-                    "reason": "no_threat_match",
-                    "needs_llm": True,
-                },
-            )
-        )
-
-    async def _on_executed(self, event: SystemEvent) -> None:
-        """Handle ``agent.executed`` events.
-
-        Reserved for post-execution analysis. Command history is already
-        recorded by :meth:`scan_command`, so this handler intentionally does
-        not record again to avoid duplicating context entries.
-        """
-        return None
+        return threats
 
     async def _dispatch(self, threat: ThreatMatch, event: SystemEvent) -> None:
         """Publish a flat ``security.monitor_result`` and hand the threat to SecExecutor.

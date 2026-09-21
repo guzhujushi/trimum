@@ -155,16 +155,17 @@ class TestDispatchPublishesTheFlatContract:
         assert executor.calls[0][0].threat_name == "ld_preload"
 
     @pytest.mark.asyncio
-    async def test_on_executing_payload_matches_the_builtin_script(self):
+    async def test_inspect_reports_a_real_threat_and_matches_the_builtin_script(self):
         """真命令 → 真威胁 → 发出去的载荷必须命中对应剧本。"""
         executor = _StubExecutor()
         monitor, bus, captured = await make_monitor(executor)
 
-        await bus.publish(make_event(
+        threats = await monitor.inspect(make_event(
             agent_id="a1", command="echo 'x' >> /etc/ld.so.preload", pid=4242,
         ))
         await asyncio.sleep(0.05)
 
+        assert [item.threat_name for item in threats] == ["ld_preload"]
         assert executor.calls, "威胁没有被交给 SecExecutor"
         assert len(captured) == 1
         payload = captured[0].payload
@@ -177,6 +178,36 @@ class TestDispatchPublishesTheFlatContract:
         assert WorkflowRuntime.eval_condition(
             threat_workflows.trigger_condition(entry), payload
         )
+
+
+class TestScanEntryPoint:
+    """扫描入口只剩一个：``inspect()``；事件订阅已删，别留两条路重复阻断。"""
+
+    @pytest.mark.asyncio
+    async def test_clean_command_reports_nothing(self):
+        executor = _StubExecutor()
+        monitor, _bus, captured = await make_monitor(executor)
+
+        threats = await monitor.inspect(make_event(agent_id="a1", command="echo hello"))
+        await asyncio.sleep(0.05)
+
+        assert threats == []
+        assert captured == []
+        assert executor.calls == []
+
+    @pytest.mark.asyncio
+    async def test_start_does_not_subscribe_agent_executing(self):
+        """往总线发 agent.executing 不应再触发扫描（ToolGateway 直连 inspect 才是入口）。"""
+        executor = _StubExecutor()
+        _monitor, bus, captured = await make_monitor(executor)
+
+        await bus.publish(make_event(
+            agent_id="a1", command="echo 'x' >> /etc/ld.so.preload",
+        ))
+        await asyncio.sleep(0.05)
+
+        assert executor.calls == []
+        assert captured == []
 
 
 class TestBuiltinWorkflowContract:

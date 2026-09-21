@@ -39,6 +39,8 @@ from .models import (
     AgentManifest,
     AuditEvent,
     JITToken,
+    SourceType,
+    SystemEvent,
     TrimumError,
     TRMErrorCode,
     EventSeverity,
@@ -462,6 +464,8 @@ class ToolGateway:
         else:
             self.security_rule = None
         self.sec_monitor = sec_monitor
+        # 防御动作由 SecMonitor 内部持有的 executor 执行（见 SecMonitor.inspect）；
+        # 网关保留注入位只是为了装配对称，不自己调它。
         self.sec_executor = sec_executor
         self.op_context = op_context or OpContextClassifier()
         self.enable_cwd_jail = enable_cwd_jail
@@ -712,12 +716,25 @@ class ToolGateway:
                 reason = f"User confirmed: {reason}"
 
         # ===== LAYER 4: Security Monitor =====
+        # 走 SecMonitor.inspect()：一次调用完成「威胁匹配 → 发 security.monitor_result
+        # → 交 SecExecutor（审计 / 通知 / 阻断 / 工作流触发）」。以前这里旁路调用
+        # scan_command()，于是命中的威胁既不广播也不执行 —— 拦截能跑，响应链是空的。
         if self.sec_monitor:
-            threats = await self.sec_monitor.scan_command(
-                agent_id=request.agent_id or "unknown",
-                command=cmd_str,
-                pid=os.getpid(),
-                sandbox=request.source_type.value if hasattr(request.source_type, 'value') else str(request.source_type),
+            threats = await self.sec_monitor.inspect(
+                SystemEvent(
+                    event_type="agent.executing",
+                    source="tool_gateway",
+                    source_type=source_type or SourceType.UNKNOWN,
+                    payload={
+                        "agent_id": request.agent_id or "unknown",
+                        "command": cmd_str,
+                        # L4 是**执行前**闸门，子进程还没 spawn —— 没有 PID。
+                        # 不要用 os.getpid() 冒充：FREEZE / KILL 会打到 daemon 自己身上。
+                        "pid": 0,
+                        "sandbox": self._sandbox_of(request),
+                        "layer_hit": "L4",
+                    },
+                )
             )
             if threats:
                 top = threats[0]
