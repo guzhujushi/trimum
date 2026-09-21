@@ -1,24 +1,23 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **E5 第三片步骤 3：多用户边界（调研 + 设计，`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略（取证类武装 / 处置类不武装 / 自动触发不派子 Agent）** → **穿插项步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **穿插项步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地，`docs/SANDBOX-PLAN.md` §9.3.7）** → **真机切开关：整树同步 + 收 TCP 脚本就绪（备份 / 导入预演 / 回滚三条护栏）** → **真机切开关落地（TCP 已收口）+ LLM 路由 / 限流 / 回退 + 测试环境隔离**）
+> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **E5 第三片步骤 3：多用户边界（调研 + 设计，`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略（取证类武装 / 处置类不武装 / 自动触发不派子 Agent）** → **穿插项步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **穿插项步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地，`docs/SANDBOX-PLAN.md` §9.3.7）** → **真机切开关：整树同步 + 收 TCP 脚本就绪（备份 / 导入预演 / 回滚三条护栏）** → **真机切开关落地（TCP 已收口）+ LLM 路由 / 限流 / 回退 + 测试环境隔离** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）**）
 > 测试基线：本地 **1554 passed / 2 failed / 10 skipped**（2026-09-21 沙箱前置片 TCP 收口之后；socket 收口轮 1502 → TCP 收口轮 1519；穿插项步骤 C 之后 1489 → 步骤 B 1475）；步骤 3 之后是 **1326**（只加文档）；2 项失败 = 既有宿主基线：PATH 缺 `python.exe`（`test_depends_on::test_existing_dep_returns_empty`）+ LLM 断网（`test_llm_integration`）；原先那批「沙箱写 `~/.trimum` 被拒」已由 `tests/conftest.py` 把 `TRIMUM_HOME` 指到临时目录消掉）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326** → 步骤 A 1365 → 步骤 B 1475 → **步骤 C 1489** → E7 设计轮 1489（只加文档）→ socket 收口轮 1502 → **TCP 收口轮 1519** → **LLM 路由轮 1547** → **测试隔离轮 1554**；基线里的「写真实 `~/.trimum` 被拒」那几项已由 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）消掉，剩下的 2 项（PATH 缺 `python.exe`、LLM 断网）是纯宿主状态基线与本仓库改动无关；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
-> 当前分支：`server`（= `origin/server` = `9e34ddc`，工作区干净）；日常只推 `server`，`main` / `ubuntu` / `arch-linux` 只在里程碑收尾时同步。
+> 当前分支：`server`（= `origin/server` = `de619c5`，工作区干净）；日常只推 `server`，`main` / `ubuntu` / `arch-linux` 只在里程碑收尾时同步。
 
 ---
 
-## 📦 交接（2026-09-21，第三轮：S1 试装复盘 + **socket 收口** → 第四轮：**TCP 收口（代码侧）** → 第五轮：**真机切开关（整树同步 + 收 TCP）脚本就绪**）
+## 📦 交接（2026-09-21，第三轮：S1 试装复盘 + **socket 收口** → 第四轮：**TCP 收口（代码侧）** → 第五轮：**真机切开关（整树同步 + 收 TCP）脚本就绪** → 第六轮：**真机切开关落地 + LLM 路由 / 限流 / 回退 + 测试环境隔离** → 第七轮：**Codex 侧模型分工（Qwen / deepseek-flash）**）
 
 ### 一句话现状
 
-**P0 安全响应链、E5 分发渠道、穿插三项都已收口**；沙箱是 E7 的前置片，**六条裁决 + 本轮三条新裁决全部已定**。
-S1 试装过两次，**两次都被冒烟抢跑误判回滚**（真因是断言跑在 daemon 就绪之前，不是加固有问题），复盘见
-`docs/SANDBOX-PLAN.md` §9.3.3；socket 层已按「先看看」的结论改完代码与脚本（§9.3.4）。
-**S1 已于 21:15 在真机 apply 成功并复核**：`/etc/systemd/system/trmd.service.d/10-hardening.conf` 在位、`NRestarts=0`、
-socket `/run/trimum/trimum.sock` 可连接、`trm status` 走 RPC —— 生产现在是**「S1 加固已生效 + TCP 还开着（8321 在听）」**。
-下一步（第五轮；脚本已就绪在真机 `/tmp/`）：**整树同步 → 收 TCP**，见下面「下一步」一节。
-**§9.3.5 的 TCP 收口四步已在同日第四轮落地**（代码侧，`docs/SANDBOX-PLAN.md` §9.3.7）：`health` 自报 pid/uptime/http/ipc、
-新增 `security.tokens/learning/learn` 三个 RPC、`core.http_enabled`（+ `TRIMUM_HTTP`，默认 `true`）、无 HTTP 时 socket 失败
-升级为致命。**S1 已过、代码侧已齐；切换本身（整树同步 + 收 TCP）见下「下一步」一节。**
+**P0 安全响应链、E5 分发渠道、穿插三项都已收口**；沙箱是 E7 的前置片，**六条裁决 + 三条新裁决全部已定**。
+**沙箱前置片已经真落地**：S1 系统级加固已在真机 `apply` 并在位；**TCP 已收口** —— `trm status` →
+`source: rpc` + `http: disabled` + `ipc socket: ok`，全机 8321 无监听（23:07 复核：pid 27582 / uptime 27m）。
+**LLM 的「一处策略」也在生产跑着**：`trimum_core.llm_router`（选谁 / 等多久 / 失败换谁）+ `env_file` 加载器 +
+`/opt/trimum/.env` 经 systemd `EnvironmentFile` 注入，冒烟走 `primary:qwen3.8-27b@models.sjtu.edu.cn`。
+**Codex 侧的模型分工同时落地**：`qwen` / `ds` 两个 profile + `scripts/codex-model.ps1`（任务级切换已能跑，
+`docs/CODEX-MODEL-POLICY.md`）；**尚未做**的是「Codex 限流后自动降级」—— Codex 自身没有这个开关，只能加本地路由代理（待裁决）。
+下一步：**S2 施加点收口【DS】**，见下面「下一步」一节。
 
 ### 本次（2026-09-21）完成
 
@@ -33,6 +32,9 @@ socket `/run/trimum/trimum.sock` 可连接、`trm status` 走 RPC —— 生产�
 | `ee69508` | docs+scripts：沙箱前置片（`docs/SANDBOX-PLAN.md` 十节 + 5 个脚本 + 六条裁决落档） |
 | `685d03a` / `9d28e38` / `ff9aa14` | **socket 收口**：路径契约收敛到 `TRIMUM_SOCKET`、客户端按「能连通」挑、bind 失败不再静默、`await ipc.start()`、S1 脚本改版（默认 `@debug` / 不加只读 / 就绪门 / 失败留证）+ 测试 11 → 20；随后自检改 `utf-8-sig`、事故修复 + 导入预演护栏 |
 | `b7d474e` / `66b2236` | **TCP 收口**（§9.3.7）：`health` 自报 `pid`/`uptime`/`http`/`ipc` + `trm status` 认它 → 新增 `security.tokens/learning/learn` 三个 RPC（`trm security *` 改 RPC 优先）→ `core.http_enabled`（默认 `true`；关掉时不启 uvicorn，改由 `_serve_without_http()` 驱同一段 lifespan）→ 无 HTTP 时 socket 失败升级为 `exit 3`；新增 `tests/test_ipc_only_mode.py` **16 项**；`66b2236` 是真机验证后的补丁（中途致命改 `os._exit` + `scripts/accept_ipc_only.sh`） |
+| `9e34ddc` | **真机切开关 + LLM 路由 / 限流 / 回退 + 测试环境隔离**：`llm_router.py`（新，唯一策略处）+ `env_file.py`（新，`.env` 加载器）+ 5 个调用点全部接上 + `sync_opt_tree.sh`（整树同步）/ `switch_ipconly.sh`（收 TCP）/ `llm_env_dropin.sh`（daemon `EnvironmentFile`）+ conftest 的 `isolate_process_env`（修 `.env` 带出的用例间污染）；真机已验（收 TCP **PASS=10 / WARN=0 / FAIL=0**，LLM 冒烟 `primary:qwen3.8-27b`） |
+| `03f6156` | 提交号回填（上一行） |
+| `de619c5` | **Codex 侧模型分工**：`scripts/codex-model.ps1`（新）+ `docs/CODEX-MODEL-POLICY.md`（新）+ TODO 打 `【Qwen】`/`【DS】` 标签；实测 Codex 0.151 `wire_api` 只认 `responses`、交我算 `/responses` 返回 200、`codex exec -p qwen` 端到端通 |
 
 **真机验证（隔离环境）15 PASS / 0 FAIL**：`scripts/accept_ipc_only.sh`（本轮新增，见 `docs/SANDBOX-PLAN.md` §9.3.8）。
 抓到两件事：① 致命路径 `sys.exit(3)` 会被 **aiosqlite 非 daemon 线程**拖住（真机退出码 124 而非 3）→ 已改
@@ -102,11 +104,6 @@ sudo bash /tmp/switch_ipconly.sh --apply    # 写 20-http-off.conf → 重启 �
 （`tool_dispatchers.py` 5 处 + `agent_launcher.py:132`）全部收口，施加失败 **fail-closed** + 审计留痕。
 真机前提已具备（Landlock 非特权可用、跨 `execve` 继承、systemd 黑名单未误伤 444/445/446）。
 
-### 下一步（2026-09-21 第六轮）：S2 施加点收口（Landlock + `PR_SET_NO_NEW_PRIVS`）
-
-新增 `sandbox_exec`，把 6 个 spawn 点（`tool_dispatchers.py` 5 处 + `agent_launcher.py:132`）全部收口，
-**施加失败 fail-closed + 审计留痕**。真机前提已具备（Landlock 非特权可用、跨 `execve` 继承、
-systemd 黑名单未误伤 444/445/446）。口径与上一轮一致，只是因为插了「真机切开关 + LLM 路由」两件事，往后挪了一格。
 ### ✅ LLM 模型路由与节流（2026-09-21 第五轮：已落地；设计/分工见 `docs/LLM-ROUTING.md`）
 
 > 背景：用户口径 —— deepseek-flash 太贵，学校（交我算）**免费**提供 API，有 `QWEN3.6-27B`；
@@ -211,34 +208,34 @@ daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`�
 | 真机切换与回滚、破坏性操作前的设计与复核 | 【DS】 | 同上 |
 | 架构裁决、跨模块重构、长链路调试 | 【DS】 | 同上 |
 
-### 下一步：S1 落地 → S2
+### 收尾核对与接下来（2026-09-21 第七轮；S2 的设计口径见上「紧接着的下一项」）
 
 **六条裁决（2026-09-21，全部已定）**：① eBPF → **CAP_BPF + root helper**；② 非特权 userns → **不全局放开**（需要时定向给 `bwrap` 写 AppArmor profile）；
 ③ Docker 档 → **Phase 5**；④ daemon → **保持非特权 + 加特权 helper**；⑤ 沙箱 → **提到 E7 之前**；
 ⑥ E7 首发 → **默认出差异 + 跑只读验证**，写盘要确认，`--yes` 才自动落盘。另：入口定 **`trm exec --code`**，`skill.yaml` 与 `SKILL.md` **不合并**。
 
-**S1 现状**：`scripts/harden_trmd_unit.sh` 已按本轮裁决改版（**默认放行 `@debug`**、**默认不加 `ReadOnlyPaths`**、
-单元改用 `Environment=TRIMUM_SOCKET=/run/trimum/trimum.sock`、冒烟先等 socket 真能连上、FAIL 把现场写进 `$BK/smoke.log`）。
-**生产 daemon 仍是零加固原样**（两次 `--apply` 都因冒烟抢跑被自动回滚，复盘见 `docs/SANDBOX-PLAN.md` §9.3.3）。口径见 §6.6，helper 设计见 §6.7。
+**真机现状（收尾核对，2026-09-21 23:07）**：S1 加固 drop-in 在位；**TCP 已收口**（`http: disabled` + `ipc socket: ok` +
+`source: rpc`，全机 8321 无监听，daemon pid 27582 / uptime 27m）；LLM `.env`（18 键）已注入 daemon，冒烟走 `primary:qwen3.8-27b`。
+一键退（脚本都在真机 `/tmp/`）：`sudo bash /tmp/switch_ipconly.sh --rollback`（HTTP 回来）、
+`sudo bash /tmp/llm_env_dropin.sh --rollback`（daemon 不再读 `.env`）、`sudo bash /tmp/sync_opt_tree.sh --rollback`（还原部署树）。
 
-**你要跑的（两条，按顺序；apply 失败会自动回滚）**：
+**部署树与 HEAD 的差异（唯一一处，不影响运行）**：`/opt/trimum/src` 与本地 `src` 逐文件哈希比对 —— **105/105 文件在位**，
+只有 `trimum_core/env_file.py` 不同，差的是**只给测试用的 `reset_loaded()`**（daemon 从不调用，行为一致）。
+下次动生产时用 `sudo bash /tmp/sync_opt_tree.sh --restart` 一并带上即可，**不为它单独重启生产**。
 
-```bash
-sudo bash /tmp/trmd_hotfix_restore.sh          # ⓪ 【先跑这个】把 src 从 socket-patch 备份还原（daemon 正在崩溃循环）
-sudo bash /tmp/sync_opt_socket_patch.sh        # ① 把 socket 补丁装进 /opt/trimum/src（含导入预演 + 逐文件备份）
-sudo bash /tmp/harden_trmd_unit.sh             # ② 先看现状与将写入的 drop-in
-sudo bash /tmp/harden_trmd_unit.sh --apply     #    安装 + 重启 + 冒烟（失败自动回滚，证据留在备份目录）
-sudo bash /tmp/harden_trmd_unit.sh --verify    #    事后复查
-sudo bash /tmp/check_sandbox_caps_root.sh      #    系统级能力核对（顺带回答 helper 那条）
-```
+**曾经列在这里的「你要跑的两条」已全部作废**：整树同步 → 收 TCP → LLM `.env` 注入，三件都已在 2026-09-21 22:41 做完并复核
+（复盘见 `STATUS.md` 同名小节）。
 
-**之后**：S2 施加点收口【DS】（新增 `sandbox_exec`，6 个 spawn 点全改走它，Landlock + fail-closed）→ S3 seccomp 三档【DS】→ S4 子 Agent systemd transient【DS】→ S5 可选档【DS】（helper / Docker / bwrap profile）。
-**S1 过了再收 TCP**：四步（`docs/SANDBOX-PLAN.md` §9.3.5）的**代码侧已在第四轮落地**（§9.3.7）；
-真机只差「开开关」：`trm status` 看到 `ipc socket: ok` → drop-in 写 `Environment=TRIMUM_HTTP=0` 重启试跑一轮
-（`trm status` / `trm agent list` / `trm security tokens|learning|learn`）→ 全绿再把 `config.yaml` 的
-`http_enabled` 设成 `false`。
+**接下来（按优先级；模型标签见上「🤖 Codex 模型分工」）**：
 
-**本轮三条裁决（全部已定）**：① HTTP **只留 unix socket**；② `@debug` **放行**（`bpf` 仍挡）；③ `ReadOnlyPaths=/opt/trimum` **不保留**。
+1. 【DS】**S2 施加点收口**：新增 `sandbox_exec`（Landlock + `PR_SET_NO_NEW_PRIVS`），收 6 个 spawn 点
+   （`tool_dispatchers.py:641/389/502/507/525/530` + `agent_launcher.py:132`），**fail-closed + 审计**；真机前提已具备。
+2. 【DS】S3 seccomp 三档 → S4 子 Agent systemd transient → S5 可选档（helper / Docker / bwrap profile）。
+3. **【待裁决】**把 Codex 接到本地路由上（免费的 Qwen 撞 429 时自动降 `deepseek-flash`）：
+   `docs/CODEX-MODEL-POLICY.md` §4（B1 LiteLLM / B2 `trm codex-proxy` 复用 `llm_router`，**推荐 B2**）。
+4. 【DS】LLM 侧的 ①②（跨进程限流、token 维度计量）；【Qwen】③④⑤（`Retry-After`、doctor 显示路由表、成本账本）。
+
+**真机切开关那轮的三条裁决（全部已定，且已生效）**：① HTTP **只留 unix socket**；② `@debug` **放行**（`bpf` 仍挡）；③ `ReadOnlyPaths=/opt/trimum` **不保留**。
 
 ### E7 未决两项（不阻塞开工）
 
@@ -246,7 +243,7 @@ sudo bash /tmp/check_sandbox_caps_root.sh      #    系统级能力核对（顺�
 ### 开工须知（省得踩坑）
 
 - **先读**：`STATUS.md`（进度与决策）、本节、`docs/` 里对应专题文档 + `docs/ARCH.md`；**不读文档直接动手 = 违规**。
-- **测试**：`python -m pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider`；基线 **1519 passed / 2 failed / 10 skipped**，
+- **测试**：`python -m pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider`；基线 **1554 passed / 2 failed / 10 skipped**，
   2 项失败是既有宿主基线（PATH 缺 `python.exe` + LLM 断网），**不算回归**。
 - **分支**：日常只提交、只推送 `server`；另外三个分支只在里程碑收尾时逐提交同步。
 - **写文件**：用 node 的 `fs.writeFileSync(path, text, {encoding:"utf8"})`（UTF-8 + LF）。
@@ -266,13 +263,21 @@ Landlock / Seccomp 沙箱、记忆桥（`memory_bridge` + `experience_learner` �
 - 运行记录只在内存（环形 200 条，重启即丢）；`trm workflow status/log` 仍是桩。
 - 内置剧本只有落盘式开关（`trm workflow enable <id>`），没有「原地开关」。
 - 确认通道目前只有命令行（桌面 / WebSocket 未做）。
-- 真机：`trm env install` 的 root 真执行路径待跑；`/opt/trimum` 部署树还有几处待同步（见下方「其他待办」）。
+- 真机：`trm env install` 的 root 真执行路径待跑；`/opt/trimum` 部署树只差 `env_file.py` 一个**测试用** helper（见「下一步」一节）。
 - 真机验收脚本：`scripts/accept_w1.py`（48/0）、`scripts/accept_e4.py`（43/0）、`scripts/accept_ipc_only.sh`（15/0，2026-09-21）；E7 的 `scripts/accept_e7.py` 待写。
 - **启动失败时的退出路径**：TCP 预检那两条是 `sys.exit(3)`（什么都还没起），中途致命那条（HTTP 关 + IPC 起不来）已改 `os._exit(3)`；
   但 **HTTP 开着的 daemon 启动失败仍走 uvicorn 自己的 `sys.exit(3)`** —— 同样可能被 `ContextManager` 的
   aiosqlite 非 daemon 线程拖住（真机实测同类现象见 `docs/SANDBOX-PLAN.md` §9.3.8 发现 1）。收 S1 时一并核。
 - **两棵树整体同步**：`/opt/trimum` 与 `~/trimum` 都落后 HEAD（分别缺 `workflow_runtime.py` / `SecurityRuntime`），
   同步脚本要跑导入预演；在此之前 `api_server.py` 不能加回 `sync_opt_socket_patch.sh` 的文件集。
+
+### 收尾留档：三条安全提醒（都未处理）
+
+- 本仓库 `.git/config` 的 origin URL 里是**明文 GitHub token** → 建议轮换 + 改用 credential helper（AGENTS.md 里写的 `GITHUB_TOKEN` 用法不受影响）。
+- 本机 `.env` 里存了真机 sudo 口令（`USER_PASSWORD`）。本轮所有 sudo 都走 **stdin**（没进命令行、没进历史、没进仓库），
+  但仍建议给这台机配一条 NOPASSWD 白名单。
+- Codex 的 profile 依赖**进程环境**里的 `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`（二者都不是持久化的用户环境变量）
+  → 用 `scripts/codex-model.ps1` 起就不会漏；直接敲 `codex -p qwen` 前先确认 key 在环境里。
 
 ### 真机
 

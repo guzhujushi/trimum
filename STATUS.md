@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -13,6 +13,36 @@
 > 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
 > E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
 > 失败项均为既有宿主状态基线（Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网），与本轮各次开工前同名同数，无回归。
+
+---
+
+## 2026-09-21 Codex 侧模型分工与「限流降级」调研（✅ 已落地；提交 `de619c5`）
+
+**需求**：简单任务用交我算免费的 Qwen、难任务用 deepseek-flash，并希望「像 trimum 一样限流后自动降级」。
+
+**结论**：Codex **自身没有**「限流 → 换 provider」的开关（全二进制扫 `*fallback*` 只有 CodeModeHost / TokenBudget /
+models-manager 内部回落 / session 模型不可用回落四种，与限流无关）；能立刻做的是**任务级 profile 切换**（本轮已落地），
+要自动降级只能**在 Codex 前面加一层本地路由代理**（`docs/CODEX-MODEL-POLICY.md` §4，**待裁决**）。
+
+**实测事实**：
+
+| 事实 | 证据 |
+|---|---|
+| `wire_api` 只接受 `responses` | 故意写 `bogus` → 报错 "unknown variant `bogus`, expected `responses`" |
+| 交我算 `/api/v1/responses` 可用 | 最小请求 **HTTP 200**（`object:"response"`、`model:"qwen3.8-27b"`、24 tokens；响应带 `_litellm_tpm_reserved_model` ⇒ 后端是 LiteLLM 网关） |
+| `codex exec -p qwen` 端到端通 | `model: qwen3.8-27b` / `provider: sjtu-jiaowoisan` / 回复「可以」/ 退出码 **0**（跑两次） |
+| profile 不能写在 `config.toml` | 0.151 要求独立文件 `~/.codex/<name>.config.toml`（`sjtu-min.config.toml` 是先例） |
+| 次数才是瓶颈 | 一次 `codex exec`（2 字回复）用掉 **14~15k tokens**；交我算 10 次/分 ⇒ 长会话必撞 429，**Qwen 只适合单次小任务** |
+
+**改动**：`scripts/codex-model.ps1`（新：按任务选 profile + 把 trimum `.env` 灌进进程环境；存 UTF-8 **with BOM** ——
+PS 5.1 用 `-File` 跑无 BOM 的 UTF-8 会按 GBK 解、中文直接把脚本解析弄挂）、`docs/CODEX-MODEL-POLICY.md`（新）、
+`TODO.md`（新增「🤖 Codex 模型分工」一节 + 给 19 条待办打 `【Qwen】` / `【DS】` 标签）。
+仓库外：新建 `~/.codex/qwen.config.toml` 与 `~/.codex/ds.config.toml`；`~/.codex/config.toml` 加过 `[profiles.*]` 被 0.151 拒绝，已回滚
+（备份 `~/.codex/backups/config.toml.20260921-230249.bak`）。**未改任何 `src/` 与 `tests/`。**
+
+**收尾核对（2026-09-21 23:07）**：真机 `trm status` → `source: rpc` / `http: disabled` / `ipc socket: ok`（pid 27582，uptime 27m）；
+`/opt/trimum/src` 与本地 `src` 逐文件哈希：**105/105 在位，唯一差异是 `env_file.py` 少一个测试用 `reset_loaded()`**（daemon 不调用）；
+全量测试 **1554 passed / 2 failed / 10 skipped**（两条仍是宿主基线）；`server` = `origin/server`，工作区干净。
 
 ---
 
