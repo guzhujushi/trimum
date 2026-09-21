@@ -4,8 +4,16 @@ Responsibilities:
 1. SecBlocker: deny/freeze/kill/isolate primitives.
 2. SecAudit: append-only JSON-lines audit log with HMAC hash chain.
 3. SecNotif: publish security alerts/block notifications to the Event Bus.
-4. SecExecutor: orchestrate audit, blocking, notifications, and workflow
-   triggers for a detected threat.
+4. SecExecutor: orchestrate audit, blocking, and notifications for a detected
+   threat.
+
+触发归属（2026-09-21，P0 步骤 3 定）：**SecExecutor 不发 ``workflow.trigger``**。
+
+- 威胁剧本的**自动触发**只有一条：``security.monitor_result``（L4 是唯一生产者，
+  扁平载荷见 ``sec_monitor.monitor_result_payload``），剧本条件就是它的 ``threat_name``。
+- ``workflow.trigger`` 留给**意图驱动**（TARL 三段式 → 跑一份 workflow），生产者是
+  ``workflow_listener.py``（今天仍未接线）。它俩载荷约定不同，同时发等于让同一次威胁
+  被两条链各跑一遍 —— 所以在这里收敛掉。
 """
 
 from __future__ import annotations
@@ -20,7 +28,6 @@ from uuid import uuid4
 from .event_bus import (
     EVENT_SEC_ALERT,
     EVENT_SEC_BLOCKED,
-    EVENT_WORKFLOW_TRIGGER,
     EventBus,
 )
 from .models import (
@@ -232,19 +239,9 @@ class SecExecutor:
         else:
             await self.notif.alert(threat, event)
 
-        if threat.workflow_name:
-            await self.event_bus.publish(
-                SystemEvent(
-                    event_type=EVENT_WORKFLOW_TRIGGER,
-                    source="sec_executor",
-                    severity=EventSeverity.INFO,
-                    payload={
-                        "workflow_name": threat.workflow_name,
-                        "threat_name": threat.threat_name,
-                        "agent_id": agent_id,
-                    },
-                )
-            )
+        # 这里**不再**发 workflow.trigger：威胁剧本听 security.monitor_result（见模块
+        # docstring 的「触发归属」）。``threat.workflow_name`` 已经随 monitor_result 的
+        # 扁平载荷一起送出，剧本按 threat_name 条件自己命中，不需要第二条触发链。
 
 
 class SecurityRuntime:
@@ -254,13 +251,12 @@ class SecurityRuntime:
     之外的入口（``trm ask`` / ``trm exec`` / workflow 的兜底网关）悄悄没有 L4，
     命中威胁既不广播也不阻断。
 
-    - :meth:`daemon`：审计落盘 + 通知 + 阻断 + 工作流触发，daemon 用；
+    - :meth:`daemon`：审计落盘 + 通知 + 阻断，daemon 用；
     - :meth:`local`：同一条事件链，但**审计不落盘**，``ToolGateway`` 没被注入监控时
       自动用它兜底。
 
     两者只差「审计是否落盘」：``security.monitor_result`` / ``security.alert`` /
-    ``security.blocked`` / ``workflow.trigger`` 都照发，所以内置剧本与实时控制台在
-    任何入口看到的行为一致。
+    ``security.blocked`` 都照发，所以内置剧本与实时控制台在任何入口看到的行为一致。
     """
 
     def __init__(

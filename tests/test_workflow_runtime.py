@@ -204,6 +204,18 @@ class TestBuiltinPlaybooks:
             assert workflow_enabled(workflow) is False
             assert workflow.config["builtin"] is True
 
+    def test_builtin_playbooks_listen_to_the_fact_chain_only(self):
+        """归属（P0 步骤 3）：剧本只监听 ``security.monitor_result``（L4 事实事件）与
+        ``cron``（定时）；``workflow.trigger`` 是意图驱动那条链的，剧本不碰它。"""
+        allowed = {"security.monitor_result", "cron"}
+        for workflow in threat_workflows.builtin_workflows():
+            for step in workflow.steps:
+                assert step.trigger.event_type in allowed, (
+                    workflow.id, step.trigger.event_type
+                )
+        assert threat_workflows.get_workflows_by_trigger("workflow.trigger") == []
+        assert len(threat_workflows.get_workflows_by_trigger("security.monitor_result")) == 15
+
     def test_filter_becomes_a_condition(self):
         workflow = threat_workflows.to_workflow_def_v2(
             threat_workflows.get_workflow_by_name("threat-cron-audit")

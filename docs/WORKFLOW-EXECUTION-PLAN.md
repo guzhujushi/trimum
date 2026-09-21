@@ -14,7 +14,7 @@
 | `load_from_dir()` 尾部有一段死代码 | `workflow_engine.py:1085-1117`（`return` 之后的重复函数体） |
 | 唯一预设工作流是「数据」不是「能力」 | `threat_workflows.THREAT_WORKFLOWS`（16 条威胁响应剧本），全库只有定义 + 两个查询函数，零调用点 |
 | 工作流目录默认是空的 | `WorkflowDefV2.load_from_dir(None)` → `~/.trimum/workflows/`；仓库内无 workflow YAML 资产 |
-| `WorkflowListener` 从未被实例化 | `api_server.py` 只起了 `WorkflowEventDriver`；`workflow.trigger` 事件只发不收 |
+| `WorkflowListener` 从未被实例化 | `api_server.py` 只起了 `WorkflowEventDriver`；`workflow.trigger` 事件只发不收（2026-09-21 起连唯一的生产者也没了：威胁剧本改由 `security.monitor_result` 驱动，见 `docs/SECURITY-DEFENSE-PLAN.md` §三「触发归属」） |
 | shell 执行路径只有两条 | `trm exec`（人，ToolGateway）与 `shell` dispatcher；引擎侧没有 |
 
 **结论**：workflow 这条线是「定义齐全、执行缺席」——本轮补的就是执行。
@@ -120,8 +120,10 @@ workflow 失败了，锅却算到点名的这份头上（验收脚本自己也�
   D11（点名的那份没被触发就明说）。
 
 ## 6. 遗留（本轮已知边界）
-- `WorkflowListener`（Transform TARL 三段式）仍未接线；它的 `workflow.trigger` 事件
-  已能被运行时消费（写 `trigger.event_type: workflow.trigger` 的 workflow 即可）。
+- `WorkflowListener`（Transform TARL 三段式）仍未接线；`workflow.trigger` 事件
+  已能被运行时消费（写 `trigger.event_type: workflow.trigger` 的 workflow 即可），
+  但**今天没有生产者** —— 归属已定：`workflow.trigger` = 意图驱动（Listener 那条链），
+  威胁剧本走 `security.monitor_result`（P0 步骤 3 收敛掉的两套约定）。
 - 内置威胁剧本里「散文式步骤」（如「比对上次 hash 基线」）编译为 `agent_type: trm-agent`，
   没有 driver / 没装 Agent 脚本时节点会明确失败——这是设计选择，不是 bug。
 - 运行记录只存内存，进程重启即丢。

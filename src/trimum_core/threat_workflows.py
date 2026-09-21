@@ -1,7 +1,8 @@
 """威胁应对工作流预注册库。
 
 每个威胁对应一个应对工作流定义（纯 JSON 格式，无 LLM 参与）。
-通过 Event Bus 的 workflow.trigger 事件触发，WorkflowEngine 执行。
+监听 Event Bus 的 **security.monitor_result** 事件（L4 事实链，唯一自动触发路径），
+由 WorkflowRuntime 驱动执行 —— 归属决策见 ``sec_executor`` 模块 docstring 的「触发归属」。
 """
 
 from __future__ import annotations

@@ -25,6 +25,10 @@
 - shell 任务一律走 ToolGateway：运行时不持有任何绕过策略与审计的旁路。
 - 条件表达式：受限 ``eval``（空 ``__builtins__``，命名空间只有 ``payload`` /
   ``event`` / ``true`` / ``false``），求值失败按「不通过」处理。
+- **触发归属**（2026-09-21 定）：内置威胁剧本监听 ``security.monitor_result``（L4 的
+  事实事件，唯一自动链）；``workflow.trigger`` 是「意图驱动」（TARL 三段式 →
+  ``workflow_listener.py``，未接线）那条链的事件，运行时对两者一视同仁 —— 谁在
+  ``trigger.event_type`` 里写了什么，就听什么。
 
 运行记录只存内存（环形，进程重启即丢），持久化留给后续的 `trm workflow status/log`。
 """
@@ -343,7 +347,7 @@ class WorkflowRuntime:
         return ids
 
     def register_builtin(self, *, enabled: bool = False) -> list[str]:
-        """注册内置威胁响应剧本。
+        """注册内置威胁响应剧本（触发器 = ``security.monitor_result``，见 ``threat_workflows``）。
 
         默认 ``enabled=False``：剧本里有 ``kill`` / ``firewall-cmd``，自动触发等于
         把确认环节删掉。手动 ``run_now()`` 不受此限（人已经明确点了）。

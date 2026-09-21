@@ -180,6 +180,26 @@ L4 常开的前提是签名不误报 —— 否则正常操作、以及**内置�
   签名 `trigger_workflow` 与剧本名也必须一一对应。
 - 其余安全事件（`security.alert` / `security.blocked`）本来就是扁平（`threat_name` + `defense` + `agent_id` + `command` + `reason`）。
 
+### 触发归属：谁触发剧本（2026-09-21 定，P0 步骤 3）
+
+「威胁命中了」和「跑哪份剧本」之间只留一条链，避免同一次威胁被两条路各跑一遍：
+
+| 触发方式 | 事件 / 入口 | 谁是生产者 | 谁消费 |
+|---|---|---|---|
+| **自动（事实驱动）** | `security.monitor_result` | L4（`SecMonitor._dispatch`），唯一生产者 | 内置威胁剧本（`trigger.event_type` = `security.monitor_result`，条件 = 扁平 `threat_name`）+ W1 `WorkflowRuntime` |
+| 自动（定时） | `cron` | 定时器（`threat-audit-integrity-check` 专用） | 同上 |
+| 意图驱动 | `workflow.trigger` | `workflow_listener.py` 的 TARL 三段式（**今天仍未接线**，即无生产者） | 任何写了 `trigger.event_type: workflow.trigger` 的 workflow（今天没有） |
+| 手动 | `runtime.trigger()` / `run_now()` / `trm workflow run <id>` | 人 | `WorkflowRuntime` |
+
+- **`SecExecutor` 不再发 `workflow.trigger`**（2026-09-21 删）：它的载荷约定（`workflow_name`）
+  与 Listener 的（`cmd` / `tarl` / `decision`）本来就不同，且当前无消费者 —— 留着只会让将来
+  有人写 `trigger: workflow.trigger` 时被「威胁命中」和「意图匹配」重复触发。
+- 内置剧本**默认不自动跑**（`config.enabled = False`，因为剧本里有 `kill` / `firewall-cmd`）：
+  `trm workflow run <id>` 手动跑，或 `trm workflow enable <id>` 落盘后常驻。
+- 归属由测试锁住：`tests/test_gateway_layer4.py::TestLayer4DrivesTheScript`（L4 的广播真的
+  把剧本跑起来）+ 断言 `workflow.trigger` 不再发出；`tests/test_workflow_runtime.py`
+  锁「内置剧本的触发器只有 `security.monitor_result` / `cron`」。
+
 ### 上下文追踪（操作序列检测）
 
 > 操作序列检测同样**优先走 Workflow TARL 匹配**：操作序列模式触发后，ThreatMatcher 直接匹配对应工作流，无需 Security Agent 参与。只有操作序列模式明确但上下文不足以确定阻断/确认时，才走 Security Agent 深度判断。
@@ -282,7 +302,8 @@ SecExecutor 负责 "SecurityRule 判定后的实际操作"。
 ### 4.3 SecNotif — 通知器
 
 - 发布 `security.alert` / `security.blocked` / `security.audit_breach` 到 Event Bus
-- 通知 WorkflowListener 触发对应工作流
+- **不负责触发工作流**：威胁剧本听 `security.monitor_result`（见 §三「触发归属」）；
+  `workflow.trigger` 是意图驱动那条链的事件，与这里的通知正交
 - 审计完整性被破坏时（hash 链断链 / 审计文件不可写），立即发布 `security.audit_breach` 高优事件
 - 可选：CLI 终端输出 ⚠️ 安全告警
 
@@ -293,7 +314,7 @@ SecExecutor 负责 "SecurityRule 判定后的实际操作"。
 
 ## 五、已知威胁 → 工作流应对表
 
-每种威胁可以自动触发一个应对工作流（YAML），不需要 LLM 参与。所有工作流通过 TARL 匹配直接触发，**不走 Security Agent**。
+每种威胁可以自动触发一个应对工作流（YAML），不需要 LLM 参与：剧本监听 `security.monitor_result`（L4 的事实事件，条件就是 `threat_name`），**不走 Security Agent**。
 
 | 威胁 | 触发时机 | 工作流名称 | 类型 | 具体步骤 |
 |------|---------|-----------|------|---------|

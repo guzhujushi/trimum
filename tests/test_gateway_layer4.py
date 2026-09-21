@@ -26,6 +26,7 @@ from trimum_core.event_bus import (  # noqa: E402
 )
 from trimum_core.models import (  # noqa: E402
     ExecuteRequest,
+    ExecuteResponse,
     SourceType,
     SystemEvent,
     ToolType,
@@ -116,16 +117,16 @@ class TestLayer4Deny:
         assert payload["pid"] == 0, "L4 是执行前闸门，不能拿 daemon 自己的 PID 冒充"
 
     @pytest.mark.asyncio
-    async def test_executor_audits_and_notifies_and_triggers_the_script(self, wired):
+    async def test_executor_audits_and_notifies(self, wired):
         gateway, recorder, tmp_path = wired
 
         await gateway.execute(_request(BLOCKED_COMMAND))
         await asyncio.sleep(0.05)
 
         assert [event.payload["threat_name"] for event in recorder[EVENT_SEC_BLOCKED]] == ["ld_preload"]
-        assert [event.payload["workflow_name"] for event in recorder[EVENT_WORKFLOW_TRIGGER]] == [
-            "threat-prelink-check"
-        ]
+        # 归属（P0 步骤 3）：SecExecutor 不发 workflow.trigger —— 剧本的自动触发只走
+        # security.monitor_result，两套并存会让同一次威胁被两条链各跑一遍。
+        assert recorder[EVENT_WORKFLOW_TRIGGER] == []
         audit_text = (tmp_path / "security.log").read_text(encoding="utf-8")
         assert "ld_preload" in audit_text and "deny" in audit_text
 
@@ -179,9 +180,11 @@ class TestLayer4NonDeny:
         assert [event.payload["threat_name"] for event in recorder[EVENT_SEC_MONITOR]] == [
             threat_name
         ]
-        assert [event.payload["workflow_name"] for event in recorder[EVENT_WORKFLOW_TRIGGER]] == [
+        # 剧本名随 monitor_result 的扁平载荷走（不再另发 workflow.trigger）
+        assert [event.payload["workflow_name"] for event in recorder[EVENT_SEC_MONITOR]] == [
             workflow
         ]
+        assert recorder[EVENT_WORKFLOW_TRIGGER] == []
 
     @pytest.mark.asyncio
     async def test_confirm_threat_is_reported_but_the_command_still_runs(self, wired):
@@ -256,3 +259,53 @@ class TestLayer4DefaultWiring:
         runtime = WorkflowRuntime(EventBus())
 
         assert runtime._ensure_gateway().sec_monitor is not None
+
+
+class _RecordingGateway:
+    """记录请求的假网关（端到端用例里替 ToolGateway 执行剧本步骤）。"""
+
+    def __init__(self) -> None:
+        self.requests: list = []
+
+    async def execute(self, request):
+        self.requests.append(request)
+        return ExecuteResponse(
+            execution_id="x", status="allowed", output="ok", exit_code=0
+        )
+
+
+class TestLayer4DrivesTheScript:
+    """归属闭环（P0 步骤 3）：L4 发的 ``security.monitor_result`` 就是剧本的驱动事件。"""
+
+    @pytest.mark.asyncio
+    async def test_the_broadcast_really_triggers_a_registered_script(self, wired):
+        gateway, _recorder, _tmp = wired
+        bus = gateway.event_bus
+        runner = _RecordingGateway()
+        runtime = WorkflowRuntime(bus, gateway=runner)
+        entry = {
+            "name": "test-ld-preload-script",
+            "trigger": "security.monitor_result",
+            "filter": {"threat_name": "ld_preload"},
+            "steps": ["echo hit"],
+        }
+        runtime.register(
+            threat_workflows.to_workflow_def_v2(entry), source="test", enabled=True
+        )
+        await runtime.start()
+        try:
+            baseline = runtime.run_count
+            # 命令被 L4 拦下，同时它触发的剧本真的跑起来了
+            resp = await gateway.execute(_request(BLOCKED_COMMAND))
+            records = await runtime.wait_for_runs(since=baseline, timeout=5)
+        finally:
+            await runtime.stop()
+
+        assert resp.status == "denied"
+        assert len(records) == 1
+        assert records[0].status == "completed"
+        assert records[0].triggered_by == "event"
+        # L4 用 ``publish(SystemEvent(...))`` 直发，没有 ``emit_event`` 的 ``event.`` 命名空间
+        # 前缀；匹配端两种写法都认（见 workflow_runtime.type_matches）
+        assert records[0].trigger_event == "security.monitor_result"
+        assert [request.args for request in runner.requests] == [["echo hit"]]
