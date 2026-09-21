@@ -1,7 +1,7 @@
 """`trm install` / `pkg_install` —— 官方渠道的安装与登记（E5 第三片）。
 
 覆盖：按类型落地、登记表、agent 证书（official → TRUSTED / 降级 → CONFIRM）、
-签名索引（哈希承诺、未签名索引、目录里没有的名字）、``--allow-untrusted`` 只放宽「来源」
+签名索引（哈希承诺、未签名索引、目录里没有的名字）、``trm pkg index`` 造出来的索引能直接装
 而**不放宽包内路径**这条红线，以及卸载（``--remove``）的红线与确认口径。
 """
 
@@ -341,6 +341,29 @@ class TestInstallFromIndex:
         assert (home / "tools" / "demo-tool" / "main.py").is_file()
         assert (home / "cache" / "pkgs" / "demo-tool-1.0.0.trmpkg").is_file()
 
+    def test_an_index_built_by_the_cli_installs_end_to_end(self, home, channel, keys, tmp_path, monkeypatch, capsys):
+        """发布方闭环 + 使用者闭环接上：`trm pkg index` 造出来的索引，`trm install` 直接能用。"""
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        for package in channel["packages"].values():
+            shutil.copyfile(package, dist / package.name)
+        key_file = tmp_path / "release.key"
+        key_file.write_text(keys["signer_key"], encoding="utf-8")
+        capsys.readouterr()
+
+        assert main([
+            "pkg", "index", str(dist),
+            "--signer-cert", str(keys["signer_path"]),
+            "--key", str(key_file),
+            "--root-cert", str(keys["root_path"]),
+        ]) == 0
+        capsys.readouterr()
+        monkeypatch.setenv(pkg_install.INDEX_ENV, str(dist / pkg_index.INDEX_NAME))
+
+        assert main(["install", "demo-flow"]) == 0
+
+        assert (home / "workflows" / "demo-flow" / "main.py").is_file()
+        assert "demo-flow" in pkg_install.installed_records()
     def test_index_env_override_is_honoured(self, home, channel, monkeypatch, capsys):
         monkeypatch.setenv(pkg_install.INDEX_ENV, str(channel["index"]))
 

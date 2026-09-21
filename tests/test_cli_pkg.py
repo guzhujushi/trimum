@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from trimum_core import trmpkg  # noqa: E402
+from trimum_core import pkg_index, trmpkg  # noqa: E402
 from trimum_core.cli import main  # noqa: E402
 
 
@@ -99,6 +99,25 @@ def rewrite(package: Path, dest: Path, mutate) -> Path:
             info.size = len(blob)
             tar.addfile(info, io.BytesIO(blob))
     return dest
+
+
+
+
+def index_args(directory: Path, keys: dict, **overrides) -> list[str]:
+    """``trm pkg index`` 的最小参数集（发布方要显式交出签名者证书与私钥）。"""
+    args = [
+        "pkg", "index", str(directory),
+        "--signer-cert", str(keys["signer_cert"]),
+        "--key", str(keys["signer_key"]),
+        "--root-cert", str(keys["root_cert"]),
+    ]
+    for key, value in overrides.items():
+        flag = "--" + key.replace("_", "-")
+        if value is True:
+            args.append(flag)
+        elif value is not False and value is not None:
+            args.extend([flag, str(value)])
+    return args
 
 
 class TestCreateAndVerify:
@@ -408,3 +427,157 @@ class TestSignerCapabilitiesReachTheRuntimeContract:
         monkeypatch.setenv("TRIMUM_HOME", str(tmp_path / "home"))
         assert pkg_mod.trust_dir() == tmp_path / "home" / "trust"
         assert pkg_mod.signer_dir() == tmp_path / "home" / "trust" / "signers"
+
+
+class TestIndex:
+    """`trm pkg index` —— 发布方闭环的最后一步：扫目录 → 签名索引 → 落盘。"""
+
+    def test_builds_a_signed_index_whose_promises_hold(self, payload, tmp_path, keys, capsys):
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        package = make_package(payload, dist / "demo-1.2.3.trmpkg", keys)
+        capsys.readouterr()
+
+        code = main(["--json", *index_args(dist, keys)])
+        data = json.loads(capsys.readouterr().out)
+
+        assert code == 0
+        assert data["count"] == 1
+        assert data["index"] == str(dist / pkg_index.INDEX_NAME)
+        assert data["signer"]["name"] == "trimum-release"
+        assert data["root"]["name"] == "trimum-root"
+        entry = data["packages"][0]
+        assert (entry["name"], entry["type"], entry["version"]) == ("demo-agent", "agent", "1.2.3")
+        assert entry["sha256"] == trmpkg.file_digest(package)
+        assert entry["size"] == package.stat().st_size
+
+        written = pkg_index.verify_index(dist / pkg_index.INDEX_NAME, root_path=keys["root_cert"])
+        assert written.ok
+        assert written.find("demo-agent")["url"] == "demo-1.2.3.trmpkg"
+
+    def test_an_untrusted_proxy_cannot_rewrite_the_url(self, payload, tmp_path, keys, capsys):
+        """索引的用处就在这里：改了 url 就验不过签名（否则中间人可以换包）。"""
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        make_package(payload, dist / "demo.trmpkg", keys)
+        assert main(["--json", *index_args(dist, keys)]) == 0
+        capsys.readouterr()
+
+        index_path = dist / pkg_index.INDEX_NAME
+        container = json.loads(index_path.read_text(encoding="utf-8"))
+        container["document"]["packages"][0]["url"] = "http://evil.example/demo.trmpkg"
+        index_path.write_text(json.dumps(container), encoding="utf-8")
+
+        result = pkg_index.verify_index(index_path, root_path=keys["root_cert"])
+
+        assert not result.ok
+        assert any("签名" in item or "签名不符" in item for item in result.errors)
+
+    def test_entries_come_from_the_manifest_not_the_file_name(self, payload, tmp_path, keys, capsys):
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        make_package(payload, dist / "whatever-name.trmpkg", keys)
+        capsys.readouterr()
+
+        assert main(["--json", *index_args(dist, keys)]) == 0
+        entry = json.loads(capsys.readouterr().out)["packages"][0]
+
+        assert entry["name"] == "demo-agent"  # manifest 说了算
+        assert entry["url"] == "whatever-name.trmpkg"  # url 说的才是去哪儿拿
+
+    def test_nested_packages_get_relative_urls(self, payload, tmp_path, keys, capsys):
+        dist = tmp_path / "dist"
+        (dist / "agents").mkdir(parents=True)
+        make_package(payload, dist / "agents" / "demo.trmpkg", keys)
+        capsys.readouterr()
+
+        assert main(["--json", *index_args(dist, keys)]) == 0
+        entry = json.loads(capsys.readouterr().out)["packages"][0]
+
+        assert entry["url"] == "agents/demo.trmpkg"
+        resolved = pkg_index.read_index(dist / pkg_index.INDEX_NAME)
+        assert resolved["document"]["packages"][0]["url"] == "agents/demo.trmpkg"
+
+    def test_a_package_that_does_not_verify_is_refused(self, payload, tmp_path, keys, capsys):
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        package = make_package(payload, dist / "demo.trmpkg", keys)
+        rewrite(package, dist / "tampered.trmpkg", lambda blobs: {
+            **blobs, "main.py": b"print('pwned')\n"
+        })
+        capsys.readouterr()
+
+        code = main(index_args(dist, keys))
+
+        assert code == 1
+        assert "拒绝收录" in capsys.readouterr().err
+        assert not (dist / pkg_index.INDEX_NAME).exists()
+
+    def test_an_empty_directory_is_refused(self, tmp_path, keys, capsys):
+        dist = tmp_path / "dist"
+        dist.mkdir()
+
+        assert main(index_args(dist, keys)) == 1
+
+        assert "没有 .trmpkg" in capsys.readouterr().err
+        assert not (dist / pkg_index.INDEX_NAME).exists()
+
+    def test_an_existing_index_needs_force(self, payload, tmp_path, keys, capsys):
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        make_package(payload, dist / "demo.trmpkg", keys)
+        assert main(index_args(dist, keys)) == 0
+        capsys.readouterr()
+
+        assert main(index_args(dist, keys)) == 1
+        assert "--force" in capsys.readouterr().err
+        assert main(index_args(dist, keys, force=True)) == 0
+
+    def test_signing_material_is_required(self, payload, tmp_path, keys, capsys):
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        make_package(payload, dist / "demo.trmpkg", keys)
+        capsys.readouterr()
+
+        args = ["pkg", "index", str(dist)]
+        assert main(args) == 1
+
+        assert "需要 --signer-cert" in capsys.readouterr().err
+        assert not (dist / pkg_index.INDEX_NAME).exists()
+
+    def test_a_signer_from_another_root_is_refused(self, payload, tmp_path, keys, capsys):
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        make_package(payload, dist / "demo.trmpkg", keys)
+        other_root, other_key = trmpkg.make_root("someone-else")
+        other_signer, other_signer_key = trmpkg.make_signer_cert(
+            "someone-release", other_root, other_key
+        )
+        other_cert = tmp_path / "someone.crt"
+        other_cert.write_text(json.dumps(other_signer), encoding="utf-8")
+        other_key_file = tmp_path / "someone.key"
+        other_key_file.write_text(other_signer_key, encoding="utf-8")
+        capsys.readouterr()
+
+        args = [
+            "pkg", "index", str(dist),
+            "--signer-cert", str(other_cert),
+            "--key", str(other_key_file),
+            "--root-cert", str(keys["root_cert"]),
+        ]
+        assert main(args) == 1
+
+        assert "不是这个根签发的" in capsys.readouterr().err
+
+    def test_human_output_lists_what_got_indexed(self, payload, tmp_path, keys, capsys):
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        make_package(payload, dist / "demo.trmpkg", keys)
+        capsys.readouterr()
+
+        assert main(index_args(dist, keys)) == 0
+        out = capsys.readouterr().out
+
+        assert "indexed 1 package(s)" in out
+        assert "signed by trimum-release" in out
+        assert "demo-agent 1.2.3 [agent] demo.trmpkg" in out

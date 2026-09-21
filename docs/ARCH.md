@@ -498,10 +498,10 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 | 模块 | 职责 |
 |---|---|
 | `src/trimum_core/trmpkg.py` | 包格式（`manifest.json5` + 逐文件 sha256 + `SIGNATURE` + `chain.json`）、打包、校验、安全解包；`verify_chain()` 与 `verify_document_signature()` 是「什么算可信」的唯一实现 |
-| `src/trimum_core/pkg_index.py` | 官方目录索引（`trmindex/1`，容器 `{document, signature, chain}`）：回答「去哪拿这个包」，索引本身也必须签名 |
+| `src/trimum_core/pkg_index.py` | 官方目录索引（`trmindex/1`，容器 `{document, signature, chain}`）：回答「去哪拿这个包」，索引本身也必须签名；`entries_from_directory()` 是发布方的扫描+质检面（只收录验得过的包） |
 | `src/trimum_core/pkg_install.py` | 校验 → 按类型落地（`agents/` / `tools/` / `workflows/` / `skills/`）→ 登记 `~/.trimum/config/installed.json5`；`remove_package()` 是逆操作（删登记过的目录 + 划掉登记行） |
 | `src/trimum_core/capability.py` | 能力清单的运行期交集（E6 遗留）：多来源取最严，只收紧、不放宽 |
-| `src/trimum_core/cli/commands/pkg.py` | `trm pkg {verify,info,create,extract,root-init,signer-init}` |
+| `src/trimum_core/cli/commands/pkg.py` | `trm pkg {verify,info,create,extract,index,root-init,signer-init}` |
 | `src/trimum_core/cli/commands/install.py` | `trm install [name]` / `--file` / `--list` / `--index` / `--allow-untrusted` / `--remove` / `--yes` / `--dry-run`（无参数仍是原向导） |
 | `config/trust/trimum-root.crt` | 内置官方根（只有公钥；私钥留在发布方 `~/.trimum/trust/`，仓库外） |
 
@@ -516,6 +516,9 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 - **两档 trust**：`official`（链追到内置根）与 `untrusted`（显式 `--allow-untrusted`）。
 - **安装 ≠ 授权**：登记只回答「从哪来」；能不能执行仍由 ToolGateway 分层决定，`capability.py` 只收紧。
 - **requires**：安装时按 PATH 探测，缺依赖只警告不拒装（与 `AgentRegistry.check_dependencies` 同一口径）。
+- **发布方闭环**：`create`（打包签名）→ `index`（扫目录 → 签名索引 → 写完自检）。`trm pkg index` 只收录
+  **验得过**的包（一个不过就整体失败并列出原因，不写索引），条目字段取自**校验过的 manifest** 而不是
+  文件名，`url` 相对索引位置 —— 索引与包同目录即可离线安装。发布 / 上线 / 轮换流程见 `docs/PACKAGE-CHANNEL-OPS.md`。
 - **发布方工具**：`root-init` / `signer-init` 拒绝把私钥写进 git 工作树（除非 `--insecure-key-output`），
   落盘 0600；换根 = 旧包全部作废（见 `config/trust/README.md`）。
 - **卸载只删登记过的那个路径**：`trm install --remove <name>` 读 ledger 里的 `path`，只有恰好等于
@@ -541,7 +544,7 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 
 ### 测试
 
-`tests/test_trmpkg.py`（16）、`tests/test_cli_pkg.py`（25）、`tests/test_pkg_install.py`（42）、
+`tests/test_trmpkg.py`（16）、`tests/test_cli_pkg.py`（35）、`tests/test_pkg_install.py`（43）、
 `tests/test_capability.py`（20）。
 
 ## 范围边界与验收（生态轮）

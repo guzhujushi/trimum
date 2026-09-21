@@ -1,8 +1,8 @@
 """`trm pkg` — `.trmpkg` 官方分发包的打包、校验与信任锚（E5 第二片）。
 
-五个动作对应分发渠道的两端：**发布方造钥匙**（``root-init`` / ``signer-init``）、
-**发布方打包**（``create``）、**使用者校验**（``verify`` / ``info``）、
-**解包落地**（``extract`` —— 先校验后落地，不留「先解开再判断」的中间态）。
+六个动作对应分发渠道的两端：**发布方造钥匙**（``root-init`` / ``signer-init``）、
+**发布方打包**（``create``）、**发布方建目录**（``index``）、
+**使用者校验**（``verify`` / ``info``）、**解包落地**（``extract`` —— 先校验后落地，不留「先解开再判断」的中间态）。
 
 两条硬规则（``docs/ECOSYSTEM-STRATEGY.md`` §7）：
 
@@ -23,13 +23,14 @@ from pathlib import Path
 from typing import Any
 
 from .._utils import emit, fail
-from trimum_core import trmpkg
+from trimum_core.pkg_index import INDEX_NAME
+from trimum_core import pkg_index, trmpkg
 from trimum_core.models import TRMErrorCode, TrimumError
 
 __command_meta__ = {
     "pkg": {
         "summary": "Build, inspect and verify official .trmpkg packages",
-        "args": "{verify,info,create,extract,root-init,signer-init}",
+        "args": "{verify,info,create,extract,index,root-init,signer-init}",
         "tags": ["pkg", "ecosystem", "trust"],
         "risk": "low",
     },
@@ -58,6 +59,15 @@ __command_meta__ = {
             "--signer-cert trust/signers/release.crt --key trust/signers/release.key",
         ],
         "tags": ["pkg", "publish"],
+        "risk": "medium",
+    },
+    "pkg index": {
+        "summary": "Build and sign the directory index for a folder of .trmpkg files",
+        "args": "<directory> [-o PATH] [--signer-cert P] [--key P] [--root-cert P] [--force]",
+        "examples": [
+            "trm pkg index dist/ --signer-cert trust/signers/release.crt --key trust/signers/release.key",
+        ],
+        "tags": ["pkg", "publish", "trust"],
         "risk": "medium",
     },
     "pkg extract": {
@@ -148,6 +158,27 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     )
     extract_parser.set_defaults(handler=handler)
 
+    index_parser = nested.add_parser(
+        "index", help="build and sign the directory index for a folder of packages"
+    )
+    index_parser.add_argument("directory", help="directory holding the .trmpkg files")
+    index_parser.add_argument(
+        "-o", "--out", default=None, help=f"output path (default: <directory>/{INDEX_NAME})"
+    )
+    index_parser.add_argument(
+        "--signer-cert", default=None, help="signer certificate; the index must be signed"
+    )
+    index_parser.add_argument(
+        "--key", default=None, help="signer private key (PEM); never commit this file"
+    )
+    index_parser.add_argument(
+        "--root-cert", default=None, help="trust root that issued the signer certificate"
+    )
+    index_parser.add_argument(
+        "--force", action="store_true", help="overwrite an existing index"
+    )
+    index_parser.set_defaults(handler=handler)
+
     root_parser = nested.add_parser(
         "root-init", help="generate the official trust root (cert + private key)"
     )
@@ -188,7 +219,7 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
 
 def _show_help(args: argparse.Namespace) -> int:
     del args
-    print("usage: trm pkg {verify,info,create,extract,root-init,signer-init} ...")
+    print("usage: trm pkg {verify,info,create,extract,index,root-init,signer-init} ...")
     return 0
 
 
@@ -377,6 +408,61 @@ def _create(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _index(args: argparse.Namespace) -> dict[str, Any]:
+    """Build the signed directory index for a folder of packages."""
+    directory = Path(args.directory)
+    if not args.signer_cert or not args.key:
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_INVALID,
+            message=(
+                "需要 --signer-cert 与 --key：索引必须签名 ——"
+                "不签名的索引等于把「去哪拿这个包」交给中间人"
+            ),
+        )
+
+    signer_cert = trmpkg.load_cert(args.signer_cert)
+    root_path = _root_cert_path(args.root_cert)
+    root_cert = trmpkg.load_cert(root_path)
+    if signer_cert.get("issuer_key_id") != root_cert.get("key_id"):
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_INVALID,
+            message=(
+                f"签名者证书 {signer_cert.get('name', '?')} 不是这个根签发的"
+                f"（issuer_key_id={signer_cert.get('issuer_key_id', '')[:20]}…，"
+                f"root key_id={root_cert.get('key_id', '')[:20]}…）"
+            ),
+        )
+    signer_key = Path(args.key).read_text(encoding="utf-8")
+
+    out = Path(args.out) if args.out else directory / INDEX_NAME
+    _refuse_overwrite(out, bool(args.force), "索引")
+
+    entries = pkg_index.entries_from_directory(directory, root_path=root_path)
+    document = pkg_index.build_index(entries)
+    container = pkg_index.sign_index(
+        document,
+        signer_cert=signer_cert,
+        signer_private_pem=signer_key,
+        chain=[signer_cert, root_cert],
+    )
+    path = pkg_index.write_index(out, container)
+    # 写完自检：刚签出来的索引自己必须先验得过，否则「签名」只是自我安慰。
+    pkg_index.verify_index(path, root_path=root_path).require_ok()
+
+    return {
+        "index": str(path),
+        "directory": str(directory),
+        "generated_at": document["generated_at"],
+        "count": len(entries),
+        "signer": {
+            "name": signer_cert.get("name", ""),
+            "key_id": signer_cert.get("key_id", ""),
+        },
+        "root": {"name": root_cert.get("name", ""), "key_id": root_cert.get("key_id", "")},
+        "packages": entries,
+    }
+
+
 def _extract(args: argparse.Namespace) -> dict[str, Any]:
     dest = Path(args.dest)
     if dest.exists() and any(dest.iterdir()) and not args.force:
@@ -516,6 +602,14 @@ def _human_create(data: dict[str, Any]) -> None:
     print(f"  signed by {data['signer']} (root {data['root']})")
 
 
+def _human_index(data: dict[str, Any]) -> None:
+    print(f"indexed {data['count']} package(s) -> {data['index']}")
+    print(f"  signed by {data['signer']['name']} (root {data['root']['name']})")
+    for item in data["packages"]:
+        short = str(item["sha256"]).split(":", 1)[-1][:12]
+        print(f"  - {item['name']} {item['version']} [{item['type']}] {item['url']} {short}")
+
+
 def _human_extract(data: dict[str, Any]) -> None:
     print(f"verified and unpacked {data['files_count']} file(s) -> {data['dest']}")
     for name in data["files_written"]:
@@ -549,6 +643,9 @@ def handler(args: argparse.Namespace) -> int:
         elif command == "create":
             data = _create(args)
             human = _human_create
+        elif command == "index":
+            data = _index(args)
+            human = _human_index
         elif command == "extract":
             data = _extract(args)
             human = _human_extract

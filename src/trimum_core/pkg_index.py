@@ -15,6 +15,9 @@
 签名覆盖 ``document`` 的**规范字节**（``trmpkg.canonical_bytes``），证书链与包共用
 ``trmpkg.verify_chain()`` —— 索引与包不可能对「什么算可信」产生第二种解释。
 
+发布方把包丢进一个目录，``entries_from_directory()`` 扫出条目、``sign_index()`` 盖章 ——
+``trm pkg index <dir>`` 就是这两个动作的 CLI 面（发布方闭环的最后一步）。
+
 索引里的每个 ``package`` 条目：``name`` / ``type`` / ``version`` / ``url`` / ``sha256``
 / ``size`` / ``description`` / ``requires`` / ``entry``。``sha256`` 是**索引对包的承诺**：
 下载下来先比哈希，不一致就不进校验流程（省掉一步「明明不可能通过」的解包）。
@@ -242,12 +245,74 @@ def verify_index(
     return result
 
 
+
+def entries_from_directory(
+    directory: str | Path,
+    *,
+    root_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Scan *directory* for ``.trmpkg`` files and turn each one into an index entry.
+
+    这是发布方闭环的**最后一步**，同时是一条质检线：
+
+    * 只收录**验得过**的包（证书链追到 *root_path*），一个验不过就整体失败并列出原因 ——
+      索引是「官方目录」这份承诺本身，「悄悄少一个包」比「报错」危险得多;
+    * 字段取自**校验过的 manifest**，不是文件名 —— 文件叫什么不等于包里写的是什么;
+    * ``url`` 是相对**索引位置**的路径（``/`` 分隔），所以索引与包放进同一个目录树
+      就能离线安装（``pkg_install.resolve_url`` 负责解析）。
+    """
+    base = Path(directory)
+    if not base.is_dir():
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_INVALID, message=f"目录不存在：{base}"
+        )
+    found = sorted(
+        (item for item in base.rglob("*.trmpkg") if item.is_file()),
+        key=lambda item: item.relative_to(base).as_posix(),
+    )
+
+    entries: list[dict[str, Any]] = []
+    problems: list[str] = []
+    for package in found:
+        result = trmpkg.verify_package(package, root_path=root_path)
+        if not result.ok:
+            reasons = "；".join(result.errors) or "校验失败"
+            problems.append(f"{package.relative_to(base).as_posix()}：{reasons}")
+            continue
+        manifest = result.manifest or {}
+        entries.append(
+            package_entry(
+                str(manifest.get("name", "")),
+                type=str(manifest.get("type", "")),
+                version=str(manifest.get("version", "")),
+                url=package.relative_to(base).as_posix(),
+                sha256=trmpkg.file_digest(package),
+                size=package.stat().st_size,
+                requires=dict(manifest.get("requires") or {}),
+                entry=str(manifest.get("entry", "")),
+            )
+        )
+
+    if problems:
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_VERIFY_FAILED,
+            message="索引拒绝收录验不过的包（先修包或先移出目录）：" + "；".join(problems),
+            context={"directory": str(base)},
+        )
+    if not entries:
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_NOT_FOUND,
+            message=f"{base} 里没有 .trmpkg：空索引不是官方目录该有的样子",
+        )
+    return sorted(entries, key=lambda item: (item["name"], item["version"], item["url"]))
+
 __all__ = [
     "INDEX_FORMAT",
     "INDEX_NAME",
     "PACKAGE_KEYS",
     "IndexResult",
     "build_index",
+    "entries_from_directory",
     "package_entry",
     "parse_container",
     "read_index",
