@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -9,18 +9,18 @@
 > **P0 安全响应链接线已闭环**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，剧本在真机上永远不会被自动触发）：
 > 2026-09-21 四步走完 —— 步骤 1/3（载荷契约扁平化）、步骤 2/3（L4 改走 `SecMonitor.inspect()`）、
 > 步骤 2 补丁（装配统一 + 处置映射 + 签名收敛）、步骤 3/3（定 `workflow.trigger` 归属）；
-> **E5 官方分发渠道**已闭环（2026-09-21 第二片：`.trmpkg` + `trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + 证书能力运行期交集；**第三片步骤 1**：`trm install --remove` 卸载与注销）；剩 官网服务端与目录托管、目录索引生成入口（`trm pkg index`）、多用户边界（§7.2）。P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
+> **E5 官方分发渠道**已闭环：第二片（`.trmpkg` + `trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + 证书能力运行期交集）、**第三片步骤 1**（`trm install --remove` 卸载与注销）、**步骤 2**（`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md` 运维手册）；剩 官网服务端托管、多用户边界（步骤 3，只做调研设计）。P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
 > 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
 > E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
 > 失败项均为既有宿主状态基线（Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网），与本轮各次开工前同名同数，无回归。
 
 ---
 
-## E5 第三片 —— 卸载与注销（✅ 步骤 1 已完成，2026-09-21）
+## E5 第三片（✅ 步骤 1 卸载 + 步骤 2 发布方闭环，2026-09-21）
 
 > 计划与红线：`TODO.md`「🚚 E5 第三片实施计划」；口径：`docs/ECOSYSTEM-STRATEGY.md` §7.6、
 > 模块与红线：`docs/ARCH.md`「官方分发渠道（E5）」。
-> 提交：`d7aced2`（`feat(e5): trm install --remove`）。
+> 提交：步骤 1 `d7aced2`（`trm install --remove`）、步骤 2 `fcecbfe`（`trm pkg index`）。
 
 **做了什么**：`trm install --remove <name>` —— 与 `--list` 对称，不新增顶层命令（命令面仍是 76）。
 两个动作成对：删掉 **ledger 指名的**落地目录 + 划掉登记行，不留「目录没了但还登记着」的半截状态。
@@ -46,6 +46,33 @@
 同名 tool 可卸 / 干跑不动盘不动账 / 幂等连删 / 非交互 abort / `--file` 互斥 / 缺名字 / 过期登记 / 运行期联动）。
 全量 **1315 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线：沙箱写 `~/.trimum` 被拒 ×4 + LLM 断网 ×1，无回归）。
 
+### 步骤 2 — 发布方闭环（`trm pkg index`）
+
+**做了什么**：`trm pkg index <dir> -o index.json5 --signer-cert … --key …` —— 发布方闭环的最后一步：
+扫目录里的 `.trmpkg` → 生成 `trmindex/1` document → 用签名者签 → 落盘（命令面 76 → **77**，
+新码在 `pkg_index.entries_from_directory()`，CLI 只做接线）。四条口径：
+
+| 口径 | 为什么 |
+|---|---|
+| 只收录**验得过**的包，一个不过就整体失败并逐条列原因、**不写索引** | 「悄悄少一个包」比「报错」危险得多 |
+| 字段取自**校验过的 manifest**，不是文件名 | 文件叫什么 ≠ 包里写的是什么 |
+| `url` **相对索引位置**（`/` 分隔，支持子目录） | 索引与包同目录即可离线安装（`resolve_url` 解析） |
+| **写完自检**：刚签出来的索引就地验一遍（签名 + 证书链） | 否则「签名」只是自我安慰 |
+
+`--force` 才能覆盖已存在的索引；**改一个包就要重签索引**（条目里的 `sha256` 是索引对包的承诺）。
+
+**验收（按计划原样达成）**：`trm pkg index dist/` → `TRIMUM_PKG_INDEX=dist/index.json5 trm install <name>`
+一条链跑通 —— `tests/test_pkg_install.py::TestInstallFromIndex::test_an_index_built_by_the_cli_installs_end_to_end`
+（发布方用 CLI 造索引 → 使用者用该索引装包 → 落地并登记）。
+
+**官网服务端仍不做**（域名 / 托管 / CI 属产品决策）：本步骤交付的是**可离线复现的发布闭环 + 运维手册**
+`docs/PACKAGE-CHANNEL-OPS.md`（造根 → 建签名者 → 打包 → 建索引 → 上线 → **轮换根**（换根 = 旧包全部作废）→
+内网镜像（`--index` 指过去，镜像不需要被信任）→ 出问题对照表 → 边界）。
+
+**测试**：新增 11 项（`tests/test_cli_pkg.py::TestIndex` 10：条目承诺 / 改 url 验不过 / manifest 说了算 /
+子目录相对 url / 验不过的包拒收 / 空目录拒收 / `--force` / 缺签名材料 / 跨根签名者 / 人读输出；
+外加上述端到端 1 项）。全量 **1326 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线，无回归）。
+
 ### 提交与分支
 
 > 分支纪律见 `AGENTS.md`：**日常只推 `server`**，`main` / `ubuntu` / `arch-linux` 只在收尾阶段同步。
@@ -53,6 +80,7 @@
 | 内容 | server |
 |---|---|
 | E5 第三片 步骤 1（`trm install --remove` + `TestRemove` + 文档 §7.6） | `d7aced2` |
+| E5 第三片 步骤 2（`trm pkg index` + `TestIndex` + `docs/PACKAGE-CHANNEL-OPS.md` + 文档 §7.7） | `fcecbfe` |
 
 ---
 
