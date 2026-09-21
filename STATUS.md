@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理：删除 `PRD.md`、`ARCH.md` 去重后移入 `docs/`** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（剧本只走 `security.monitor_result`）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -1529,3 +1529,39 @@ workflow，同一次威胁就会被两条链各跑一遍。
 内置剧本 `config.enabled = False` 未动：剧本里有 `kill` / `firewall-cmd`，自动触发等于删掉确认环节。
 要不要给「只读自查」子集（`threat-cron-audit` / `threat-systemd-audit` / `threat-prelink-check` …）
 开自动触发，属于策略决定，记在 `TODO.md`。
+---
+
+## 2026-09-21 E5 第一片：`.trmpkg` 包格式 + 打包/校验器
+
+> 提交：`9b40be2`（server 分支）。E5「官方分发渠道」的第一片 —— 先把信任基座做出来，
+> 网络与 CLI 留到下一片。
+
+### 做了什么
+
+| 位置 | 内容 |
+|---|---|
+| `src/trimum_core/trmpkg.py` | **新建**：`build_manifest()` / `create_package()` / `verify_package()` / `extract_package()` / `read_manifest()` + 根与签名者证书工具（`make_root` / `make_signer_cert`） |
+| 包结构 | `manifest.json5`（`format` / `name` / `type` / `version` / `requires` / `entry` / `capabilities` / `files{路径: sha256}`）+ `SIGNATURE` + `chain.json` + 载荷 |
+| 签名覆盖 | 签名者签 **manifest 的规范字节**；manifest 覆盖每个载荷文件的 sha256 → 改包（含改 manifest 自己）都验不过 |
+| 信任链 | 内置根（`config/trust/trimum-root.crt`，只有公钥）→ 根签发签名者证书（`issuer_signature`）→ 签名者签 manifest；证书 `expires_at` 也查 |
+| 解包安全 | 拒绝绝对路径 / `..` / 符号链接 / 硬链接 / 设备文件；`extract_package()` 校验不过就不落地 |
+| `tests/test_trmpkg.py` | **新建 16 项**：往返 + 能力清单透传 + 四类拒绝（载荷被改 / manifest 被改 / 多带文件 / 换根）+ 路径越界 + 符号链接 + 非 tar 包 |
+| `models.py` / `docs/ERROR-CODE-SPEC.md` | 新增 `TRM-4009 PKG_INVALID` / `TRM-4010 PKG_VERIFY_FAILED`（`test_error_codes` 计数同步 65 → 67） |
+| `config/trust/README.md` | 只提交公钥证书；根私钥属发布方，永不进仓库；运行态查找顺序 `TRIMUM_TRUST_ROOT` → `~/.trimum/trust/` → 仓库 |
+| `docs/ECOSYSTEM-STRATEGY.md` §7.4 | 落地口径 + 两处与早先文档的**有意差异**（`chain.json` 而非 `chain.pem`；只签 manifest 不逐文件签） |
+
+### 验证
+
+- `python -m pytest tests/test_trmpkg.py -q` → **16 passed**
+- 全量：`python -m pytest tests -q` → **1228 passed / 5 failed / 7 skipped**（5 项既有基线，无回归）
+- 关键拒绝路径（真包，不是 mock）：改 `main.py` 一个字节 → `哈希不符`；改 manifest 版本号 →
+  `manifest 签名验证失败`；多塞一个 `backdoor.sh` → `额外文件`；换一把同名根 → `不是本机内置根`
+  + `签名者证书不是内置根签发的`；`../evil.sh` → `路径越界`（且拒绝解包）
+
+### 这一片没做（E5 下一片）
+
+`trm pkg verify|create|root-init` CLI、内置根的实际生成与提交（仓库 `config/trust/` 目前只有 README，
+所以 `verify_package()` 会明确报「找不到内置根证书」而不是「验过了」）、
+`trm install <name>` / `--file <pkg>` 接线、`--allow-untrusted` 降级路径
+（装成 `trust: untrusted` + 运行期强制 confirm）、证书 `capabilities` 与 `security_rule.py`
+的**运行期交集**（E6 遗留，与本节同源，建议与 `trm install` 一起做）。
