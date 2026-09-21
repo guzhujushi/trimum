@@ -43,5 +43,8 @@
 ## 文档地图（2026-09-21）
 - **架构**：`docs/ARCH.md`（2026-09-21 由根目录 `ARCH.md` 移入；根目录不再保留 `PRD.md` / `ARCH.md`）。
 - **需求 / 生态战略**：`docs/ECOSYSTEM-STRATEGY.md`、`docs/MCP-INTEGRATION-PLAN.md`、`docs/CLI-ANYTHING-RESEARCH.md`。
+- **编码智能体（E7）**：规格与设计 `docs/CODING-AGENT-PLAN.md`；前置调研（ECC 适合吗 + 可复用开源件）`docs/CODING-AGENT-REUSE-RESEARCH.md`（**注意：ECC 的「903 个 SKILL.md」「30+ 宿主」是错的，真实 292 / 7**）。
+- **沙箱（E7 前置片，2026-09-21）**：`docs/SANDBOX-PLAN.md`（主流做法三层 / Docker 裁决 / 真机实测 / 设计 + 分片 S1–S5 / **裁决见 §9**）；
+  脚本 `scripts/setup_ubuntu_toolchain.sh`（装工具链）、`scripts/check_sandbox_caps{,_root}.sh`（能力自检）、`scripts/harden_trmd_unit.sh`（**S1 daemon 加固，默认 dry-run，`--apply` 才装，失败自动回滚**）——**都需 sudo，真机 sudo 需要密码，只能本人跑**。
 - **运维**：`docs/OPERATIONS.md`；**包渠道运维**（造根 / 打包 / 建索引 / 上线 / 轮换根）：`docs/PACKAGE-CHANNEL-OPS.md`；**多用户边界**（调研 + 设计，2026-09-21）：`docs/MULTI-USER-BOUNDARY.md`；**进度 / 待办**：`STATUS.md` / `TODO.md`。
 - **原始调研件**：`tmp/research/`（已 gitignore，`docs/` 有多处引用，且是 `trm mcp catalog import` 的默认输入，不要整目录清空）。

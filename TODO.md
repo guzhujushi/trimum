@@ -6,12 +6,13 @@
 
 ---
 
-## 📦 交接（2026-09-21，穿插项 A/B/C 收口 + E7 设计之后）
+## 📦 交接（2026-09-21，E7 设计 + 沙箱前置片 + **六条裁决**之后）
 
 ### 一句话现状
 
-**P0 安全响应链、E5 分发渠道、穿插三项都已收口**；下一步是 **E7 自研编码智能体** ——
-规格与设计已落地（`docs/CODING-AGENT-PLAN.md`），**卡在两条裁决上**，裁决后按五步分片开工。
+**P0 安全响应链、E5 分发渠道、穿插三项都已收口**；沙箱成为 E7 的前置片，**六条裁决全部已定**（见下表）。
+S1（daemon 系统级加固）的脚本已就绪并做完真机只读验证，**生产 daemon 仍是原样**（未 apply）；
+下一步是 `sudo bash /tmp/harden_trmd_unit.sh --apply`，然后 S2（施加点收口 + Landlock）。
 
 ### 本次（2026-09-21）完成
 
@@ -22,23 +23,37 @@
 | `f51b86d` | 穿插项步骤 C：`WorkflowListener` 接线（`submit()` 当生产者 + daemon 装配 + `trm workflow submit`，命令面 77 → 78）+ 修两个真问题（日志器用错 / `ExecuteRequest` 字段名全错）+ 确认缺位由「放行」改「拒绝」 |
 | `36fedb7` | E7 规格与设计：`docs/CODING-AGENT-PLAN.md` + 生态战略 §5 的 E7 口径修订（原「身份与多用户」已由 E5 第三片 / E6 / 多用户边界文档落地） |
 | `69f56b5` / `adb0ce3` | 两次提交号回填（步骤 C、E7） |
+| 待提交 | **沙箱前置片**：`docs/SANDBOX-PLAN.md`（主流做法 + 真机实测 + 设计/分片）+ `scripts/setup_ubuntu_toolchain.sh`（默认 dry-run）+ `scripts/check_sandbox_caps{,_root}.sh`；脚本已传真机 `/tmp/`（sha256 与本地逐字一致） |
+| 待提交 | **S1 落地**：`scripts/harden_trmd_unit.sh`（drop-in + 冒烟 + 失败自动回滚）+ 六条裁决落档（`docs/SANDBOX-PLAN.md` §6.6/§6.7/§9、`docs/CODING-AGENT-PLAN.md` §8.1）+ `trimum_client.socket_candidates()` 加 `/run/trimum/trimum.sock`（含 3 个测试） |
 
-细节：`STATUS.md`「2026-09-21 穿插项步骤 C」「2026-09-21 E7 规格与设计」两节；下方「🔧 穿插项实施计划」与「🌐 生态战略」E7 项。
+细节：`STATUS.md`「2026-09-21 穿插项步骤 C」「2026-09-21 E7 规格与设计」「2026-09-21 沙箱前置片」「2026-09-21 S1：daemon 系统级加固」四节；
+下方「🔧 穿插项实施计划」与「🌐 生态战略」E7 项。
 
-### 下一步：E7 自研编码智能体（**先答两条裁决**）
+### 下一步：S1 落地 → S2
 
-规格与设计见 `docs/CODING-AGENT-PLAN.md`（现状勘察 / 定位裁决 / 红线 / 架构与模块 / 五步分片 / 风险与未决）。
-五步分片：**编辑原语** → **验证闭环** → **技能与规则运行时** → **子 Agent 委派做实** → **`trm code` 入口 + 真机验收**。
+**六条裁决（2026-09-21，全部已定）**：① eBPF → **CAP_BPF + root helper**；② 非特权 userns → **不全局放开**（需要时定向给 `bwrap` 写 AppArmor profile）；
+③ Docker 档 → **Phase 5**；④ daemon → **保持非特权 + 加特权 helper**；⑤ 沙箱 → **提到 E7 之前**；
+⑥ E7 首发 → **默认出差异 + 跑只读验证**，写盘要确认，`--yes` 才自动落盘。另：入口定 **`trm exec --code`**，`skill.yaml` 与 `SKILL.md` **不合并**。
 
-**两条裁决（决定先做沙箱还是先做编辑原语）**：
+**S1 现状**：`scripts/harden_trmd_unit.sh` 已写完并做完真机**只读**验证（dry-run / `--stage` 渲染 / 黑名单拦截效果 / `bash -n`）；
+**生产 daemon 仍是零加固原样**（未 apply，因为 `sudo` 要密码）。口径见 `docs/SANDBOX-PLAN.md` §6.6，helper 设计见 §6.7。
 
-1. **沙箱（Landlock / Seccomp）是否提到编码智能体之前？** 编码智能体会大量写盘、跑测试，没有内核级边界时，
-   「安全优先」只剩策略与审计撑着。
-2. **首发是否允许自动改盘 + 自动跑测试？** 草案建议：默认只出差异 + 跑只读验证；写盘要确认，`--yes` 才自动落盘。
+**你要跑的（一条即可，冒烟失败会自动回滚）**：
 
-次要待定三条（同文档 §8）：入口叫 `trm code` 还是 `trm exec --code`；是否改用原生工具调用；
-`skill.yaml`（旧）与 `SKILL.md`（新）是否合并（草案建议：不合并，明确分工）。
+```bash
+sudo bash /tmp/harden_trmd_unit.sh            # 先看现状与将写入的 drop-in
+sudo bash /tmp/harden_trmd_unit.sh --apply    # 安装 + 重启 + 冒烟（失败自动回滚）
+sudo bash /tmp/harden_trmd_unit.sh --verify   # 事后复查
+sudo bash /tmp/check_sandbox_caps_root.sh     # 系统级能力核对（顺带回答 helper 那条）
+```
 
+**之后**：S2 施加点收口（新增 `sandbox_exec`，6 个 spawn 点全改走它，Landlock + fail-closed）→ S3 seccomp 三档 → S4 子 Agent systemd transient → S5 可选档（helper / Docker / bwrap profile）。
+
+**新增待裁决三条**（`docs/SANDBOX-PLAN.md` §9.2）：HTTP 端口是否只留 unix socket（建议是）；`@debug` 是否放行（默认挡 ptrace，`--allow-debug` 可回退）；`ReadOnlyPaths=/opt/trimum` 是否保留。
+
+### E7 未决两项（不阻塞开工）
+
+是否改用原生工具调用；会话记录存 `~/.trimum/sessions/` 还是随项目走（建议用户私有）。
 ### 开工须知（省得踩坑）
 
 - **先读**：`STATUS.md`（进度与决策）、本节、`docs/` 里对应专题文档 + `docs/ARCH.md`；**不读文档直接动手 = 违规**。
@@ -455,9 +470,15 @@ trm config set <key> <value>       # 设置配置项
     向导新增 `official` 步骤（trimum 自研 Agent 全部免确认；用户自签 `scope=local` 不被覆盖）
   - [x] 已接线（2026-09-21 E5 第二片）：证书 `capabilities` 与策略的**运行期交集**已落地（`capability.py` + 网关 Layer 2.6，多来源取最严、只收紧不放宽）；详见 `STATUS.md`「E5 第二片」
 - [ ] **E7. 自研编码智能体**（2026-09-21 出规格与设计，**待裁决**）：定位 / 现状勘察 / 红线 / 五步分片计划 → `docs/CODING-AGENT-PLAN.md`
-  - 参考 `affaan-m/ECC`（262,999★；仓库 5,026 条目、903 个 `SKILL.md`、144 个规则文件、94 个斜杠命令、30+ 宿主适配目录）；
-    调研原始件 `tmp/research/ecosystem/ecc-*`（已 gitignore）
-  - 关键事实：**ECC 没有自己的模型循环**（循环与工具执行由宿主提供），它卖的是内容分层 + 工具事件钩子 + 安装适配 + 学习记忆
+  - 参考对象（**2026-09-21 调研后建议改口径**，见 `docs/CODING-AGENT-REUSE-RESEARCH.md`）：
+    **主参考改为 `Aider-AI/aider`**（Python、编码智能体、13 种编辑格式与真实失败回灌；源码级事实见该文 §3.3），
+    ECC 降级为**内容素材来源**（MIT 文本可改写）。
+  - ECC 事实修正（原写法有三处虚高，勿再引用）：`SKILL.md` **903 个是重复计数**，真实技能 **292**（其余是 `docs/` 多语言译本 518 + 宿主目录副本 93）；
+    「30+ 宿主」是**另一个项目 rulesync** 的自述，ECC 自述 **7 个 harness**；「2,141 个文档」大半是译本。
+    调研原始件：`tmp/research/ecosystem/ecc-*` + `tmp/research/coding-agents/`（均已 gitignore）
+  - 关键事实：**ECC 没有自己的模型循环**（循环与工具执行由宿主提供），它卖的是内容分层 + 工具事件钩子 + 安装适配 + 学习记忆；
+    **它自己就是 Claude Code / Codex 的插件包**（`.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`），不是运行时。
+  - 可直接复用的开源件**很短**：`python-unidiff`（直接依赖）/ `grep-ast`（可选，注意 16.5 个月未推）/ 其余抄设计（aider、gptme、cline、crush）
   - 缺口三条（查代码得到）：`file.write` 只能整文件覆盖或追加（**无**锚点替换 / 无差异应用 / 无回滚）、**无**验证闭环（测试红绿信号进不了循环）、`SKILL.md` **不被运行时加载**；
     外加 `agent_runtime` 的 spawn 仍是空壳（`task.assigned` 无生产者）
   - **待裁决**：① 沙箱（Landlock / Seccomp）是否提到编码智能体之前；② 首发是否允许自动改盘 + 自动跑测试

@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -16,6 +16,33 @@
 
 ---
 
+## 2026-09-21 编码智能体调研：ECC 适合吗？（✅ 已完成，**只调研不改代码**）
+
+> 用户提问：① ECC 如何做成一个 coding Agent；② 参考 `~/.trimum/agents/` 别的 Agent 的文件格式；③ 还有没有其他可直接复用的开源项目；④ **先想 ECC 适合吗**。
+> 产出：`docs/CODING-AGENT-REUSE-RESEARCH.md`。事实层材料 `tmp/research/coding-agents/`（19 个仓库快照 + aider 源码 30 件 + 两份事实草稿，均已 gitignore）。
+
+**结论：ECC 不适合做成 coding Agent。** 它没有可复用的执行体 —— 68 个 `agents/*.md` 是提示词、292 个技能是文本、
+hooks 是「宿主事件 + node 命令」，**ECC 自己就是 Claude Code / Codex 的插件包**（`.claude-plugin/plugin.json`、`.codex-plugin/plugin.json` 都在树里）。
+三条路径逐条算过账（该文 §2）：包成 trimum 子 Agent → **空壳**（`AgentManifest` 里只有 `name`/`description` 对得上，
+`entry`/`capabilities`/`permissions`/`events`/`risk_level` 全无对应，且 `system_prompt_path` 在代码里**零消费者**）；
+当内容注入 → **唯一成立的用法**（正对 E7 步骤 3）；接它的代码 → 只换来 Node + Rust 依赖。
+
+**三处数字修正（原文档虚高，勿再引用）**：`SKILL.md`「903」是重复计数 → 真实 **292**（另有 `docs/` 译本 518 + 宿主目录副本 93）；
+「30+ 宿主」是**另一个项目 rulesync** 的自述，ECC 自述 **7 个 harness**；`docs/` 2,141 个文件大半是译本。
+star:watcher = 194.8，与同类同区间（superpowers 267.8 / rulesync 728.0 / anthropics-skills 157.3）→ **「刷星」这条不成立**，如实记录。
+
+**另一件已经做完的事**：ECC 的核心分发机制 trimum 早已实现 —— `skill_sync.py` + `hosts.py` 的 **14 个已知宿主**（覆盖 ECC 全部宿主目录）
++ 探测 + 符号链接/junction，代码注释写着 *"the wider set of ECC-style harnesses"*。**这块不用再学第二遍，差的只是内容。**
+
+**可直接复用的清单（很短）**：`python-unidiff`（统一差异解析，MIT、活跃、只 parse 不 apply → 可直接依赖）；
+`grep-ast`（代码感知检索；366★、约 16.5 个月未推、带 tree-sitter 两个依赖）；其余**抄设计**（aider / gptme / cline / crush / opencode）。
+不建议接：Roo-Code（已 archived）、continue（自称 read-only）、python-patch（4 年 8 个月未动 + 无许可）、SWE-agent（官方指向 mini-swe-agent）、
+codex / goose（README 无部件级信息）、bubblewrap / nsjail（Linux 内核特性，Windows 无对应）。
+
+**对 E7 的建议（待裁决）**：参考对象由 ECC 换成 **aider**（13 种编辑格式、`max_reflections=3` 的错误回灌、
+`search_replace.py:438-439` 唯一性检查被注释掉的设计张力、`auto_commit` 早于 `confirm_ask` 的红线冲突）；`TODO.md` E7 条目已同步改口径。**本轮未改任何代码。**
+
+---
 ## 2026-09-21 穿插项步骤 A：剧本自动触发策略（✅ 已完成）
 
 > 计划：`TODO.md`「🔧 穿插项实施计划」步骤 A。问题源头：P0 把「L4 → 总线 → 剧本」接通了，
@@ -74,6 +101,133 @@
 
 ---
 
+## 2026-09-21 S1：daemon 系统级加固（脚本就绪 + 冒烟 + 自动回滚，**未 apply**）
+
+> 裁决已定（见下表），S1 是沙箱前置片的第一片。本轮**未安装任何包、未重启任何服务、未改动运行中的单元**；
+> 生产 daemon 还是原来的零加固状态，等你跑 `sudo bash /tmp/harden_trmd_unit.sh --apply`。
+> 产物：`scripts/harden_trmd_unit.sh` + `docs/SANDBOX-PLAN.md` §6.6/§6.7/§9（口径、helper 设计、裁决）。
+
+### 六条裁决（2026-09-21）
+
+| # | 问题 | 裁决 |
+|---|---|---|
+| 1 | eBPF 监控要不要提权 | **要，走 `CAP_BPF` + root helper**（daemon 不加能力，也不把 eBPF 摘出方案） |
+| 2 | 要不要放开非特权 user namespace | **不全局放开**，将来需要时**定向**给 `bwrap` 写 AppArmor profile |
+| 3 | Docker 档放哪 | **Phase 5**（不可信第三方 Agent 包），不进 E7 主干 |
+| 4 | daemon 非特权 vs 加特权 helper | **加特权 helper**，daemon 本身仍非特权 |
+| 5 | 沙箱是否提到 E7 之前 | **是** |
+| 6 | E7 首发是否允许自动改盘 + 跑测试 | **默认只出差异 + 跑只读验证**，写盘要确认，`--yes` 才自动落盘 |
+
+另：E7 入口定为 **`trm exec --code`**（不新开 `trm code`）；`skill.yaml` 与 `SKILL.md` **不合并**（同批裁决记在 `docs/CODING-AGENT-PLAN.md` §8.1）。
+
+### 实做中推翻的三处原设想（都是真机实测逼出来的）
+
+| 原设想 | 实际采用 | 理由（一手事实） |
+|---|---|---|
+| `ProtectSystem=strict` + `ReadWritePaths` 白名单 | **`ProtectSystem=full`**，不列白名单 | daemon 要在**任意工作区**写盘，白名单**列不全**（列漏 = 运行时才炸）；`full` 盖住 `/usr`/`/boot`/`/efi`/**`/etc`** 的持久化面，工作区粒度交给 S2 的 Landlock |
+| `ProtectHome=read-only` | `ProtectHome=no`（显式写出） | `~/.trimum` 与工作区都在 `$HOME` —— 这是**明确放弃**的边界，写进 drop-in 当记录 |
+| `SystemCallFilter=@system-service` | **黑名单**（`~`） | 实测 systemd 255 的 `@system-service`（展开 375 条）**不含** `seccomp(2)` 与 `landlock_*`(444/445/446)，且这三个**任何分组里都没有** —— 白名单会**把 S2/S3 自己要装的沙箱挡在门外** |
+| `PrivateDevices=yes` | **不开** | 它会建一个**不带 `/dev/shm`** 的 `/dev` → Python `multiprocessing` / 共享内存类工具会挂；对非 root daemon 的收益本来就近于零 |
+
+### 额外两个实测发现（一条改了设计、一条新增待裁决）
+
+1. **daemon 的 IPC socket 之前根本没起来**：默认路径 `/run/user/<uid>/trimum.sock` 下没有文件（系统单元里 `XDG_RUNTIME_DIR` 为空），
+   `trm status` 一直显示 **`source: http`**。S1 用 `RuntimeDirectory=trimum` + `Environment=XDG_RUNTIME_DIR=/run/trimum`
+   把 socket 落到 `/run/trimum/trimum.sock`（目录 0750 / socket 0700）。
+   配套代码改动（唯一一处）：`trimum_client.socket_candidates()` 增加 `/run/trimum/trimum.sock` + 3 个测试 ——
+   否则 daemon 绑了 A、客户端去连 B，仍旧静默降级成 HTTP。
+2. **HTTP 端口是尚未收口的授权面**：`127.0.0.1:8321` 对**同机任何用户**开放（loopback 不做 uid 检查），背后是完整的工具执行 API。
+   systemd 的只读路径指令**管不了 IPC**（文档原文：这类选项「do not affect the ability for programs to connect to」），
+   要收口只能从监听面动手 → 列为新增待裁决（`docs/SANDBOX-PLAN.md` §9.2-1，建议只留 unix socket）。
+
+### 加固脚本怎么用（`scripts/harden_trmd_unit.sh`，已传真机 `/tmp/`）
+
+```bash
+sudo bash /tmp/harden_trmd_unit.sh            # dry-run：打印现状 + 将要写入的 drop-in（默认行为）
+sudo bash /tmp/harden_trmd_unit.sh --apply    # 备份 → 写 drop-in → daemon-reload → 重启 → 冒烟 → 失败自动回滚
+sudo bash /tmp/harden_trmd_unit.sh --verify   # 只跑冒烟复查
+sudo bash /tmp/harden_trmd_unit.sh --rollback # 还原最近一次备份
+```
+
+drop-in 走 `/etc/systemd/system/trmd.service.d/10-hardening.conf`（**不改原单元**），
+备份落在 `/var/backups/trimum/harden-<时间戳>/`（含 `unit-before.txt` 与一键 `rollback.sh`）。
+
+**冒烟断言**（任一 FAIL 自动回滚）：`systemctl is-active`；`ProtectSystem=full`；`NoNewPrivileges`/`RestrictNamespaces`/`PrivateTmp`=yes；
+`CapabilityBoundingSet` 空；**进程内实测** `/proc/<pid>/status` 的 `NoNewPrivs: 1` 与 `Seccomp: 2`；
+`/proc/<pid>/mountinfo` 里 `/usr` 与 `/etc` 是 `ro` 而 `/home` 不是；**`mountinfo` 条目数 > 宿主基线 47**（证明命名空间真建了）；
+`/run/trimum/trimum.sock` 存在；以服务用户跑 `trm status` / `trm tool list` 通过；日志无 `unix_socket_start_failed`；
+syscall 探针（同一套黑名单下 `landlock_*`/`seccomp`/`prctl` 不被挡、`bpf`/`ptrace`/`mount` 被挡）。
+
+### 真机验证（本轮已跑，全部只读）
+
+| 检查 | 结果 |
+|---|---|
+| 脚本语法 `bash -n`（3 个 + 本脚本） | 全 OK |
+| dry-run | 跑通：现状段正确报出 `mountinfo=47`（= 没有命名空间）、当前评分 **9.2 UNSAFE** |
+| `--stage` 渲染 | drop-in 全文正确（含 `ProtectSystem=full`、黑名单、`RuntimeDirectory=trimum`） |
+| 黑名单实际拦截效果（用户级复现同一套过滤器） | `bpf`/`ptrace`/`mount`/`init_module`/`kexec_load`/`userfaultfd`/`io_uring_setup`/`process_vm_readv`/`swapon`/`add_key` → **全部 EPERM**；`landlock_create_ruleset`(14)/`landlock_restrict_self`(77)/`seccomp`(22)/`prctl`(22) **未被误伤** |
+| `--allow-debug` 变体 | `ptrace` 恢复 `errno=0`，`bpf` 仍 `EPERM`（开关有效） |
+| 客户端测试 | `tests/test_socket_path_consistency.py` **11 passed** |
+
+> **未做（要 `sudo` 密码，只能你自己跑）**：`--apply` 安装 + 冒烟；`check_sandbox_caps_root.sh`（系统级能力核对）。
+
+---
+
+## 2026-09-21 沙箱前置片：把内核级边界提到 E7 之前（调研 + 真机实测 + 脚本，✅ 方向已定）
+
+> 裁决落地：原「**沙箱是否提到编码智能体之前**」**已定为「是」** —— 编码智能体会大量写盘、跑测试，
+> 没有内核级边界就不敢让它自己动手。本轮**只写文档与脚本，未改代码、未装任何包、未重启任何服务**。
+> 产物：`docs/SANDBOX-PLAN.md`（10 节）、`scripts/setup_ubuntu_toolchain.sh`、`scripts/check_sandbox_caps{,_root}.sh`。
+> 原始材料：`tmp/research/sandbox/`（143 份一手材料 + `draft-C-sandbox.md` 651 行）。
+
+### 四个问题的答案
+
+| 问题 | 答案 |
+|---|---|
+| 主流沙箱怎么做 | **三层收敛**：① **策略层**（谁能做什么 —— K8s Pod Security Standards 的 Restricted 档要求 `seccompProfile: RuntimeDefault`、`capabilities.drop: [ALL]`、`allowPrivilegeEscalation: false`，且明确标注 **Linux-only**）；② **内核层**（Landlock LSM / seccomp-bpf / AppArmor / namespace / cgroup v2）；③ **边界层**（换运行时拿更强边界：OCI 容器 → gVisor `runsc` → microVM Firecracker）。**接口收敛在 OCI runtime-spec**（namespace / seccomp / cgroup / maskedPaths 都是可移植字段）；所谓「沙箱」多数 = 内核层机制组合 + 一份默认 profile（Docker 默认 seccomp 是 `SCMP_ACT_ERRNO` 白名单，300+ syscall 里默认挡掉约 44 个） |
+| 需不需要 Docker | **不进主干**：① 粒度不匹配 —— 要的是**每次工具调用**的边界，Docker 给的是**整容器**的边界（每次 spawn 一个容器太慢）；② 会成**第二条执行通道**，与「一切动作经 `ToolGateway`」红线冲突；③ 真机已装（29.8.1）但**本地 0 个镜像**，用一次就要拉网。**留作 Phase 5**：隔离不可信第三方 Agent 包 |
+| 真机能不能做 | **能，而且不需要 root**：Landlock **ABI=4** 已实测可拦（40 行 ctypes PoC）；seccomp 走自带 `libseccomp 2.5.5`（ctypes 可加载）；资源边界走 systemd 用户级 cgroup 委派 |
+| 还需装什么 | 沙箱主干（Landlock + seccomp + systemd 用户级 + cgroup）**几乎零新依赖**；要装的是「把 C/BPF 侧做扎实」与「写脚本 / 排障」那批（清单见 `docs/SANDBOX-PLAN.md` §7.1，core 档 13 项真机已装 3 项、待装 10 项） |
+
+### 真机实测（Ubuntu 24.04.1 / kernel 6.8.0-41-generic / systemd 255 / 8 核 7.4G / 854G 可用）
+
+| 结论 | 依据 |
+|---|---|
+| Landlock **非特权可拦** | 纯 ctypes 三个 syscall（444/445/446）+ `prctl(PR_SET_NO_NEW_PRIVS)`：`/` 只读 + 一个目录全权限 → 允许路径可写、**写 `$HOME` 得 `EACCES`**、只读路径可读不可写、**跨 `execve` 继承**（子进程也被拒）、只能收紧不可逆 |
+| systemd 用户级**真生效** | `NoNewPrivileges`（`NoNewPrivs: 1`）、`SystemCallFilter`（`Seccomp: 2`、`Seccomp_filters: 3`）、`MemoryMax` / `CPUQuota`（单元内 `memory.max=33554432`）、`PrivateUsers=true`（userns inode 变化、`CapEff: 0`） |
+| systemd 用户级**静默 no-op**（决定性） | `ProtectSystem=strict` / `ProtectHome=read-only` / `PrivateTmp=yes`：三类单元（单独 / 组合 / 加 `PrivateUsers=true`）的 `/proc/self/mountinfo` **条目数全是 47 = 宿主** —— **根本没建 mount namespace**；`$HOME` 照写成功、宿主能看到单元写进 `/tmp` 的文件 |
+| 非特权 userns 被禁 | `kernel.apparmor_restrict_unprivileged_userns=1` → `unshare --user/-m/-n` 与 `bwrap`（`setting up uid map: Permission denied`）全拒 → bubblewrap / rootless 容器 / podman / nsjail 当前**都不可用** |
+| eBPF 非特权不可用 | `kernel.unprivileged_bpf_disabled=2` → `security.ebpf_alert` 在 daemon 当前运行方式（`User=guzhujushi`）下**不可能工作**，**校正** `docs/SECURITY-DEFENSE-PLAN.md` 把 eBPF 当常规手段的前提 |
+| cgroup v2 统一层级 | 用户 slice 委派 `cpu memory pids`；普通用户**不能**直写 `/sys/fs/cgroup` |
+| daemon 现状 | `/etc/systemd/system/trmd.service` **零加固**（只有 `User=guzhujushi` + `WorkingDirectory=/opt/trimum`）；`/run/trimum` 不存在 → RPC 走 HTTP 回退 |
+
+**踩坑（已写进纪律）**：第一轮用 `systemd-run --user -p ...`（**不带 `--wait`**）测沙箱，因竞态误判成「拦住了」。
+**唯一可信口径是 `systemd-run --wait --pipe`。**
+
+### 三个脚本（未装任何包；真机 `sudo` 需要密码，root 那个只能本人跑）
+
+| 脚本 | 需要 sudo | 真机状态 |
+|---|---|---|
+| `scripts/setup_ubuntu_toolchain.sh` | 是（默认 dry-run；`--apply` 才装；`--tier` 选 core / ops / optional / all） | 已传 `/tmp/`（sha256 与本地逐字一致）；dry-run 跑通：**tier=core 13 项已装 3、待装 10** |
+| `scripts/check_sandbox_caps.sh` | 否 | 已跑通 **PASS=8 WARN=6 FAIL=0** |
+| `scripts/check_sandbox_caps_root.sh` | 是 | **本轮核实：上一轮其实没传上去**，本轮已补传（sha256 与本地一致）；**未跑** —— 真机 `sudo` 需要密码 |
+
+### 设计要点（`docs/SANDBOX-PLAN.md` §6 / §8）
+
+- 新增**内核层**（Layer K），与既有四层网关**串联不并列**：内核层只做「施加 + 如实记录」，不做决策；**fail-closed**（沙箱没装上就不许执行）。
+- 六个 spawn 点必须收口到新封装 `sandbox_exec`：`tool_dispatchers.py:641,389,502,507,525,530` + `agent_launcher.py:132`。
+- 三档档案 `readonly` / `workspace-write`（默认）/ `strict`，声明在 `agent.json5` 的 `sandbox` 段（既有设计已有 `seccomp_profile` / `extra_syscalls` / `extra_block`，加 `fs_read` / `fs_write` 即可）；`AuditRecord.sandbox` 字段已存在（`models.py:749`）。
+- **Windows 降级**：明确报 `unsupported`，绝不允许「不知道就放行」。
+- 分片：**S1** daemon 加固 → **S2** 施加点收口（Landlock）→ **S3** seccomp 三档 → **S4** 子 Agent 走 systemd transient → **S5** 可选档（等裁决）。
+
+### 待裁决四条 —— **已于同日全部裁决**（见上一节「S1：daemon 系统级加固」）
+
+1. eBPF 提权 → **CAP_BPF + root helper**；2. 非特权 userns → **不全局放开**，定向给 `bwrap` 写 profile；
+3. Docker 档 → **Phase 5**；4. daemon → **保持非特权 + 加特权 helper**。
+新增待裁决三条见 `docs/SANDBOX-PLAN.md` §9.2（HTTP 端口收口 / `@debug` 取舍 / `ReadOnlyPaths` 是否保留）。
+
+---
+
 ## 2026-09-21 E7 规格与设计：自研编码智能体（草案，待裁决）
 
 > 提交：`36fedb7`（server 分支）。立项依据：`TODO.md`「🌐 生态战略」E7 项；本轮**只写文档，不改代码**。
@@ -113,8 +267,8 @@
 4. 子 Agent 委派做实（spawn + `task.assigned` + 权限交集 + 预算 + 审计）
 5. 命令行入口与真机验收（`trm code`，命令面 78 → 79；`scripts/accept_e7.py` 五组）
 
-**待裁决两条**（决定先做沙箱还是先做编辑原语）：① Landlock / Seccomp 是否提到编码智能体之前；
-② 首发是否允许自动改盘 + 自动跑测试（草案建议：默认出差异 + 跑只读验证，写盘要确认，`--yes` 才自动落盘）。
+**裁决（更新）**：① 沙箱（Landlock / Seccomp）是否提到编码智能体之前 —— **已定为「是」**，见本文「2026-09-21 沙箱前置片」与 `docs/SANDBOX-PLAN.md`（新增四条待裁决在该文 §9）；
+② 首发是否允许自动改盘 + 自动跑测试 —— **仍未定**（草案建议：默认出差异 + 跑只读验证，写盘要确认，`--yes` 才自动落盘）。
 
 ---
 
@@ -489,7 +643,7 @@ L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线
 7. 🟡 **引擎侧两个半成品** —— `src/agent-sdk` 端到端测试与打包验证（`tests/` 无覆盖）；Policy Engine 正则→LLM 混合（`LlmPolicyEngine` 骨架未接线）；`transform_agent` 的 confidence 三级分流
 8. 🟢 **SonarQube 重扫** / **daemon 部署形态二选一**（`trmd.service` root 或用户态路径）
 9. ⏸️ **未开工子系统**（别误判为 bug）—— eBPF 告警 `security.ebpf_alert`、性能熔断 `security.fuse_triggered`、审计断链检测 `security.audit_breach`（`SecAudit.verify_chain()` 已实现但无人调用）
-10. 🅿️ **E7 自研编码智能体** —— 规格与设计已出（`docs/CODING-AGENT-PLAN.md`，2026-09-21），**待裁决两条**（沙箱是否提前 / 首发是否允许自动改盘 + 自动跑测试）后按五步分片落地；调研件见 `tmp/research/ecosystem/ecc-*`
+10. 🅿️ **E7 自研编码智能体** —— 规格与设计已出（`docs/CODING-AGENT-PLAN.md`，2026-09-21），**待裁决两条**（沙箱是否提前 / 首发是否允许自动改盘 + 自动跑测试）后按五步分片落地。前置调研已完成（`docs/CODING-AGENT-REUSE-RESEARCH.md`，2026-09-21）：**ECC 不适合做成 coding Agent**（它不是运行时，自己就是宿主插件；格式对不上 trimum 子 Agent），**参考对象建议改为 aider**，可直接复用的只有 `python-unidiff` / `grep-ast`；调研原始件 `tmp/research/ecosystem/ecc-*` + `tmp/research/coding-agents/`
 
 ---
 

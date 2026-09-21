@@ -4,7 +4,7 @@
 > 触发问题：想极大扩大 trimum 的生态、复用别人的生态（灵感来自 Omarchy、Warp），CLI-Anything 是最优解吗？
 > **结论先行：不是。** 最优解是四层「集成」结构 —— 环境清单（Omarchy 式）+ 协议（MCP）+ 知识（Agent Skills）
 > + 目录（Warp 式 workflow）；CLI-Anything 降级为「可选的第三方 harness 目录」，只做导入源，不做主战略。
-> 补充（同日）：第三个灵感源 **ECC**（`affaan-m/ECC`，262,999★）证明「一套技能 / 规则分发进 30+ 个宿主目录」
+> 补充（同日）：第三个灵感源 **ECC**（`affaan-m/ECC`，262,999★）证明「一套技能 / 规则分发进多个宿主目录」（**2026-09-21 校正**：ECC 自述 7 个 harness，不是 30+；「30+」是 rulesync）
 > 是可落地的工业级做法 —— 这条直接支撑 L2 的宿主分发路线。
 > 证据原始件：`tmp/research/ecosystem/`（已 gitignore）
 
@@ -62,8 +62,10 @@ skills / instincts / memory / security / research-first。
 
 仓库 5,026 个文件、**84 个顶层条目**（证据 `tmp/research/ecosystem/ecc-tree.json`）：
 
-- **903 个 `SKILL.md`**、68 个 agent、94 个 command —— 生态面几乎全是 markdown，不是代码。
-- **30+ 个宿主目录并列存在**：`.claude/` `.codex/` `.cursor/` `.gemini/` `.pi/` `.hermes/` `.kimi/` `.kiro/` `.qwen/` `.trae/` `.opencode/` `.zed/` `.agents/` `.claude-plugin/` `.codex-plugin/` …
+- **292 个技能**（`skills/<name>/SKILL.md`）、68 个 agent、94 个 command —— 生态面几乎全是 markdown，不是代码。
+  > **口径校正（2026-09-21 调研）**：本节原先引用的「903 个 `SKILL.md`」是**重复计数**（`skills/` 292 + `docs/` 多语言译本 518 + 宿主目录副本 93）；
+  > 「30+ 宿主」是**另一个项目 rulesync** 的自述，ECC 自述是 **7 个 harness**。详见 `docs/CODING-AGENT-REUSE-RESEARCH.md`。
+- **十几个宿主目录并列存在**（**2026-09-21 校正**：原写「30+」，按文件树实际统计是十几个，且其中含插件/清单元数据目录而非技能根）：`.claude/` `.codex/` `.cursor/` `.gemini/` `.pi/` `.hermes/` `.kimi/` `.kiro/` `.qwen/` `.trae/` `.opencode/` `.zed/` `.agents/` `.claude-plugin/` `.codex-plugin/` …
   → 「一套内容，多宿主分发」被做到工业化程度（正是 trimum 的 L2 目标，只是它已经覆盖 30 个宿主）。
 - 另有 `hooks/` `rules/` `mcp-configs/` `manifests/` `schemas/` `workflows/` `integrations/` `scaffolds/`；
   README 提供安装引导（`install.sh` / `install.ps1`，guided setup 与 native plugin 二选一）、`the-security-guide.md`、
@@ -88,7 +90,7 @@ trimum 的差异化仍在 ToolGateway + 审计 —— **能力从哪来可以借
 | 通用适配器（API/MCP ↔ CLI） | `open-webui/mcpo` 4,382★、`knowsuchagency/mcp2cli` 2,403★、`janwilmake/openapi-mcp-server` 904★ | Python/Node | 中 | 把任意 API/CLI 变成工具，替代逐应用写包装 |
 | 包管理器清单（Omarchy 式） | pacman/AUR、apt、mise、winget、brew | 系统级 | 中 | 解决「机器上有什么 / 能装什么」 |
 | Warp workflow 目录 | 410 个 spec | 无 | 低 | 可共享的参数化命令目录 |
-| **ECC**（harness 增强层） | 262,999★；903 个 `SKILL.md` / 68 agent / 94 command；30+ 宿主目录 | 无运行时依赖（markdown + hooks） | 低（格式可直接复用） | **对照 / 灵感源**：多宿主分发的工业级样板，不引入其代码 |
+| **ECC**（harness 增强层） | 262,999★；**292 个技能** / 68 agent / 94 command；自述 **7 个 harness** | 无自带运行时（markdown 内容 + Node 安装器 + 宿主钩子；它自己就是 Claude Code / Codex 的插件包） | **不直接复用代码**（格式对不上 trimum 子 Agent，见 §1.3 校正） | **对照 / 灵感源**：多宿主分发的样板，只借文本内容 |
 
 补充发现：`epiral/bb-browser`（6,222★，"CLI + MCP server，用你自己的登录态控制 Chrome"）
 比 CLI-Anything 的 `browser` 更契合 trimum 的自研 CDP 路线，可作为对照与备选。
@@ -121,7 +123,7 @@ trimum 的差异化仍在 ToolGateway + 审计 —— **能力从哪来可以借
 - 现状：`~/.trimum/skills/` 目录已在，分发（symlink / junction / copy 回退）已实现（E1），但目标根是**硬编码 7 个**。
 - 要改：分发目标**按已探测到的宿主动态决定** —— 第三方 coding agent 是选装项，没装就不建目录（见 §7.3 / E6）。
 - 补做：`trm skill list / import <repo|url>`，遵循 agentskills.io 规范，把外部生态的技能拉进本地再分发。
-- 这是「让 Agent 会用所有软件」性价比最高的一层：**只写文档，不写适配器**；ECC（§1.3）用 903 个 `SKILL.md` 覆盖 30+ 宿主，证明这条路能走到工业级规模。
+- 这是「让 Agent 会用所有软件」性价比最高的一层：**只写文档，不写适配器**；ECC（§1.3）用 **292 个技能**覆盖 7 个 harness、rulesync 用一份源生成 30+ 宿主配置，证明这条路能走到工业级规模。
 
 ### L3 目录层（Warp 式可共享目录 + trimum 的编排）
 
