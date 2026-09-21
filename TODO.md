@@ -1,13 +1,87 @@
 # trimum — 待办清单
 
 > 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **E5 第三片步骤 3：多用户边界（调研 + 设计，`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略（取证类武装 / 处置类不武装 / 自动触发不派子 Agent）** → **穿插项步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **穿插项步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）**）
+> 测试基线：本地 **1489 passed / 5 failed / 8 skipped**（2026-09-21 穿插项步骤 C 之后；步骤 B 之后 1475，C 加 14）；步骤 3 之后是 **1326**（只加文档）；5 项失败 = 既有基线：Windows 沙箱写 `~/.trimum` 被拒 + PATH 缺 `python.exe` + LLM 断网）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326** → 步骤 A 1365 → 步骤 B 1475 → **步骤 C 1489** → E7 设计轮 1489（只加文档）；基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
+> 当前分支：`server`（= `origin/server` = `adb0ce3`，工作区干净）；日常只推 `server`，`main` / `ubuntu` / `arch-linux` 只在里程碑收尾时同步。
+
+---
+
+## 📦 交接（2026-09-21，穿插项 A/B/C 收口 + E7 设计之后）
+
+### 一句话现状
+
+**P0 安全响应链、E5 分发渠道、穿插三项都已收口**；下一步是 **E7 自研编码智能体** ——
+规格与设计已落地（`docs/CODING-AGENT-PLAN.md`），**卡在两条裁决上**，裁决后按五步分片开工。
+
+### 本次（2026-09-21）完成
+
+| 提交 | 内容 |
+|---|---|
+| `d5d4b02` | 穿插项步骤 A：剧本自动触发策略（取证 8 条武装 / 处置 8 条不武装 / 自动触发不派子 Agent，测试 +40） |
+| `dd3c0a2` | 穿插项步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正，测试 +110） |
+| `f51b86d` | 穿插项步骤 C：`WorkflowListener` 接线（`submit()` 当生产者 + daemon 装配 + `trm workflow submit`，命令面 77 → 78）+ 修两个真问题（日志器用错 / `ExecuteRequest` 字段名全错）+ 确认缺位由「放行」改「拒绝」 |
+| `36fedb7` | E7 规格与设计：`docs/CODING-AGENT-PLAN.md` + 生态战略 §5 的 E7 口径修订（原「身份与多用户」已由 E5 第三片 / E6 / 多用户边界文档落地） |
+| `69f56b5` / `adb0ce3` | 两次提交号回填（步骤 C、E7） |
+
+细节：`STATUS.md`「2026-09-21 穿插项步骤 C」「2026-09-21 E7 规格与设计」两节；下方「🔧 穿插项实施计划」与「🌐 生态战略」E7 项。
+
+### 下一步：E7 自研编码智能体（**先答两条裁决**）
+
+规格与设计见 `docs/CODING-AGENT-PLAN.md`（现状勘察 / 定位裁决 / 红线 / 架构与模块 / 五步分片 / 风险与未决）。
+五步分片：**编辑原语** → **验证闭环** → **技能与规则运行时** → **子 Agent 委派做实** → **`trm code` 入口 + 真机验收**。
+
+**两条裁决（决定先做沙箱还是先做编辑原语）**：
+
+1. **沙箱（Landlock / Seccomp）是否提到编码智能体之前？** 编码智能体会大量写盘、跑测试，没有内核级边界时，
+   「安全优先」只剩策略与审计撑着。
+2. **首发是否允许自动改盘 + 自动跑测试？** 草案建议：默认只出差异 + 跑只读验证；写盘要确认，`--yes` 才自动落盘。
+
+次要待定三条（同文档 §8）：入口叫 `trm code` 还是 `trm exec --code`；是否改用原生工具调用；
+`skill.yaml`（旧）与 `SKILL.md`（新）是否合并（草案建议：不合并，明确分工）。
+
+### 开工须知（省得踩坑）
+
+- **先读**：`STATUS.md`（进度与决策）、本节、`docs/` 里对应专题文档 + `docs/ARCH.md`；**不读文档直接动手 = 违规**。
+- **测试**：`python -m pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider`；基线 **1489 passed / 5 failed / 8 skipped**，
+  5 项失败是既有宿主基线（沙箱写真实用户目录 ×4 + 断网 ×1），**不算回归**。
+- **分支**：日常只提交、只推送 `server`；另外三个分支只在里程碑收尾时逐提交同步。
+- **写文件**：用 node 的 `fs.writeFileSync(path, text, {encoding:"utf8"})`（UTF-8 + LF）。
+  **别用 PowerShell here-string 写含中文的内容**（会按 GBK 写坏）；本环境 `apply_patch` 不可用；
+  编辑用「锚点唯一才替换」——锚点出现次数不为 1 就报错，本轮所有编辑都这么做，很稳。
+- **命令面**：`trm commands --check` 当前 **78 commands**；动了 `__command_meta__` 的 `args` 必须同步。
+- **提交与推送**：`git add` / `git commit -F tmp/commit-msg.txt` / `git push origin server` 需要提权；提交信息写进 `tmp/commit-msg.txt`。
+
+### 明确未开工（别误判为 bug）
+
+eBPF 告警（`security.ebpf_alert`）、性能熔断（`security.fuse_triggered`）、审计断链检测（`security.audit_breach`）、
+Landlock / Seccomp 沙箱、记忆桥（`memory_bridge` + `experience_learner` 至今零调用点）、
+系统监视（`SystemMonitor` 从未被实例化）、子 Agent 真启动（`agent_runtime` 的 spawn 仍是空壳、`task.assigned` 无生产者）。
+
+### 遗留小项（都不阻塞下一步）
+
+- 运行记录只在内存（环形 200 条，重启即丢）；`trm workflow status/log` 仍是桩。
+- 内置剧本只有落盘式开关（`trm workflow enable <id>`），没有「原地开关」。
+- 确认通道目前只有命令行（桌面 / WebSocket 未做）。
+- 真机：`trm env install` 的 root 真执行路径待跑；`/opt/trimum` 部署树还有几处待同步（见下方「其他待办」）。
+- 真机验收脚本：`scripts/accept_w1.py`（48/0）、`scripts/accept_e4.py`（43/0）；E7 的 `scripts/accept_e7.py` 待写。
+
+### 真机
+
+SSH `guzhujushi@100.115.86.48`（免密）；开发目录 `/home/guzhujushi/trimum`，部署目录 `/opt/trimum`；
+daemon 现由 systemd 托管（`sudo systemctl restart trmd`）；需要 sudo 的操作写成脚本放到远端 `/tmp/` 并告知位置。
+
+---
+
+## 附：历史指针（时间倒序，保留备查）
+
+> 最新一条已在上面「📦 交接」重写；以下为更早的指针原文。
+
 > 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5 + E4**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；**E4 三个导入器（CLI / workflow / skill）已落地**；**E5 分发面已闭环**（第二片：`trm pkg` + 内置根 + 签名索引 + `trm install` + 能力交集），**E5 第三片步骤 1/2 已落地**（`trm install --remove` 卸载；`trm pkg index` 发布方闭环 + 运维手册），**E5 第三片步骤 3 已定稿**（多用户边界调研 + 设计 → `docs/MULTI-USER-BOUNDARY.md`，复核结论「无硬伤、不改代码」）—— **E5 第三片三步骤全部收口**；剩 官网服务端托管（域名 / 托管 / CI = 产品决策，暂缓）；E7 待做
-> 测试：本地 **1489 passed / 5 failed / 8 skipped**（2026-09-21 穿插项步骤 C 之后；步骤 B 之后 1475，C 加 14）；步骤 3 之后是 **1326**（只加文档）；5 项失败 = 既有基线：Windows 沙箱写 `~/.trimum` 被拒 + PATH 缺 `python.exe` + LLM 断网）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326** → 步骤 A 1365 → 步骤 B 1475 → **步骤 C 1489** → E7 设计轮 1489（只加文档）；基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
 > 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固/M4 均已推送四分支（M4：server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）；**M4.5 收口小项提交号见 `STATUS.md` 的「提交与分支」表**（幽灵条目 `9e63a81` / env+网关确认 `d34054a` / install 向导 `bd00990`，四分支已同步）。
 > ✅ **真机部署已完成（2026-09-20 20:52）**：`sudo bash /tmp/sync_opt_tree.sh` 全树同步落地，`/opt/trimum` 三个关键文件与本地 HEAD 逐文件对上（`mcp_bridge.py` `f503f505…` / `mcp_registry.py` `86447a65…` / `tool_gateway.py` `47d8a205…`），部署树 `[4b/5]` 自检通过；daemon 20:52:27 启动 → 跑的就是新代码（`trm status` 的 `source: rpc`，PID 23850）。真机聚合实测 4 条 `source=mcp`（`echo__echo` / `echo__fail` / `echo__slow` / …），总数 17；幽灵缓存已清（备份 `/tmp/mcp-tools.json.bak-20260920`），清后 `tool list --mcp` 为 0 条、总数 13。
 > ▶ **下次继续从这里开始（2026-09-21，穿插项步骤 C 之后）**：**步骤 1 ✅**（`d7aced2` `trm install --remove`）、**步骤 2 ✅**（`fcecbfe` `trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`）、**步骤 3 ✅**（多用户边界：调研 + 设计 → `docs/MULTI-USER-BOUNDARY.md` + 生态战略 §7.8；复核结论「现有设计无硬伤、**不改代码**」，只记了一条「Windows 上 `chmod` 不产生 ACL」的事实）。**E5 第三片三步骤收口**；E5 只剩「官网服务端托管」（域名 / 托管 / CI = 产品决策，本轮不做）。**穿插三项全部收口**（见「🔧 穿插项实施计划」）：步骤 A ✅ 剧本自动触发策略、步骤 B ✅ 总线硬化、**步骤 C ✅ `WorkflowListener` 接线（`trm workflow submit`，命令面 77 → 78）**；**下一步 = E7 自研编码智能体** —— 规格与设计已出（`docs/CODING-AGENT-PLAN.md`：现状勘察 / 定位裁决 / 红线 / 五步分片计划），**待裁决两条**（① 沙箱是否提到编码智能体之前；② 首发是否允许自动改盘 + 自动跑测试）；第一片 `9b40be2` / 第二片 `2aec23b`→`4e29b4e` / 第三片 1/3 `d7aced2`、2/3 `fcecbfe` 已落地；
 > **逐条实施计划（红线 + 测试清单）见下方「🚚 E5 第三片实施计划」**。穿插候选（三项均已于 2026-09-21 落地）：剧本自动触发策略、总线硬化（P0 配套）、W1 遗留 `WorkflowListener` 接线。
-> 📌 更早的指针（2026-09-20 EventBus 审计之后）：W1 已闭环（真机 `accept_w1.py` 48/0）；只读审计发现**安全响应链未接线**——拦得住，但不会响应、不会记录、不会通知（见下方「EventBus 通信缺口」）→ 下一步 = **P0 安全链接线**（三条动作，顺序不能乱）→ 然后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`；W1 遗留见 STATUS「W1 遗留」（`WorkflowListener` 未接线 / 运行记录只在内存 / 内置剧本只有落盘式开关）。
+> 📌 更早的指针（2026-09-20 EventBus 审计之后）：W1 已闭环（真机 `accept_w1.py` 48/0）；只读审计发现**安全响应链未接线**——拦得住，但不会响应、不会记录、不会通知（见下方「EventBus 通信缺口」）→ 下一步 = **P0 安全链接线**（三条动作，顺序不能乱）→ 然后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研编码智能体**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`；W1 遗留见 STATUS「W1 遗留」（`WorkflowListener` 未接线 / 运行记录只在内存 / 内置剧本只有落盘式开关）。
 
 ---
 
@@ -376,7 +450,7 @@ trm config set <key> <value>       # 设置配置项
   - [x] `src/trimum_core/setup_wizard.py` + `config/setup-catalog.yaml`（7 组 25 项）+ `trm setup [--dry-run|--yes|--tools|--all-hosts|--skip|--max-risk]`
   - [x] `skill_sync.default_target_roots()` 改为**按探测结果决定**，`--all-hosts` 保留全量模式；`trm install --setup` 复用同一向导
   - [x] 测试：`tests/test_hosts.py`（13）+ `tests/test_setup_wizard.py`（29）+ `TestDynamicTargets`（5）
-  - 硬约束（已满足）：**零预装可跑** —— 不依赖 `claude` / `codex` / `opencode` 等第三方 coding agent，也不假设它们会被实际使用
+  - 硬约束（已满足）：**零预装可跑** —— 不依赖 `claude` / `codex` / `opencode` 等第三方编码智能体，也不假设它们会被实际使用
   - [x] 官方 Agent 证书：`cert_type=official` + `capabilities` 能力块；`discover_bundled_agents()` / `ensure_official_certs()`；
     向导新增 `official` 步骤（trimum 自研 Agent 全部免确认；用户自签 `scope=local` 不被覆盖）
   - [x] 已接线（2026-09-21 E5 第二片）：证书 `capabilities` 与策略的**运行期交集**已落地（`capability.py` + 网关 Layer 2.6，多来源取最严、只收紧不放宽）；详见 `STATUS.md`「E5 第二片」
