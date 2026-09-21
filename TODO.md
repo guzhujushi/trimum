@@ -1,11 +1,11 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`**）
-> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5 + E4**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；**E4 三个导入器（CLI / workflow / skill）已落地**；**E5 分发面已闭环**（第二片：`trm pkg` + 内置根 + 签名索引 + `trm install` + 能力交集），**E5 第三片步骤 1/2 已落地**（`trm install --remove` 卸载；`trm pkg index` 发布方闭环 + 运维手册），剩 官网服务端托管 / 多用户边界（步骤 3）；E7 待做
-> 测试：本地 **1326 passed / 5 failed / 8 skipped**（2026-09-21 E5 第三片步骤 2 之后；5 项失败 = 既有基线：Windows 沙箱写 `~/.trimum` 被拒 + PATH 缺 `python.exe` + LLM 断网）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326**；基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
+> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **E5 第三片步骤 3：多用户边界（调研 + 设计，`docs/MULTI-USER-BOUNDARY.md`，不改代码）**）
+> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5 + E4**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；**E4 三个导入器（CLI / workflow / skill）已落地**；**E5 分发面已闭环**（第二片：`trm pkg` + 内置根 + 签名索引 + `trm install` + 能力交集），**E5 第三片步骤 1/2 已落地**（`trm install --remove` 卸载；`trm pkg index` 发布方闭环 + 运维手册），**E5 第三片步骤 3 已定稿**（多用户边界调研 + 设计 → `docs/MULTI-USER-BOUNDARY.md`，复核结论「无硬伤、不改代码」）—— **E5 第三片三步骤全部收口**；剩 官网服务端托管（域名 / 托管 / CI = 产品决策，暂缓）；E7 待做
+> 测试：本地 **1326 passed / 5 failed / 8 skipped**（2026-09-21 E5 第三片步骤 3 之后；本轮只加文档、数字未变；5 项失败 = 既有基线：Windows 沙箱写 `~/.trimum` 被拒 + PATH 缺 `python.exe` + LLM 断网）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326**；基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
 > 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固/M4 均已推送四分支（M4：server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）；**M4.5 收口小项提交号见 `STATUS.md` 的「提交与分支」表**（幽灵条目 `9e63a81` / env+网关确认 `d34054a` / install 向导 `bd00990`，四分支已同步）。
 > ✅ **真机部署已完成（2026-09-20 20:52）**：`sudo bash /tmp/sync_opt_tree.sh` 全树同步落地，`/opt/trimum` 三个关键文件与本地 HEAD 逐文件对上（`mcp_bridge.py` `f503f505…` / `mcp_registry.py` `86447a65…` / `tool_gateway.py` `47d8a205…`），部署树 `[4b/5]` 自检通过；daemon 20:52:27 启动 → 跑的就是新代码（`trm status` 的 `source: rpc`，PID 23850）。真机聚合实测 4 条 `source=mcp`（`echo__echo` / `echo__fail` / `echo__slow` / …），总数 17；幽灵缓存已清（备份 `/tmp/mcp-tools.json.bak-20260920`），清后 `tool list --mcp` 为 0 条、总数 13。
-> ▶ **下次继续从这里开始（2026-09-21，E5 第三片步骤 2 之后）**：**步骤 1 ✅**（`d7aced2` `trm install --remove`）、**步骤 2 ✅**（`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`）。**下一步 = 步骤 3**：多用户边界（调研 + 设计，**不写实现**）—— `docs/ECOSYSTEM-STRATEGY.md` §7.2 的三个子问题（`/etc/trimum/` 系统公共 vs `~/.trimum/` 用户私有的边界、审计日志 `user_id` 归属、私钥保护 文件权限 / DPAPI / keyring），现状单点是 `paths.py::trimum_home()`；产出扩写 §7.2 或新开 `docs/MULTI-USER-BOUNDARY.md`（含迁移成本）。**官网服务端不做**（域名 / 托管 / CI 属产品决策）。第一片 `9b40be2` / 第二片 `2aec23b`→`4e29b4e` / 第三片 1/3 `d7aced2` 已落地；
+> ▶ **下次继续从这里开始（2026-09-21，E5 第三片步骤 3 之后）**：**步骤 1 ✅**（`d7aced2` `trm install --remove`）、**步骤 2 ✅**（`fcecbfe` `trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`）、**步骤 3 ✅**（多用户边界：调研 + 设计 → `docs/MULTI-USER-BOUNDARY.md` + 生态战略 §7.8；复核结论「现有设计无硬伤、**不改代码**」，只记了一条「Windows 上 `chmod` 不产生 ACL」的事实）。**E5 第三片三步骤收口**；E5 只剩「官网服务端托管」（域名 / 托管 / CI = 产品决策，本轮不做）。**下一批候选 = E7 自研 coding Agent**（设计层，参考 ECC）；第一片 `9b40be2` / 第二片 `2aec23b`→`4e29b4e` / 第三片 1/3 `d7aced2`、2/3 `fcecbfe` 已落地；
 > **逐条实施计划（红线 + 测试清单）见下方「🚚 E5 第三片实施计划」**。穿插候选：**剧本自动触发策略**（内置剧本默认 `enabled=False`，要不要给只读自查子集开自动触发）、总线硬化（P0 配套）、W1 遗留 `WorkflowListener` 接线。
 > 📌 更早的指针（2026-09-20 EventBus 审计之后）：W1 已闭环（真机 `accept_w1.py` 48/0）；只读审计发现**安全响应链未接线**——拦得住，但不会响应、不会记录、不会通知（见下方「EventBus 通信缺口」）→ 下一步 = **P0 安全链接线**（三条动作，顺序不能乱）→ 然后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`；W1 遗留见 STATUS「W1 遗留」（`WorkflowListener` 未接线 / 运行记录只在内存 / 内置剧本只有落盘式开关）。
 
@@ -363,7 +363,7 @@ trm config set <key> <value>       # 设置配置项
   设计见 `docs/ECOSYSTEM-STRATEGY.md` 第 7 节；安装 ≠ 授权，运行时仍走 ToolGateway 分层
   - [x] 子项：身份与能力模型 —— 证书携带**能力清单**（可动用工具 / 风险上限 / 有效期），运行期与内置策略取交集（只收紧）（第二片落地：`capability.py` + 网关 Layer 2.6）
   - [x] 子项：自签证书**仅本机本用户**可用（绑 `machine_id` + 用户 keystore）；他人使用需重新自签（`agent_cert.py` 已有雏形）
-  - [ ] 子项：多用户前瞻（**未做**）—— `~/.trimum/`（用户私有）vs `/etc/trimum/`（系统公共）边界、审计日志 `user_id` 归属、私钥保护方案
+  - [x] 子项：多用户前瞻（**2026-09-21 定稿**：调研 + 设计，**不改代码**）—— `~/.trimum/`（用户私有）vs `/etc/trimum/`（系统公共）边界、审计日志 `user_id` 归属、私钥保护方案 → `docs/MULTI-USER-BOUNDARY.md` + `docs/ECOSYSTEM-STRATEGY.md` §7.8
 - [x] **E6. 选装模型 + 首次安装引导**（2026-09-20 完成）：全套开发者工具链大部分为**选装**，引导逐项询问，默认全不装
   - [x] `src/trimum_core/hosts.py`：14 个已知宿主 + 三路探测（`TRIMUM_HOSTS*` 环境变量 / 配置目录 / PATH 上的 CLI）
   - [x] `src/trimum_core/paths.py`：`TRIMUM_HOME` 统一数据根（给多用户 / `/etc/trimum` 预留单一改点）
@@ -477,13 +477,16 @@ trm config set <key> <value>       # 设置配置项
   `docs/PACKAGE-CHANNEL-OPS.md`：造根 → 建签名者 → 打包 → 建索引 → 上线 → **轮换根**
   （换根 = 旧包全部作废）→ 自建镜像（`--index` 指内网）。
 
-### 步骤 3 — 多用户边界（调研 + 设计，**不写实现**）
+### 步骤 3 — 多用户边界（调研 + 设计，**不写实现**）✅ 2026-09-21 完成
 
 - 见 `docs/ECOSYSTEM-STRATEGY.md` §7.2 的三个子问题：`/etc/trimum/`（系统公共）vs
   `~/.trimum/`（用户私有）的边界、审计日志 `user_id` 归属、私钥保护（文件权限 / DPAPI / keyring）。
 - 现状单点已经存在：`paths.py::trimum_home()` 是唯一改点；
   `agents/<name>/cert.json` 已把「来源 + 证书 + 版本 + 登记」捆在最小单位。
 - 产出：把 §7.2 扩写成带方案的章节（或 `docs/MULTI-USER-BOUNDARY.md`），含迁移成本。
+- ✅ **已交付**：新建 `docs/MULTI-USER-BOUNDARY.md`（现状对照表 / 三个问题各带方案 / 六条不变量 / 实现顺序与风险 / 迁移成本）；
+  `docs/ECOSYSTEM-STRATEGY.md` §7.2 改为定稿指针并新增 §7.8；`docs/ARCH.md` / `AGENTS.md` 文档地图同步。
+  **复核结论：现有设计无硬伤，不改代码**（计划原文：「除非发现现有设计有硬伤，否则不动代码」）。
 - 除非发现现有设计有硬伤，否则**不动代码**。
 
 ### 本片红线（写进代码与测试）

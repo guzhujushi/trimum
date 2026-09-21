@@ -200,6 +200,8 @@
   `~/.trimum/agent-skills`（永远存在，保证零预装可跑）；`all_hosts=True` / `--all-hosts` 恢复全量预置模式。
 - **数据根单一入口**：`src/trimum_core/paths.py` 的 `trimum_home()`（`TRIMUM_HOME` 可覆盖）为将来多用户
   「每用户一份 root」与 `/etc/trimum` 系统公共层预留唯一改点；本轮只在新模块使用，不重构既有调用点。
+  多用户边界（公共层内容与查找顺序 / 审计 `user_id` 归属 / 私钥保护三档）的方案与迁移成本见
+  `docs/MULTI-USER-BOUNDARY.md`（2026-09-21 调研，结论：**不改代码**）。
 - **身份**：`src/trimum_core/identity.py` 生成 Ed25519 密钥对（`~/.trimum/identity/identity-ed25519.key`，POSIX 下 0600）
   与自签身份文档 `identity.json`（`schema` / `user` / `machine_id` / `public_key_fingerprint` /
   `capabilities: {tools, max_risk, expires_at, scope}`）。`cryptography` 为**可选依赖**：缺失时状态 `skipped`，
@@ -491,7 +493,7 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 ## 官方分发渠道（E5，2026-09-21 已实现）
 
 > 信任模型与落地口径见 `docs/ECOSYSTEM-STRATEGY.md` §7（内置根 / `.trmpkg` 校验链 / 安装 ≠ 授权）、
-> §7.1（来源 + 身份 + 能力三层职责）、§7.2（多用户前瞻）、§7.4（包格式）、§7.5（本片）。
+> §7.1（来源 + 身份 + 能力三层职责）、§7.4（包格式）、§7.5（本片）、§7.8（多用户边界）；多用户明细见 `docs/MULTI-USER-BOUNDARY.md`。
 
 ### 模块
 
@@ -527,6 +529,10 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
   ledger 行划掉后，`--list` 与运行期 `untrusted_names()`（`capability.py` 读的就是它）同时不再认它。
 - **卸载是破坏性动作**：交互式问一句，非交互必须 `--yes`（stdin 不是 TTY 时 `ask_confirm` 直接答 no，
   不挂住），`--dry-run` 恒不执行；`--remove` 与 `--file` 互斥。
+- **多用户边界（调研结论，不改代码）**：`~/.trimum/` 每用户一份是结构上成立的；缺的是**系统公共层**
+  （`/etc/trimum/` 只放公开信任根 / 策略基线 / 可选共享包，查找顺序「用户层 → 系统层 → 内置」）与
+  **审计归属**（`AuditEvent` 加 `user_id` + `machine_id`）。私钥保护三档建议先做文件权限（Windows 需 ACL，
+  `chmod` 不生 ACL）。方案与迁移顺序见 `docs/MULTI-USER-BOUNDARY.md`、`docs/ECOSYSTEM-STRATEGY.md` §7.8。
 - **运行期 Layer 2.6**：`ToolGateway` 在 L2.5 之后、L4 之前做能力交集 —— deny → `capability_denied`
   审计并拒绝；confirm → 升级为 `Action.CONFIRM`（interactive 弹窗，非交互交给后续层）。
   风险取管线判定的 risk（PolicyEngine / LLM 策略），不是执行后的观测值。

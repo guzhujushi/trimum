@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -9,18 +9,18 @@
 > **P0 安全响应链接线已闭环**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，剧本在真机上永远不会被自动触发）：
 > 2026-09-21 四步走完 —— 步骤 1/3（载荷契约扁平化）、步骤 2/3（L4 改走 `SecMonitor.inspect()`）、
 > 步骤 2 补丁（装配统一 + 处置映射 + 签名收敛）、步骤 3/3（定 `workflow.trigger` 归属）；
-> **E5 官方分发渠道**已闭环：第二片（`.trmpkg` + `trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + 证书能力运行期交集）、**第三片步骤 1**（`trm install --remove` 卸载与注销）、**步骤 2**（`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md` 运维手册）；剩 官网服务端托管、多用户边界（步骤 3，只做调研设计）。P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
+> **E5 官方分发渠道**已闭环：第二片（`.trmpkg` + `trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + 证书能力运行期交集）、**第三片步骤 1**（`trm install --remove` 卸载与注销）、**步骤 2**（`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md` 运维手册）、**步骤 3**（多用户边界：调研 + 设计，**不改代码** → `docs/MULTI-USER-BOUNDARY.md`）—— **E5 第三片三步骤全部收口**；剩 官网服务端托管（域名 / 托管 / CI = 产品决策，暂缓）。P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
 > 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
 > E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
 > 失败项均为既有宿主状态基线（Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网），与本轮各次开工前同名同数，无回归。
 
 ---
 
-## E5 第三片（✅ 步骤 1 卸载 + 步骤 2 发布方闭环，2026-09-21）
+## E5 第三片（✅ 步骤 1 卸载 + 步骤 2 发布方闭环 + 步骤 3 多用户边界，2026-09-21）
 
 > 计划与红线：`TODO.md`「🚚 E5 第三片实施计划」；口径：`docs/ECOSYSTEM-STRATEGY.md` §7.6、
 > 模块与红线：`docs/ARCH.md`「官方分发渠道（E5）」。
-> 提交：步骤 1 `d7aced2`（`trm install --remove`）、步骤 2 `fcecbfe`（`trm pkg index`）。
+> 提交：步骤 1 `d7aced2`（`trm install --remove`）、步骤 2 `fcecbfe`（`trm pkg index`）、步骤 3（纯文档，见下表）。
 
 **做了什么**：`trm install --remove <name>` —— 与 `--list` 对称，不新增顶层命令（命令面仍是 76）。
 两个动作成对：删掉 **ledger 指名的**落地目录 + 划掉登记行，不留「目录没了但还登记着」的半截状态。
@@ -72,6 +72,41 @@
 **测试**：新增 11 项（`tests/test_cli_pkg.py::TestIndex` 10：条目承诺 / 改 url 验不过 / manifest 说了算 /
 子目录相对 url / 验不过的包拒收 / 空目录拒收 / `--force` / 缺签名材料 / 跨根签名者 / 人读输出；
 外加上述端到端 1 项）。全量 **1326 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线，无回归）。
+
+### 步骤 3 — 多用户边界（调研 + 设计，**不改代码**）
+
+**交付**：`docs/MULTI-USER-BOUNDARY.md`（现状对照表 / 三个问题各带方案 / 六条不变量 / 实现顺序与风险）；
+`docs/ECOSYSTEM-STRATEGY.md` §7.2 改为定稿指针并新增 §7.8；`docs/ARCH.md` 与 `AGENTS.md` 文档地图同步。
+
+**复核结论：现有设计没有硬伤，因此不动代码。** 「每用户一份」在这个仓库里是**结构上成立**的 ——
+每个关注点都只有一个改点，不是散落的路径拼接：
+
+| 关注点 | 唯一改点 | 多用户下会怎样 |
+|---|---|---|
+| 用户数据根 | `paths.trimum_home()`（`TRIMUM_HOME` 可覆盖） | 家目录天然每用户一份 ✓ |
+| 身份私钥 | `identity.py`（POSIX 0600） | POSIX 够用；**Windows 上 `chmod` 不产生 ACL** |
+| 配置 / 策略 | `config.py` 的 XDG 路径（`--config /etc/trimum/config.yaml` 已能用） | 缺「系统默认 → 用户覆盖」的合并规则 |
+| 审计 | `audit_store.default_audit_path()` | **`AuditEvent` 没有 `user_id`**：分不清是谁做的 |
+| 运行时 socket | `config.default_socket_path()`（按 uid） | **已经 per-uid**，这层不用重做（好先例） |
+
+三个问题的方案（明细见文档 §2 / §3 / §4）：
+
+1. **`/etc/trimum/` 只放公开物**：官方信任根 / 系统策略基线 / 系统配置基线 / 可选共享包；带私钥或带个人数据的
+   一律只能进用户层。查找顺序 = `~/.trimum/<type>/` → `/etc/trimum/<type>/` → 内置，同名以**用户层为准**；
+   公共层只读（用户进程不写），共享安装需要第二张账 `/etc/trimum/config/installed.json5`。**迁移成本低**：
+   新增 `paths.system_home()` + 三处查找改成有序列表，**写入路径一个都不动**。
+2. **审计 `user_id` + `machine_id` 三步**：加字段（纯增、向后兼容）→ 允许配置指向共享审计文件（默认仍写自己
+   的）→ 系统模式下用 `SO_PEERCRED` / 命名管道 SID 交叉校验。**不整体搬去 `/var/log`** —— 那会破坏
+   「审计是旁路、写失败不影响执行」这条既有取舍。
+3. **私钥保护三档**：A 现状 + 告警 / B 文件权限收紧（Windows 用 ACL）/ C keyring·DPAPI。建议先 **B**、
+   **C 作可选后端**；红线不变（私钥不进公共层 / 仓库 / 日志）。
+
+**为什么不改代码**：计划写的是「除非发现现有设计有硬伤，否则不动代码」。逐条查下来，socket 已按 uid 分目录、
+`agents/<name>/cert.json` 已把「来源 + 证书 + 版本 + 登记」捆在最小单位、`installed.json5` 每用户一份够用 ——
+没有一条是「现在就必须拆」的。多用户真正缺的是**产品决策**（账号体系 / 团队共享）与**系统公共层**，
+两者都不该在没有需求时先写实现。
+
+**测试**：本轮只加文档，全量仍 **1326 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线，逐条相同，无回归）。
 
 ### 提交与分支
 
