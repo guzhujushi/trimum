@@ -119,6 +119,11 @@
   （`task.node.started` 也算 `started`）并对重复的同一（种类, 名字）去重，安全告警另订 `security.*` /
   `event.security.*`。
 
+- **意图驱动链已接线（2026-09-21，穿插项步骤 C）**：`WorkflowListener.submit(instruction)` 是
+  `event.transform.completed` 的**唯一生产者**，也是 `event.workflow.trigger` 的生产者之一
+  （另一条是低匹配转 Planner 后的 `event.planner.task_created`）；daemon 启动时装配 —— 这几个事件
+  从此不再是「发了没人听 / 听了没人发」。
+
 ## 策略学习反馈环
 
 ```
@@ -468,7 +473,8 @@
 | `src/trimum_core/workflow_engine.py`（改） | `to_workflow_definition()` 搬运 `instruction` / `input_data` / `trigger_event`；删掉 `return` 之后那段死代码与坏掉的模块级 `start_v2`；agent 节点缺 driver 时给可行动的错误 |
 | `src/trimum_core/threat_workflows.py`（改） | 16 条威胁响应剧本 → `WorkflowDefV2`（`builtin_workflows()`）：命令式步骤 `agent_type: shell`，散文式步骤 `trm-agent` |
 | `src/trimum_core/api_server.py`（改） | daemon 启动时建运行时并 `start()`；`GET /api/workflows`、`GET /api/workflows/runs` |
-| `src/trimum_core/cli/commands/workflow.py`（改） | `list --all` / `run [--event --payload --timeout --dry-run]` / `enable`；`run --event` 只对点名的 workflow 负责 |
+| `src/trimum_core/cli/commands/workflow.py`（改） | `list --all` / `run [--event --payload --timeout --dry-run]` / `enable`；`run --event` 只对点名的 workflow 负责；2026-09-21 加 `submit "<指令>"`（意图驱动链的入口，命令面 78） |
+| `src/trimum_core/workflow_listener.py`（2026-09-21 接线） | `WorkflowListener`：意图驱动链 —— `submit()` → 变换 Agent → `event.transform.completed` → 三段式决策（高 → `workflow.trigger`；中 → 确认；低 → Planner）；`output_type: shell` 直接走 `ToolGateway`。daemon 启动装配，状态挂 `ServerState.workflow_listener` |
 
 ### 执行路径
 
@@ -505,6 +511,7 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 | 失败节点阻断后继 | 沿用引擎 DAG 语义（后继要求前驱 `completed` / `skipped`）——响应剧本前一步失败时不该继续动手 |
 | 运行记录只在内存 | 环形 200 条，进程重启即丢；`trm workflow status/log` 仍是桩，持久化留给后续一轮 |
 | 事件广播、退出码收窄 | 一次事件会触发**所有**命中的 workflow（运行时按 workflow 各自判定，不做独占）。但 `trm workflow run <id> --event ...` 的退出码只认 `<id>` 自己的运行，其余进 `other_triggered`；点名的那份没被命中而别的被命中 → 退出码 1 并回报实际触发到的 id |
+| 确认缺位 = 拒绝 | `WorkflowListener._request_confirm()` 在**没有**确认回调时返回「拒绝」（`listener.no_confirm_callback_denied`），此前是默认放行 —— 「没装确认通道」不能悄悄变成「自动批准」；中匹配（0.4 ~ 0.7）走的正是这条路 |
 | 散文式步骤会明确失败 | 内置剧本里「比对上次 hash 基线」这类步骤编译成 `trm-agent`，没有 driver / 没装 Agent 脚本时节点 FAILED 并说明原因，**不假装成功** |
 
 ## 官方分发渠道（E5，2026-09-21 已实现）

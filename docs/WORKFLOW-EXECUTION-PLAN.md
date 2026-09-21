@@ -14,7 +14,7 @@
 | `load_from_dir()` 尾部有一段死代码 | `workflow_engine.py:1085-1117`（`return` 之后的重复函数体） |
 | 唯一预设工作流是「数据」不是「能力」 | `threat_workflows.THREAT_WORKFLOWS`（16 条威胁响应剧本），全库只有定义 + 两个查询函数，零调用点 |
 | 工作流目录默认是空的 | `WorkflowDefV2.load_from_dir(None)` → `~/.trimum/workflows/`；仓库内无 workflow YAML 资产 |
-| `WorkflowListener` 从未被实例化 | `api_server.py` 只起了 `WorkflowEventDriver`；`workflow.trigger` 事件只发不收（2026-09-21 起连唯一的生产者也没了：威胁剧本改由 `security.monitor_result` 驱动，见 `docs/SECURITY-DEFENSE-PLAN.md` §三「触发归属」） |
+| ~~`WorkflowListener` 从未被实例化~~ ✅ **2026-09-21 已接线**（穿插项步骤 C） | 当时 `api_server.py` 只起了 `WorkflowEventDriver`；`workflow.trigger` 事件只发不收（2026-09-21 起连唯一的生产者也没了：威胁剧本改由 `security.monitor_result` 驱动，见 `docs/SECURITY-DEFENSE-PLAN.md` §三「触发归属」） |
 | shell 执行路径只有两条 | `trm exec`（人，ToolGateway）与 `shell` dispatcher；引擎侧没有 |
 
 **结论**：workflow 这条线是「定义齐全、执行缺席」——本轮补的就是执行。
@@ -32,7 +32,7 @@
 6. CLI 能一次性验证整条链路：`trm workflow run <id> --event <type> --payload <json>`。
 
 ### 非目标（本轮不做，记录在 TODO）
-- `WorkflowListener` 接进 daemon（要 TransformAgent / PlannerAgent 接线，与本轮正交）。
+- ~~`WorkflowListener` 接进 daemon~~ ✅ **2026-09-21 完成**（穿插项步骤 C）：`submit()` 当生产者、daemon 启动即装配、CLI 入口 `trm workflow submit`（要 TransformAgent / PlannerAgent 接线，与本轮正交，故当时不做）。
 - `task.assigned` / `agent_runtime` 的 Agent 执行链（driver 之外的路径）。
 - 运行状态持久化（`workflow status/log` 仍是桩）。
 - workflow 的远程目录 / 订阅更新（E5）。
@@ -120,10 +120,10 @@ workflow 失败了，锅却算到点名的这份头上（验收脚本自己也�
   D11（点名的那份没被触发就明说）。
 
 ## 6. 遗留（本轮已知边界）
-- `WorkflowListener`（Transform TARL 三段式）仍未接线；`workflow.trigger` 事件
-  已能被运行时消费（写 `trigger.event_type: workflow.trigger` 的 workflow 即可），
-  但**今天没有生产者** —— 归属已定：`workflow.trigger` = 意图驱动（Listener 那条链），
-  威胁剧本走 `security.monitor_result`（P0 步骤 3 收敛掉的两套约定）。
+- ~~`WorkflowListener`（Transform TARL 三段式）仍未接线~~ ✅ **2026-09-21 已接线**（穿插项步骤 C）：
+  `WorkflowListener.submit(instruction)` 是 `event.transform.completed` 的唯一生产者，daemon 启动即装配，
+  CLI 入口 `trm workflow submit`；`workflow.trigger` 事件因此真正有人发（归属口径不变：意图驱动走 Listener，
+  威胁剧本走 `security.monitor_result`，见 P0 步骤 3）。
 - 内置威胁剧本里「散文式步骤」（如「比对上次 hash 基线」）编译为 `agent_type: trm-agent`，
   没有 driver / 没装 Agent 脚本时节点会明确失败——这是设计选择，不是 bug。
 - 运行记录只存内存，进程重启即丢。

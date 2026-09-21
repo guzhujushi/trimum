@@ -78,7 +78,7 @@ class TestStartup:
 
 
 class TestWorkflowRuntimeWiring:
-    """W1：daemon 起来之后 workflow 运行时必须已经在监听 Event Bus。"""
+    """W1：daemon 起来之后 workflow 运行时与意图驱动监听器都必须已经在监听 Event Bus。"""
 
     @pytest.mark.asyncio
     async def test_startup_starts_the_workflow_runtime(self, tmp_path):
@@ -101,6 +101,25 @@ class TestWorkflowRuntimeWiring:
             await runtime.stop()
             assert runtime.running is False
         finally:
+            await teardown(app, state)
+
+    @pytest.mark.asyncio
+    async def test_startup_wires_the_workflow_listener(self, tmp_path):
+        """W1 遗留接线（2026-09-21）：daemon 启动必须把 WorkflowListener 真的装上。
+
+        它以前从未被实例化 —— 于是 ``event.transform.completed`` 没有消费者、
+        ``workflow.trigger`` 没有生产者，整条意图驱动链是摆设。
+        """
+        app = create_app(build_config(tmp_path))
+        state = app.state.trimum
+        try:
+            await run_startup(app)
+
+            assert state.workflow_listener is not None
+            assert "event.transform.completed" in set(state.event_bus._subscribers)
+        finally:
+            if state.workflow_listener is not None:
+                await state.workflow_listener.stop()
             await teardown(app, state)
 
     def test_workflow_routes_registered(self, tmp_path):

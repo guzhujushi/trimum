@@ -1,32 +1,38 @@
-"""Workflow Listener — 系统总监听器。
+"""Workflow Listener — 系统总监听器（TARL 三段式的执行端）。
 
-随着系统启动一同运行。负责监听 Event Bus 上所有关键事件：
-1. **Transform Agent 的 TARL 输出** → 按 confidence 三段式决策
-2. **Planner Agent 的 task 事件** → 转变为 WorkflowDefinition → Workflow Engine
-3. **Tool Gateway 执行反馈** → 监控系统运行状态
-4. **子 Agent 的任务完成/失败反馈** → 更新工作流状态
-5. **System Listener 监控反馈** → 健康状态跟踪
+随 daemon 一同启动，监听 Event Bus 上的关键事件：
+1. **Transform Agent 的 TARL 输出**（``event.transform.completed``）→ 按 confidence 三段式决策
+2. **Planner Agent 的 task 事件**（``event.planner.task_created``）→ 转 ``workflow.trigger``
+3. **系统状态**（``event.system.status``）→ 健康跟踪
+
+入口是 :meth:`WorkflowListener.submit`：它把一句自然语言交给 Transform Agent 翻译，
+再把结果发到 ``event.transform.completed``。这条事件到 2026-09-21 之前**没有任何生产者**，
+所以整条「意图驱动」链（含 ``workflow.trigger``）从来没有被真正跑起来过。
 
 架构位置：
-  Transform Agent → Workflow Listener → [Shell → Tool Gateway]
-                                        ├ [高匹配 → Workflow Engine]
-                                        ├ [中匹配 → 弹窗确认]
-                                        └ [低匹配 → Planner Agent → Workflow Engine]
+  用户 → submit(text) → Transform Agent → event.transform.completed
+                                            └→ Workflow Listener → [Shell → Tool Gateway]
+                                                                   ├ [高匹配 → workflow.trigger → Engine]
+                                                                   ├ [中匹配 → 弹窗确认（没人确认即拒绝）]
+                                                                   └ [低匹配 → Planner Agent → Engine]
 """
 
 from __future__ import annotations
 
 import asyncio
-import logging
+import time
 from typing import Any, Optional
 
-from trimum_core.event_bus import EventBus, NAMESPACE_EVENT, NAMESPACE_TASK
-from trimum_core.models import SystemEvent, EventSeverity
+from trimum_core.event_bus import EventBus, NAMESPACE_EVENT
+from trimum_core.logger import get_logger
+from trimum_core.models import SourceType, SystemEvent, EventSeverity
 from trimum_core.transform_agent import TransformAgent, TransformResult
 from trimum_core.tool_gateway import ToolGateway
 from trimum_core.tarl_parser import parse_line, serialize
 
-log = logging.getLogger("trimum_core.workflow_listener")
+# structlog 口径：``log.info("事件名", key=value)``。stdlib 的 Logger 收不了关键字参数，
+# 以前这个文件用错日志器 —— 每次调用都 TypeError，而被总线的静默 _safe_call 吞掉了。
+log = get_logger("trimum_core.workflow_listener")
 
 
 # ── 匹配度阈值 ───────────────────────────────────────
@@ -70,9 +76,6 @@ class WorkflowListener:
         self._running = False
         self._confirm_callbacks: list[ConfirmCallback] = []
 
-        # 子 Agent 任务跟踪
-        self._pending_sub_tasks: dict[str, str] = {}  # task_id → workflow_id
-
     # ── 声明周期 ──────────────────────────────────────────
 
     async def start(self) -> None:
@@ -91,16 +94,6 @@ class WorkflowListener:
         self._bus.subscribe(
             f"{NAMESPACE_EVENT}planner.task_created",
             self._on_planner_task,
-        )
-
-        # ── 子 Agent 任务反馈 ──
-        self._bus.subscribe(
-            f"{NAMESPACE_TASK}task.completed",
-            self._on_sub_task_completed,
-        )
-        self._bus.subscribe(
-            f"{NAMESPACE_TASK}task.failed",
-            self._on_sub_task_failed,
         )
 
         # ── 系统状态事件 ──
@@ -125,6 +118,28 @@ class WorkflowListener:
         前端/CLI 通过此回调处理中匹配时的用户确认。
         """
         self._confirm_callbacks.append(callback)
+
+    # ── 入口：自然语言 → Transform Agent → 总线 ──────────
+
+    async def submit(self, instruction: str) -> TransformResult:
+        """把一句自然语言交给 Transform Agent，并把结果发到总线。
+
+        这是 ``event.transform.completed`` 的**唯一生产者**，也就是整条意图驱动链的入口。
+        决策在本类的回调里异步跑（``publish`` 是 fire-and-forget）—— 想等它跑完，
+        ``await self._bus.wait_for_handlers()``。
+        """
+        result = await self._transform.translate_async(instruction)
+        await self._bus.emit_event(
+            "transform.completed",
+            "transform-agent",
+            {"result": result.to_dict()},
+        )
+        log.info(
+            "listener.transform_submitted",
+            output_type=result.output_type,
+            confidence=result.confidence,
+        )
+        return result
 
     # ── Transform 事件处理（三段式决策） ──────────────────
 
@@ -194,10 +209,14 @@ class WorkflowListener:
         """终端命令直接走 Tool Gateway 的 shell dispatcher。"""
         from trimum_core.models import ExecuteRequest, ToolType
 
+        # ExecuteRequest 的字段是 ``args``（命令整条塞进去，dispatcher 原样 join 回来），
+        # 没有 ``command`` / ``raw_input`` —— 写错的时候 pydantic 不报错，命令会静默变空。
         request = ExecuteRequest(
-            tool_type=ToolType.SHELL,
-            command=shell_cmd,
-            raw_input=original,
+            tool=ToolType.SHELL,
+            args=[shell_cmd],
+            raw_command=shell_cmd,
+            agent_id="workflow-listener",
+            source_type=SourceType.HUMAN,
         )
 
         response = await self._gateway.execute(request)
@@ -210,7 +229,7 @@ class WorkflowListener:
             "risk": str(response.risk) if hasattr(response, "risk") else "unknown",
         })
 
-        if hasattr(response, "status") and response.status == "denied":
+        if getattr(response, "status", "") == "denied":
             log.warning("listener.shell_denied", cmd=shell_cmd)
             await self._bus.emit_event("shell.denied", "listener", {
                 "command": shell_cmd,
@@ -231,9 +250,10 @@ class WorkflowListener:
         默认超时 30 秒，超时视为拒绝。
         """
         if not self._confirm_callbacks:
-            # 没有确认回调 → 默认放行
-            log.info("listener.no_confirm_callback_auto_allow", tarl=tarl)
-            return True
+            # 红线：确认缺位 ≠ 放行。没有回调就是没有人能同意，必须拒绝 ——
+            # 「没装确认通道」不能悄悄变成「自动批准」。
+            log.warning("listener.no_confirm_callback_denied", tarl=tarl)
+            return False
 
         # 并行调用所有确认回调
         tasks = [
@@ -305,7 +325,7 @@ class WorkflowListener:
             "tarl": tarl,
             "original": original,
             "decision": decision,
-            "timestamp": __import__("time").time(),
+            "timestamp": time.time(),
         })
 
     # ── Planner Task 事件处理 ────────────────────────────
@@ -323,25 +343,6 @@ class WorkflowListener:
                 "original": payload.get("original", ""),
                 "decision": "planner",
             })
-
-    # ── 子 Agent 任务反馈 ────────────────────────────────
-
-    async def _on_sub_task_completed(self, event: SystemEvent) -> None:
-        """子 Agent 任务完成。"""
-        payload = event.payload or {}
-        task_id = payload.get("task_id", "")
-        workflow_id = self._pending_sub_tasks.pop(task_id, "")
-        log.info("listener.sub_task_completed",
-                 task_id=task_id, workflow_id=workflow_id)
-
-    async def _on_sub_task_failed(self, event: SystemEvent) -> None:
-        """子 Agent 任务失败。"""
-        payload = event.payload or {}
-        task_id = payload.get("task_id", "")
-        error = payload.get("error", "unknown")
-        workflow_id = self._pending_sub_tasks.pop(task_id, "")
-        log.warning("listener.sub_task_failed",
-                    task_id=task_id, workflow_id=workflow_id, error=error)
 
     # ── 系统状态监控 ─────────────────────────────────────
 

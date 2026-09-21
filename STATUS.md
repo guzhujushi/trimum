@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -71,6 +71,49 @@
 告警两种前缀 / 退订停订 / 无总线只告警）。全量 **1475 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线）。
 文档：`docs/ARCH.md` 新增「事件总线（`event_bus.py`，2026-09-21 硬化）」一节；`docs/ERROR-CODE-SPEC.md` 的
 `TRM-9005` 补接线说明。
+
+---
+
+## 2026-09-21 穿插项步骤 C：`WorkflowListener` 接线（✅ 已完成）
+
+> 计划：`TODO.md`「🔧 穿插项实施计划」步骤 C。问题源头：W1 遗留 —— `WorkflowListener` 从未被实例化，
+> `event.transform.completed` 没有生产者，`workflow.trigger` 没有生产者，整条「意图驱动」链是摆设。
+
+### 做了什么
+
+| 位置 | 改动 |
+|---|---|
+| `workflow_listener.py` | 新增 `async def submit(instruction) -> TransformResult`：变换 Agent 翻译 → `emit_event("transform.completed", ...)` 发回**同一条总线**（不搞旁路），成为该事件的唯一生产者 |
+| 同上 | 删掉拼错的死订阅（`task.task.completed` / `task.task.failed` —— 前缀多了一个 `task.`）+ 两个孤儿处理函数 + `_pending_sub_tasks`；订阅表只剩真类型 |
+| 同上 | **红线**：`_request_confirm()` 从「没有确认回调就默认放行」改为**拒绝**（`listener.no_confirm_callback_denied`）—— 没装确认通道不能悄悄变成自动批准 |
+| `api_server.py` | 启动时装配（失败只记 `workflow_listener_start_failed`，不带崩 daemon）、停机先于 workflow 运行时收；状态挂 `ServerState.workflow_listener` |
+| `workflow_runtime.py` | 新增公开属性 `gateway`（listener 复用**同一**网关，不新建第二条执行通道） |
+| `cli/commands/workflow.py` | 新增 `trm workflow submit "<指令>"`（`--root` / `--timeout` / `--yes`），命令面 77 → **78**；非交互必须 `--yes` 才自动确认中匹配 |
+
+### 顺手修的两个真 bug（测试跑出来的，不是猜的）
+
+| bug | 后果 | 修法 |
+|---|---|---|
+| 日志器用错：`logging.getLogger(...)` 被当 structlog 用 | 每次 `log.info("x", k=v)` 都抛 `TypeError`，又被总线当时静默的 `_safe_call` 吞掉 —— 这个文件等于从不记日志 | 改用 `logger.get_logger` |
+| `_execute_shell()` 的 `ExecuteRequest(tool_type=..., command=..., raw_input=...)` 字段名全错 | 真字段是 `tool` / `args` / `raw_command`，pydantic 默认忽略多余字段 → 命令**静默变空** | 按真字段构造（`args=[shell_cmd]` + `raw_command`），并补 `SourceType` |
+
+另：`PlannerAgent` 默认剧本目录是 `Path.home()/.trimum/workflows`（**不看 `TRIMUM_HOME`**，会踩沙箱 / 多用户），
+daemon 与 CLI 都显式传 `trimum_path("workflows")`；低匹配转 Planner 那条路（`planner.task_created` → `workflow.trigger`）随之真正有人听。
+
+### 三段式（写进测试）
+
+| confidence | 行为 |
+|---|---|
+| ≥ 0.7 高 | 发 `workflow.trigger`（`decision=high`）→ 运行时唤起写了该 trigger 的剧本 |
+| 0.4 ~ 0.7 中 | 有回调且同意 → `decision=confirmed` 触发；无回调 → **不发**；拒绝 → **不发** |
+| < 0.4 低 | 转 Planner（`decision=planner`）；没有 Planner 时只留 `transform.completed`，不假装触发 |
+| `output_type=shell` | 直接走 `ToolGateway`（`args=[命令]` + `raw_command`），被拒时另发 `shell.denied` |
+
+**测试**：新增 `tests/test_workflow_listener.py`（12 项，含**端到端**：一句自然语言 → 变换 → `workflow.trigger`
+→ 文件剧本真的跑起来，节点 ok 且网关收到命令）+ `test_api_server_startup.py` 一条（daemon 装配 Listener）
++ `test_cli.py` 一条（`workflow submit` 解析出 handler）。
+全量 **1489 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线）。文档：`docs/ARCH.md`、
+`docs/WORKFLOW-EXECUTION-PLAN.md`、`docs/SECURITY-DEFENSE-PLAN.md`（触发归属表）。
 
 ---
 
@@ -175,6 +218,9 @@
 | E5 第三片 步骤 1（`trm install --remove` + `TestRemove` + 文档 §7.6） | `d7aced2` |
 | E5 第三片 步骤 2（`trm pkg index` + `TestIndex` + `docs/PACKAGE-CHANNEL-OPS.md` + 文档 §7.7） | `fcecbfe` |
 | E5 第三片 步骤 3（多用户边界：调研 + 设计，**不改代码**；`docs/MULTI-USER-BOUNDARY.md` + 生态战略 §7.2/§7.8 + ARCH / AGENTS 指向） | `8646fe7` |
+| 穿插项 步骤 A（剧本自动触发策略：取证 8 条武装 / 处置 8 条不武装 / 自动触发不派子 Agent） | `d5d4b02` |
+| 穿插项 步骤 B（总线硬化：索引接线 / 失败可观测 / 严格模式 / 订阅修正） | `dd3c0a2` |
+| 穿插项 步骤 C（`WorkflowListener` 接线：`submit()` 当生产者 + daemon 装配 + `trm workflow submit`）+ 两个真 bug | 见 `TODO.md`「克隆/分支同步」（本条提交号由后续文档提交回填） |
 
 ---
 
@@ -207,6 +253,12 @@
 - **有订阅没生产**：`agent.executing` / `.executed`（SecMonitor 死订阅）、`memory.*`（MemoryBridge 未实例化）、`system.alert`（SystemMonitor 未实例化）、`event.transform.completed`（WorkflowListener 未实例化）。
 - **总线自身**：`_safe_call` 静默吞异常 + `TRM-9005` 从未 raise；`event_index.EventIndex` 没接进 `EventBus`；`LiveConsole.subscribe_events` 订阅 `task.*` 却全等比对 `task.started`（永远不亮）；SDK `trimum_agent.py:167` 的 `publish("tool.executing", {...})` 签名与事件名都错（异常被吞）。
 - **文档过期**：`docs/SYSTEM-MONITOR.md` 的示例用 `event_bus.emit()`（该 API 不存在）；旧 STATUS 表里 `TASK_ASSIGNED` 标 ✅，但 `task.assigned` 从未落地。
+
+> **修复进度（2026-09-21 回填）**：上列「总线自身」四项由穿插项**步骤 B** 全部落地；
+> 「有订阅没生产」里的 `event.transform.completed`、「有生产没消费」里的 `planner.*`、以及无处安放的 `workflow.trigger`，
+> 由穿插项**步骤 C** 接线（`WorkflowListener.submit()` 当生产者 + daemon 装配 + `trm workflow submit`）。
+> 仍未动的：`memory.*`（MemoryBridge 未实例化）、`system.alert` / `system.heartbeat`（SystemMonitor 未实例化）、
+> `agent.status_changed`、`task.assigned`、三个未开工子系统。
 
 ### 优先级判断
 
@@ -387,7 +439,7 @@ L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线
 1. ✅ **P0 安全响应链接线**（2026-09-20 审计新立，**2026-09-21 闭环**）—— L4 只拦不报 → 现在「扫描 → 广播（扁平载荷）→ SecExecutor（审计/通知/阻断）→ 网关处置（deny/kill/freeze/isolate → 拒绝，confirm → 确认）→ 剧本被 `security.monitor_result` 驱动」一条链全通，且**任何入口**的网关都过 L4。四个提交（统一契约 `087a476` → L4 走 `inspect()` `d5393a6` → 装配/处置/签名 `dbc411e` → 定 `workflow.trigger` 归属 `f6ecfe4`）见 `TODO.md`「EventBus 通信缺口」
 2. 🟠 **E5 官方分发渠道**（分发面已闭环，剩第三片）—— 第一片 `9b40be2`（`.trmpkg` 包格式 + 校验器）；第二片 `2aec23b` → `4e29b4e`（`trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + E6 遗留的证书 `capabilities` 运行期交集）。剩：`trm install --remove`（卸载 + 注销登记）、官网服务端与目录托管（`DEFAULT_INDEX_URL` 仍是占位）、多用户边界（`docs/ECOSYSTEM-STRATEGY.md` §7.2）；**逐条实施计划（红线 + 测试清单）见 `TODO.md`「🚚 E5 第三片实施计划」**
 3. ✅ **总线硬化**（2026-09-21 完成，穿插项步骤 B，见上）—— `_safe_call` 不再吞异常（计数 + 广播 `event.eventbus.dispatch_failed` + 严格模式抛 `TRM-9005`）；`EventIndex` 接进 `EventBus.publish`；`LiveConsole.subscribe_events` 改按段匹配并补订 `security.*`；SDK 侧 `publish(...)` 误用改 `emit_event(...)`
-4. 🟠 **W1 遗留：`WorkflowListener` / TARL 三段式接线** —— `event.transform.completed` 无生产者、`TransformAgent` 无调用点、`WorkflowListener` 未实例化（要把 TransformAgent 接进 daemon + 决策 + 确认，比 P0 大）；另：运行记录只在内存、内置剧本只有落盘式开关
+4. ✅ **W1 遗留：`WorkflowListener` / TARL 三段式接线**（2026-09-21 完成，穿插项步骤 C）—— `submit()` 成了 `event.transform.completed` 的唯一生产者，daemon 启动即装配，CLI 入口 `trm workflow submit`；确认缺位由「默认放行」改成**拒绝**；另修了两个真 bug（日志器当 structlog 用 / `ExecuteRequest` 字段名全错）。**仍留**：运行记录只在内存（环形 200 条，重启即丢）、内置剧本只有落盘式开关、确认通道目前只有 CLI
 5. 🟡 **桌面/WebSocket 确认通道**（P2）—— `SecurityAgent.confirm()` 目前只有 CLI 交付手段
 6. 🟡 **CLI 小缺口三连** —— `trm security revoke <token_id>` / `trm ask -i` 的中断处理（`ask.py` 无 `KeyboardInterrupt` / `EOFError`）/ `trm memory import|export`
 7. 🟡 **引擎侧两个半成品** —— `src/agent-sdk` 端到端测试与打包验证（`tests/` 无覆盖）；Policy Engine 正则→LLM 混合（`LlmPolicyEngine` 骨架未接线）；`transform_agent` 的 confidence 三级分流
@@ -1419,7 +1471,7 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 | `load_from_dir()` 尾部有死代码 | `workflow_engine.py:1085-1117`（`return` 之后的重复函数体） |
 | 唯一「预设 workflow」是数据不是能力 | `threat_workflows.THREAT_WORKFLOWS`（16 条威胁响应剧本），全库零调用点 |
 | 工作流目录默认空 | `~/.trimum/workflows/`；仓库内无 workflow YAML 资产（本机另有 2 份手写的 `blog-deploy` / `daily-check`） |
-| `WorkflowListener` 从未被实例化 | `api_server.py` 只起了 `WorkflowEventDriver`；`workflow.trigger` 事件只发不收 |
+| ~~`WorkflowListener` 从未被实例化~~ ✅ **2026-09-21 已接线**（穿插项步骤 C） | 当时 `api_server.py` 只起了 `WorkflowEventDriver`；`workflow.trigger` 事件只发不收。现已装配 + 给了 `trm workflow submit` 入口 |
 
 ### 交付
 
@@ -1474,8 +1526,9 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 
 ### W1 遗留
 
-- **`WorkflowListener` 仍未接线**：Transform TARL 三段式那条链没有实例化；它的 `workflow.trigger`
-  事件已能被运行时消费（workflow 写 `trigger.event_type: workflow.trigger` 即可）。
+- ~~**`WorkflowListener` 仍未接线**~~ ✅ **2026-09-21 已接线**（穿插项步骤 C）：`submit()` 当生产者、
+  daemon 启动即装配、CLI 入口 `trm workflow submit`；`workflow.trigger` 事件本来就能被运行时消费
+  （workflow 写 `trigger.event_type: workflow.trigger` 即可），现在真有人发它了。
 - 运行记录只在内存（环形 200 条），进程重启即丢；`trm workflow status/log` 仍是桩。
 - 内置剧本的启用开关只有 `trm workflow enable <id>`（落盘法），没有「原地开关」。
 - daemon 只暴露只读端点；`POST /api/workflows/{id}/trigger` 这类执行入口**故意没开**（避免无鉴权执行面）。
@@ -1664,7 +1717,7 @@ workflow，同一次威胁就会被两条链各跑一遍。
 |---|---|---|---|
 | **自动（事实）** | `security.monitor_result` | L4 `SecMonitor._dispatch`（唯一） | 内置剧本 + W1 `WorkflowRuntime` |
 | 自动（定时） | `cron` | 定时器 | `threat-audit-integrity-check` |
-| 意图驱动 | `workflow.trigger` | `WorkflowListener`（TARL 三段式，仍未接线 → 今天无生产者） | 写了该 trigger 的 workflow（今天没有） |
+| 意图驱动 | `workflow.trigger` | `WorkflowListener`（TARL 三段式；2026-09-21 步骤 C 起真有人发） | 写了该 trigger 的 workflow（`trm workflow submit` 那条链） |
 | 手动 | `runtime.trigger()` / `run_now()` / `trm workflow run <id>` | 人 | `WorkflowRuntime` |
 
 ### 改动

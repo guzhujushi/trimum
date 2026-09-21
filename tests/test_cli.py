@@ -40,6 +40,7 @@ class TestBuildParser:
             ["tool", "list"],
             ["agent", "list"],
             ["workflow", "list"],
+            ["workflow", "submit", "看看谁占着 8080", "--yes"],
             ["config", "show"],
             ["install"],
             ["exec", "echo", "hi"],

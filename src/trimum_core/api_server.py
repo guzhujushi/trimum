@@ -96,6 +96,8 @@ class AppState:
         self.driver: Optional[WorkflowEventDriver] = None
         # W1：workflow 常驻运行时（监听 Event Bus → 驱动执行）
         self.workflow_runtime: Optional[WorkflowRuntime] = None
+        # 意图驱动链的监听器（Transform Agent → 三段式决策 → workflow.trigger）
+        self.workflow_listener: Optional[Any] = None
         self.learning_task: Optional[asyncio.Task] = None
         # MCP 连接池（M4）。在 startup() 里构造而不是这里：池子的空闲回收器
         # 和 cgroup 绑定都要在事件循环里跑，构造点必须和运行点重合。
@@ -554,6 +556,30 @@ def create_app(config: Config) -> FastAPI:
         except Exception as e:
             logger.warning("workflow_runtime_start_failed", error=str(e))
 
+        # 意图驱动那条链（W1 遗留的接线）：``event.transform.completed`` 以前没有生产者，
+        # 于是 WorkflowListener 从未被实例化、``workflow.trigger`` 也从不出现。这里装上它，
+        # 与常驻 runtime 共用同一个总线、网关与 workflow 目录；入口是 ``trm workflow submit``。
+        try:
+            from .paths import trimum_path
+            from .planner_agent import PlannerAgent
+            from .transform_agent import TransformAgent
+            from .workflow_listener import WorkflowListener
+
+            # Planner 的 workflow_dir 必须显式给：它默认落在真实 ~/.trimum，
+            # 不看 TRIMUM_HOME（沙箱与多用户场景都会踩）。
+            state.workflow_listener = WorkflowListener(
+                event_bus=state.event_bus,
+                transform_agent=TransformAgent(),
+                tool_gateway=state.tool_gateway,
+                planner_agent=PlannerAgent(
+                    state.event_bus, workflow_dir=trimum_path("workflows")
+                ),
+            )
+            await state.workflow_listener.start()
+            logger.info("workflow_listener_started")
+        except Exception as e:
+            logger.warning("workflow_listener_start_failed", error=str(e))
+
         logger.info("trimum_core_started", host=config.host, port=config.port)
 
 
@@ -680,6 +706,8 @@ def create_app(config: Config) -> FastAPI:
         if state.mcp_pool is not None:
             # 池子先停回收器，再逐个关掉 server 子进程
             await state.mcp_pool.close_all()
+        if state.workflow_listener is not None:
+            await state.workflow_listener.stop()
         if state.workflow_runtime:
             await state.workflow_runtime.stop()
         if state.driver:

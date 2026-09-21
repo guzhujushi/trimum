@@ -824,6 +824,11 @@ class WorkflowRuntime:
 
     # ── shell 处理器（红线：一律走 ToolGateway）────────────
 
+    @property
+    def gateway(self) -> Any:
+        """共享的 ToolGateway（懒建）—— 别的组件（如 WorkflowListener）要复用同一个。"""
+        return self._ensure_gateway()
+
     def _ensure_gateway(self) -> Any:
         """拿网关：daemon 注入的是共享实例，CLI 一次性执行时按 ``trm exec`` 口径自建。"""
         if self._gateway is None:

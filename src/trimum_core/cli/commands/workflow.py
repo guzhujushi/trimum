@@ -78,6 +78,25 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     )
     run_parser.set_defaults(handler=handler)
 
+    submit_parser = nested.add_parser(
+        "submit",
+        help="send a natural-language instruction through the Transform Agent",
+    )
+    submit_parser.add_argument("instruction", help="natural-language instruction")
+    submit_parser.add_argument(
+        "--root", default=None, help="workflow root (default <TRIMUM_HOME>/workflows)"
+    )
+    submit_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=30.0,
+        help="seconds to wait for a triggered workflow (default: 30)",
+    )
+    submit_parser.add_argument(
+        "--yes", action="store_true", help="auto-approve mid-confidence confirmations"
+    )
+    submit_parser.set_defaults(handler=handler)
+
     enable_parser = nested.add_parser(
         "enable", help="materialize a builtin threat playbook into the workflow root"
     )
@@ -104,7 +123,7 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
 
 def _show_help(args: argparse.Namespace) -> int:
     del args
-    print("usage: trm workflow {list,run,enable,status,log,import} ...")
+    print("usage: trm workflow {list,run,submit,enable,status,log,import} ...")
     return 0
 
 
@@ -155,6 +174,9 @@ def handler(args: argparse.Namespace) -> int:
 
     if command == "run":
         return _handle_run(args)
+
+    if command == "submit":
+        return _handle_submit(args)
 
     if command in {"status", "log"}:
         data = {
@@ -247,6 +269,108 @@ async def _execute(runtime, bus, registered, args, context, payload):
     finally:
         await runtime.stop()
     return records or None
+
+
+def _handle_submit(args: argparse.Namespace) -> int:
+    """``trm workflow submit``：自然语言 → Transform Agent → 三段式决策 → 执行。
+
+    与 daemon 同一套组件，只是这里不常驻：翻译出终端命令就直接走网关执行；翻译出 TARL
+    就按 confidence 三段式 —— 高匹配发 ``workflow.trigger``（trigger 写 ``workflow.trigger``
+    的 workflow 会真的跑起来），中匹配问一次（``--yes`` 之外没有确认回调就是拒绝），
+    低匹配交给 Planner。
+    """
+    from trimum_core.paths import trimum_path
+    from trimum_core.planner_agent import PlannerAgent
+    from trimum_core.transform_agent import TransformAgent
+    from trimum_core.workflow_listener import WorkflowListener
+
+    root = getattr(args, "root", None) or str(trimum_path("workflows"))
+    runtime, bus = _build_runtime(root, include_builtin=True)
+
+    # 决策链是事件驱动的：把路上会出现的「谁被谁接了」记下来，好如实汇报
+    observed: list[dict] = []
+    watched = {
+        "shell.executed",
+        "shell.denied",
+        "workflow.trigger",
+        "workflow.triggered",
+        "planner.workflow_created",
+        "planner.failed",
+    }
+
+    async def watch(event):
+        name = event.event_type.split(".", 1)[-1]
+        if name in watched:
+            observed.append({"event": name, "payload": dict(event.payload or {})})
+
+    bus.subscribe("*", watch)
+
+    def confirm(original: str, tarl: str, confidence: float) -> bool:
+        del original
+        if getattr(args, "yes", False):
+            return True
+        return ask_confirm(f"confidence={confidence:.2f}，执行 {tarl}？")
+
+    async def chain():
+        await runtime.start()
+        # Planner 的 workflow_dir 显式给：默认那个落在真实 ~/.trimum，不看 TRIMUM_HOME
+        listener = WorkflowListener(
+            bus,
+            TransformAgent(),
+            runtime.gateway,
+            PlannerAgent(bus, workflow_dir=root),
+        )
+        listener.on_confirm(confirm)
+        await listener.start()
+        baseline = runtime.run_count
+        try:
+            result = await listener.submit(args.instruction)
+            await bus.wait_for_handlers()
+            runs = await runtime.wait_for_runs(since=baseline, timeout=args.timeout)
+        finally:
+            await listener.stop()
+            await runtime.stop()
+        return result, runs
+
+    try:
+        result, runs = asyncio.run(chain())
+    except Exception as exc:  # noqa: BLE001 - 一次性 CLI：把原因原样报出来
+        return fail(f"workflow submit failed: {exc}")
+
+    emit(args, {
+        "instruction": args.instruction,
+        "translation": result.to_dict(),
+        "events": observed,
+        "runs": [record.to_dict() for record in runs],
+    }, _human_submit)
+    return 0
+
+
+def _human_submit(data: dict) -> None:
+    translation = data["translation"]
+    print(
+        f"「{data['instruction']}」 -> {translation['output_type']} "
+        f"(confidence={translation['confidence']:.2f})"
+    )
+    if translation.get("shell_command"):
+        print(f"  shell: {translation['shell_command']}")
+    if translation.get("tarl"):
+        print(f"  tarl:  {translation['tarl']}")
+    if translation.get("error"):
+        print(f"  error: {translation['error']}")
+    for event in data["events"]:
+        print(f"  event {event['event']}")
+    for record in data["runs"]:
+        print(
+            f"  run {record['run_id']} status={record['status']} "
+            f"duration={record['duration']}s"
+        )
+        for node in record["nodes"]:
+            detail = node["error"] or _output_excerpt(node["result"])
+            print(
+                f"    {node['node_id']:<18} {node['status']:<10} "
+                f"{node['handler']:<8} {detail}"
+            )
 
 
 def _handle_enable(args: argparse.Namespace) -> int:
@@ -430,6 +554,17 @@ __command_meta__ = {
         ],
         "risk": "medium",
         "tags": ["workflow", "ecosystem"],
+        "since": "0.6.0",
+    },
+    "workflow submit": {
+        "summary": "Send a natural-language instruction through the Transform Agent",
+        "args": "<instruction> [--root DIR] [--timeout S] [--yes]",
+        "examples": [
+            'trm workflow submit "清理 docker 缓存" --yes',
+            'trm workflow submit "看看谁占着 8080" --yes',
+        ],
+        "risk": "medium",
+        "tags": ["workflow", "agent"],
         "since": "0.6.0",
     },
     "workflow list": {

@@ -188,7 +188,7 @@ L4 常开的前提是签名不误报 —— 否则正常操作、以及**内置�
 |---|---|---|---|
 | **自动（事实驱动）** | `security.monitor_result` | L4（`SecMonitor._dispatch`），唯一生产者 | 内置威胁剧本（`trigger.event_type` = `security.monitor_result`，条件 = 扁平 `threat_name`）+ W1 `WorkflowRuntime` |
 | 自动（定时） | `cron` | 定时器（`threat-audit-integrity-check` 专用） | 同上 |
-| 意图驱动 | `workflow.trigger` | `workflow_listener.py` 的 TARL 三段式（**今天仍未接线**，即无生产者） | 任何写了 `trigger.event_type: workflow.trigger` 的 workflow（今天没有） |
+| 意图驱动 | `workflow.trigger` | `workflow_listener.py` 的 TARL 三段式（✅ **2026-09-21 已接线**，穿插项步骤 C：`WorkflowListener.submit()` 是入口） | 任何写了 `trigger.event_type: workflow.trigger` 的 workflow（经 `trm workflow submit` / 低匹配转 Planner 那条链触发） |
 | 手动 | `runtime.trigger()` / `run_now()` / `trm workflow run <id>` | 人 | `WorkflowRuntime` |
 
 - **`SecExecutor` 不再发 `workflow.trigger`**（2026-09-21 删）：它的载荷约定（`workflow_name`）
