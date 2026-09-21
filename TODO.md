@@ -1,11 +1,12 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-20（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点**）
+> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3：`security.monitor_result` 载荷契约扁平化**）
 > 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5 + E4**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；**E4 三个导入器（CLI / workflow / skill）已落地**；E5 / E7 待做
-> 测试：本地 **1099 passed / 5 failed / 7 skipped**（E4 前是 940 passed，本轮 +159 用例；5 项失败 = 既有基线：Windows 沙箱 + PATH 缺 `python.exe` + LLM 断网）。基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
+> 测试：本地 **1167 passed / 5 failed / 7 skipped**（2026-09-21 P0 步骤 1 之后，+11 为本轮新增；5 项失败 = 既有基线：Windows 沙箱写 `~/.trimum` 被拒 + PATH 缺 `python.exe` + LLM 断网）。历史：E4 前 940 passed → E4 后 1099 → W1 后 1156 → 本轮 1167；基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
 > 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固/M4 均已推送四分支（M4：server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）；**M4.5 收口小项提交号见 `STATUS.md` 的「提交与分支」表**（幽灵条目 `9e63a81` / env+网关确认 `d34054a` / install 向导 `bd00990`，四分支已同步）。
 > ✅ **真机部署已完成（2026-09-20 20:52）**：`sudo bash /tmp/sync_opt_tree.sh` 全树同步落地，`/opt/trimum` 三个关键文件与本地 HEAD 逐文件对上（`mcp_bridge.py` `f503f505…` / `mcp_registry.py` `86447a65…` / `tool_gateway.py` `47d8a205…`），部署树 `[4b/5]` 自检通过；daemon 20:52:27 启动 → 跑的就是新代码（`trm status` 的 `source: rpc`，PID 23850）。真机聚合实测 4 条 `source=mcp`（`echo__echo` / `echo__fail` / `echo__slow` / …），总数 17；幽灵缓存已清（备份 `/tmp/mcp-tools.json.bak-20260920`），清后 `tool list --mcp` 为 0 条、总数 13。
-> ▶ **下次继续从这里开始（2026-09-20 EventBus 审计之后）**：W1 已闭环（真机 `accept_w1.py` 48/0）；只读审计发现**安全响应链未接线**——拦得住，但不会响应、不会记录、不会通知（见下方「EventBus 通信缺口」）→ 下一步 = **P0 安全链接线**（三条动作，顺序不能乱）→ 然后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`；W1 遗留见 STATUS「W1 遗留」（`WorkflowListener` 未接线 / 运行记录只在内存 / 内置剧本只有落盘式开关）。
+> ▶ **下次继续从这里开始（2026-09-21，P0 步骤 1 之后）**：下一步 = **P0 步骤 2（L4 改走 `_dispatch`）**—— 契约已就绪，接上即触发；之后 步骤 3（`workflow.trigger` 归属）→ **E5 官方分发渠道**。
+> 📌 更早的指针（2026-09-20 EventBus 审计之后）：W1 已闭环（真机 `accept_w1.py` 48/0）；只读审计发现**安全响应链未接线**——拦得住，但不会响应、不会记录、不会通知（见下方「EventBus 通信缺口」）→ 下一步 = **P0 安全链接线**（三条动作，顺序不能乱）→ 然后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`；W1 遗留见 STATUS「W1 遗留」（`WorkflowListener` 未接线 / 运行记录只在内存 / 内置剧本只有落盘式开关）。
 
 ---
 
@@ -75,15 +76,27 @@
 |---|---|
 | L4 命中威胁只 `logger.warning` + 返回 denied，**不发 `security.monitor_result`、不调 SecExecutor** | `tool_gateway.py:715` |
 | `security.monitor_result` 唯一生产者 `SecMonitor._dispatch()`，只被 `_on_executing()` 调用；而它订阅的 `agent.executing` **全库无生产者** | `sec_monitor.py:418 / 457 / 487` |
-| payload 契约不符：生产端发嵌套 `{"threat": {...}, "original_event": {...}}`，16 条内置剧本的条件是扁平 `payload.get('threat_name') == '...'` | 实测 `builtin_workflows()` 打印 condition |
+| ~~payload 契约不符~~ ✅ **2026-09-21 已修**：生产端改为扁平 `monitor_result_payload()`，与剧本条件一致 | `sec_monitor.py` + `tests/test_sec_monitor.py`（11 项，锁住生产端↔消费端契约） |
 | `SecExecutor`（阻断 / 冻结 / 隔离 + SecAudit + SecNotif）只在这条死链路上被调用 | `sec_executor.py:182` |
 | **后果** | 16 条威胁响应剧本在真机上**永远不会被自动触发**（只能手动 `trm workflow run --event`）；`security.blocked` / `security.alert` 从不出现 |
 
 **建议动作（顺序不能乱）**：
 
-1. **统一 payload 契约** —— 扁平化 `security.monitor_result`，或把剧本条件改成 `payload["threat"]["threat_name"]`；否则接上也不触发。
+1. ✅ **统一 payload 契约**（2026-09-21 完成）—— 选「扁平化生产端」，剧本条件不动；契约表见 `docs/SECURITY-DEFENSE-PLAN.md` §三。
 2. **L4 改走 `_dispatch`** —— 一条命令同时完成「发事件 + 调 SecExecutor」（顺带决定 `agent.executing` 的 EventSnoop 路径是补上还是删掉死订阅）。
 3. **定 `workflow.trigger` 的归属** —— 要么让 `WorkflowListener` 上线当生产者，要么让剧本直接听 `security.monitor_result`；**不要两套约定并存**（现在一边扁平带 `workflow_name`、一边嵌套带 `threat`）。
+
+### P0 进展（2026-09-21）
+
+- [x] **步骤 1/3 统一 payload 契约** —— `monitor_result_payload()` 扁平化；新增 `tests/test_sec_monitor.py`（11 项），
+      其中 `TestBuiltinWorkflowContract` 断言「15 条听 `security.monitor_result` 的内置剧本，条件都能被生产端载荷命中」
+      +「签名 `trigger_workflow` 与剧本名一一对应」。全量 `1167 passed / 5 failed / 7 skipped`（5 项为既有基线）。
+- [ ] **步骤 2/3：L4 改走 `_dispatch`**（下一项）—— `tool_gateway.py:716` 命中威胁时发事件 + 调 `SecExecutor`；
+      顺带决定 `agent.executing` 这条死订阅是补上生产者还是删掉。
+- [ ] **步骤 3/3：定 `workflow.trigger` 归属** —— 现在 `sec_executor.py` 扁平发 `workflow_name`、`workflow_listener` 未实例化；不要两套约定并存。
+- 🆕 **本轮顺带发现（独立缺口，未修）**：`threat-ransomware-response` / `threat-btrfs-snapshot-protect`（`ransomware`）、
+      `threat-persistence-sweep`（`persistence`）**没有对应威胁签名** —— 生产者应是尚未开工的 `BehaviorMonitor`，
+      所以这 3 条剧本今天也没有触发路径；`threat-audit-integrity-check` 的 trigger 是 `cron`（定时），不属事件链。
 
 ### P1 — 逐条缺环
 
@@ -400,6 +413,7 @@ trm config set <key> <value>       # 设置配置项
 | **2026-09-20 收尾校验 + 下次继续指针** | ✅ 全量测试 687/8/4（与基线逐条一致，无回归）+ `trm commands --check` 58 条 + `trm mcp call` 端到端冒烟 stdout 纯 JSON；TODO 记 M3 输入/输出/红线，STATUS / ARCH 修正过期口径；四分支同步 |
 | **2026-09-20 E2 MCP 接入（M0/M1/M2）** | ✅ stdio 客户端 + 文件化注册（deny-by-default）+ `MCPDispatcher` 实装 + `mcp_call` 审计 + `trm mcp`；73 项新测试 |
 | **2026-09-20 M3 MCP 策展导入器** | ✅ `mcp_catalog.py` + `trm mcp catalog import/list` + `config/mcp-catalog.yaml`（4,118 → 232 条候选，红线逐条计数可查）；52 项新测试 |
+| **2026-09-21 P0 步骤 1/3：`security.monitor_result` 载荷契约扁平化** | ✅ 生产端改发扁平载荷（`monitor_result_payload()`），与 15 条内置剧本条件对齐；新建 `tests/test_sec_monitor.py`（11 项，含生产端↔消费端契约锁）；契约表落 `docs/SECURITY-DEFENSE-PLAN.md` §三 |
 | **2026-09-21 根目录文档合并与清理** | ✅ 删除 `PRD.md`（≈95% 与 STATUS/TODO/docs 重复）；`ARCH.md` 去重后移入 `docs/ARCH.md`；引用同步（sync 脚本 / OPERATIONS / TODO / README / AGENTS）；清空 `tmp/`（保留 `tmp/research/`）、`.pytest_cache/`、`.sonar/` |
 | **2026-09-20 M3 真机验证 + 两处真实缺陷修复** | ✅ 真机 739/11/2（11 项宿主基线，无回归）；修 `trm setup --json` 的 stdout 污染（提示改走 stderr）+ 审计测试哨兵撞用户名；真机补装 `cryptography`；新增 `scripts/sync_opt_tree.sh`（`/opt/trimum` 全树 sudo 同步） |
 

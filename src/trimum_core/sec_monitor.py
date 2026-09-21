@@ -391,6 +391,30 @@ class AuditChainVerifier:
         return len(errors) == 0, errors
 
 
+# ─── security.monitor_result 载荷契约（扁平，2026-09-21）────────────────────
+# 内置剧本（threat_workflows.py）的条件写的是扁平键 `payload.get("threat_name")`，
+# 所以生产端也必须扁平：不再嵌套 `{"threat": ..., "original_event": ...}`。
+def monitor_result_payload(threat: ThreatMatch, event: SystemEvent) -> dict[str, Any]:
+    """构造 ``security.monitor_result`` 的载荷（扁平，唯一生产入口）。
+
+    内容 = ``ThreatMatch`` 的全部字段（威胁本体）+ 触发上下文（从原事件扁平拷贝）
+    + ``source_event_type``（溯源：是哪类事件触发的这次扫描）。
+    """
+    payload: dict[str, Any] = dict(threat.model_dump())
+    source = event.payload or {}
+    payload.update(
+        {
+            "agent_id": source.get("agent_id") or "unknown",
+            "command": source.get("command", ""),
+            "pid": int(source.get("pid", 0) or 0),
+            "sandbox": source.get("sandbox", "default"),
+            "layer_hit": source.get("layer_hit", "L2"),
+            "source_event_type": event.event_type,
+        }
+    )
+    return payload
+
+
 class SecMonitor:
     """Security monitor main class.
 
@@ -481,16 +505,17 @@ class SecMonitor:
         return None
 
     async def _dispatch(self, threat: ThreatMatch, event: SystemEvent) -> None:
-        """Publish a monitor result and hand the threat to SecExecutor."""
+        """Publish a flat ``security.monitor_result`` and hand the threat to SecExecutor.
+
+        载荷契约见 :func:`monitor_result_payload`：扁平键，内置剧本的
+        ``payload.get("threat_name")`` 条件直接命中。
+        """
         await self.event_bus.publish(
             SystemEvent(
                 event_type=EVENT_SEC_MONITOR,
                 source="sec_monitor",
                 severity=EventSeverity.WARNING,
-                payload={
-                    "threat": threat.model_dump(),
-                    "original_event": event.model_dump(),
-                },
+                payload=monitor_result_payload(threat, event),
             )
         )
         await self.executor.execute(threat, event)

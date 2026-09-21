@@ -117,6 +117,21 @@ agent.executing 事件到达：
   Step 3: 记录到 SecAudit
 ```
 
+### `security.monitor_result` 载荷契约（扁平，2026-09-21 冻结）
+
+生产端唯一入口是 `sec_monitor.monitor_result_payload()`，**不嵌套** `{"threat": ...}`。
+
+| 键 | 来源 | 缺省 |
+|---|---|---|
+| `threat_name` / `category` / `defense` / `confidence` / `matched_pattern` / `workflow_name` / `reason` | `ThreatMatch.model_dump()` | — |
+| `agent_id` / `command` / `pid` / `sandbox` / `layer_hit` | 触发事件的 payload（扁平拷贝） | `unknown` / `""` / `0` / `default` / `L2` |
+| `source_event_type` | 触发事件类型 | — |
+
+- 消费方按**扁平键**取值：15 条内置剧本的条件就是 `payload.get("threat_name") == "..."`（`threat_workflows.trigger_condition()`）。
+- 契约由 `tests/test_sec_monitor.py::TestBuiltinWorkflowContract` 锁住 —— 每一条内置剧本的条件都必须能被生产端载荷命中；
+  签名 `trigger_workflow` 与剧本名也必须一一对应。
+- 其余安全事件（`security.alert` / `security.blocked`）本来就是扁平（`threat_name` + `defense` + `agent_id` + `command` + `reason`）。
+
 ### 上下文追踪（操作序列检测）
 
 > 操作序列检测同样**优先走 Workflow TARL 匹配**：操作序列模式触发后，ThreatMatcher 直接匹配对应工作流，无需 Security Agent 参与。只有操作序列模式明确但上下文不足以确定阻断/确认时，才走 Security Agent 深度判断。

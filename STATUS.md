@@ -1,12 +1,13 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理：删除 `PRD.md`、`ARCH.md` 去重后移入 `docs/`**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理：删除 `PRD.md`、`ARCH.md` 去重后移入 `docs/`** → **P0 安全响应链步骤 1/3：`security.monitor_result` 载荷契约扁平化**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
 > 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3/M4** 与**远端工具聚合**（`<server>__<tool>` 进 `ToolRegistry`），
 > E4 三个导入器已落地，W1 workflow 执行语义已闭环（真机 48/0）。
-> **下一项 = P0 安全响应链接线**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，16 条威胁响应剧本在真机上永远不会被自动触发）；
+> **P0 安全响应链接线已开工**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，剧本在真机上永远不会被自动触发）：
+> **步骤 1/3（`security.monitor_result` 载荷契约扁平化）2026-09-21 完成**，剩 步骤 2（L4 改走 `_dispatch`）与 步骤 3（定 `workflow.trigger` 归属）；
 > 之后是 **E5 官方分发渠道**；P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
 > 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
 > E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
@@ -1362,3 +1363,44 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 | `.pytest_cache/`、`**/__pycache__/` | 删除（可再生） |
 | `.sonar/`（2026-09-01 扫描残留） | 删除（重扫时重建） |
 | `memory/2026-09-08.md` | 删除（工作区早已删掉的遗留条目，本次随清理提交） |
+
+---
+
+## 2026-09-21 P0 步骤 1/3：`security.monitor_result` 载荷契约统一（扁平）
+
+> 来源：2026-09-20 只读审计的 P0「安全响应链接线」三条动作，本日**只做第 1 条（契约）**，不接线。
+> 完整缺口清单见 `TODO.md`「EventBus 通信缺口」。
+
+### 事实（复述审计）
+
+- 生产端 `SecMonitor._dispatch()` 发的是**嵌套**载荷 `{"threat": ThreatMatch, "original_event": SystemEvent}`；
+- 消费端 15 条内置剧本的条件是**扁平** `payload.get("threat_name") == "..."`（`threat_workflows.trigger_condition()`）；
+- 两边对不上 → 即使把 L4 接到 `_dispatch`，剧本依然不会触发（「接上也不响」）。
+
+### 改动
+
+| 位置 | 改动 |
+|---|---|
+| `src/trimum_core/sec_monitor.py` | 新增 `MONITOR_RESULT_CONTEXT_KEYS` + `monitor_result_payload(threat, event)`：载荷 = `ThreatMatch.model_dump()`（威胁本体）+ 触发上下文扁平拷贝（`agent_id` / `command` / `pid` / `sandbox` / `layer_hit`）+ `source_event_type`；`_dispatch()` 改用它，**不再嵌套** `threat` / `original_event` |
+| `tests/test_sec_monitor.py` | **新建（11 项）**：载荷形状 / 上下文透传与缺省 / JSON 可序列化 / `_dispatch` 发的就是这个载荷且仍交 SecExecutor / **每条内置剧本的条件都能被生产端载荷命中**（生产端↔消费端契约锁）/ 签名 `trigger_workflow` 与剧本名一一对应 |
+| `docs/SECURITY-DEFENSE-PLAN.md` §三 | 新增「`security.monitor_result` 载荷契约（扁平）」表：键 → 来源 → 缺省 |
+| `docs/security-agent-implementation-plan.md` §3 | 修掉当初造成漂移的样例（`payload={"threat": threat.dict(), ...}` → 扁平），并标注契约已冻结 |
+
+### 验证
+
+- `python -m pytest tests/test_sec_monitor.py -q` → **11 passed**
+- 端到端（测试内）：真命令 `echo 'x' >> /etc/ld.so.preload` → 真威胁 `ld_preload` → 发出的扁平载荷命中 `threat-prelink-check` 的条件，威胁同时交给 `SecExecutor`
+- 全量：`python -m pytest tests -q` → **1167 passed / 5 failed / 7 skipped**（+11 为本轮新增；5 项失败与既有基线逐条一致：
+  PATH 缺 `python.exe` + 沙箱写 `~/.trimum/learning/learning_data.json` 被拒 ×3 + LLM 断网）
+
+### 顺带发现（未修，记进 `TODO.md`）
+
+- 16 条内置剧本里 **3 条没有威胁源**：`threat-ransomware-response` / `threat-btrfs-snapshot-protect`（`threat_name: ransomware`）、
+  `threat-persistence-sweep`（`persistence`）—— `ThreatMatcher` 里没有这两个签名，它们的生产者应是**尚未开工**的 `BehaviorMonitor`；
+  另 1 条 `threat-audit-integrity-check` 的 trigger 是 `cron`（定时，不是事件）。
+- 12 个威胁签名 → 12 个剧本的映射是**一一对应**的（已加测试锁住）。
+
+### 剩余（P0 步骤 2 / 3）
+
+2. **L4 改走 `_dispatch`** —— `tool_gateway.py:716` 命中威胁时发事件 + 调 `SecExecutor`（顺带决定 `agent.executing` 死订阅的去留）。
+3. **定 `workflow.trigger` 归属** —— 现在一边扁平带 `workflow_name`（`sec_executor.py`），一边（旧文档）嵌套带 `threat`；不要两套并存。

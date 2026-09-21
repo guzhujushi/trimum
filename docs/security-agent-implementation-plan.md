@@ -198,7 +198,7 @@ class SecMonitor:
             type="security.monitor_result",
             severity=EventSeverity.WARNING,
             source="sec_monitor",
-            payload={"threat": threat.dict(), "original_event": event.dict()}
+            payload=monitor_result_payload(threat, event)
         ))
 
         # 调用 SecExecutor
@@ -208,6 +208,10 @@ class SecMonitor:
 ---
 
 ## 4. SecExecutor（新建 sec_executor.py）
+
+> ⚠️ 2026-09-21 修正：`security.monitor_result` 的载荷已冻结为**扁平**（`sec_monitor.monitor_result_payload()`）。
+> 本文件 §3 的样例原先写的是嵌套 `payload={"threat": threat.dict(), "original_event": event.dict()}`，
+> 那正是后来「生产端发嵌套、剧本条件读扁平」漂移的来源；契约见 `docs/SECURITY-DEFENSE-PLAN.md` §三。
 
 ### 4.1 SecBlocker
 
