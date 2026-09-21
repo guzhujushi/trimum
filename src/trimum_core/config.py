@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 import yaml
 
@@ -24,19 +24,105 @@ DEFAULT_CONTEXT_DB = DEFAULT_DATA_DIR / "context.db"
 DEFAULT_LOG_PATH = DEFAULT_DATA_DIR / "trimum.log"
 
 
+#: 显式指定 IPC socket 路径的环境变量。daemon 与客户端**共用一个名字**：
+#: trmd.service 里 `Environment=TRIMUM_SOCKET=/run/trimum/trimum.sock`，客户端
+#: `trimum_client.discover_socket()` 也读这个变量 —— 两端就不会各算各的。
+SOCKET_ENV = "TRIMUM_SOCKET"
+
+#: 系统级 daemon 的 socket 位置（unit 里 `RuntimeDirectory=trimum`）。
+SYSTEM_RUNTIME_SOCKET = Path("/run/trimum/trimum.sock")
+
+
+def socket_is_live(path: str | os.PathLike[str]) -> bool:
+    """`path` 上是否真有进程在 listen。
+
+    socket 文件存在 ≠ 有服务：进程被 SIGKILL 后会留下无人监听的 stale 文件。
+    实现只有一份（`ipc_handler.socket_is_live`），这里只做转发，方便配置侧
+    （CLI / 探测）复用同一口径。
+    """
+    from .ipc_handler import socket_is_live as probe
+
+    return probe(str(path))
+
+
+def socket_candidates() -> list[Path]:
+    """按优先级列出候选 socket 路径（daemon 与客户端共用同一份口径）。
+
+    顺序：`TRIMUM_SOCKET` → `XDG_RUNTIME_DIR` → `/run/trimum`（系统 daemon）
+    → `/run/user/<uid>`（登录会话）→ 数据目录。
+    """
+    candidates: list[Path] = []
+
+    env = os.environ.get(SOCKET_ENV)
+    if env:
+        candidates.append(Path(env))
+
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        candidates.append(Path(runtime_dir) / "trimum.sock")
+
+    candidates.append(SYSTEM_RUNTIME_SOCKET)
+
+    if hasattr(os, "getuid"):
+        candidates.append(Path("/run") / "user" / str(os.getuid()) / "trimum.sock")
+
+    candidates.append(DEFAULT_DATA_DIR / "trimum.sock")
+
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
+
+
+def discover_socket(extra: Iterable[str | os.PathLike[str]] = ()) -> Path:
+    """挑出实际可用的 socket 路径。
+
+    **先找真能连上的那条**，连不上才退回「文件存在」的那条：只按 `exists()` 挑
+    会选中 stale 文件（进程被 kill 后残留），客户端连上死 socket → 静默降级成
+    HTTP，而 HTTP 口同机谁都能连。`extra` 里的路径优先级最高（留给
+    `config.socket_path` 这类显式配置）。
+    """
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    for candidate in [*(Path(e) for e in extra), *socket_candidates()]:
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(candidate)
+
+    for candidate in candidates:
+        if socket_is_live(candidate):
+            return candidate
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 # IPC socket：跟随 XDG/uid，不再写死 uid=1000
 def default_socket_path(
     runtime_dir: Optional[str] = None, uid: Optional[int] = None
 ) -> Path:
     """默认 IPC socket 路径。
 
-    优先 `XDG_RUNTIME_DIR`（与客户端 `trimum_client.discover_socket()` 的查找
-    口径一致），否则退回 systemd 用户实例约定的 `/run/user/<uid>`；连 uid 都
-    拿不到（Windows）时退回数据目录。
+    优先级：`TRIMUM_SOCKET` → `XDG_RUNTIME_DIR` → systemd 用户实例约定的
+    `/run/user/<uid>`；连 uid 都拿不到（Windows）时退回数据目录。
+
+    `TRIMUM_SOCKET` 排最前：系统单元用它把路径钉死。服务启动时
+    `XDG_RUNTIME_DIR` 是空的，退回的 `/run/user/<uid>` 又是登录会话目录
+    —— 开机时还不存在、daemon 也没权限建，bind 直接 ENOENT，IPC 通道静默消失
+    （真机就是这么坏掉的）。
 
     原先写死 `/run/user/1000/trimum.sock`（假设 uid=1000），换 uid 就会与
     客户端对不上。
     """
+    env = os.environ.get(SOCKET_ENV)
+    if env:
+        return Path(env)
     if runtime_dir is None:
         runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
     if runtime_dir:

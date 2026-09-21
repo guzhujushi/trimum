@@ -362,15 +362,79 @@ sudo bash /tmp/check_sandbox_caps_root.sh             # 系统级能力核对（
 | 4 | daemon 保持非特权 vs 加特权 helper | **加特权 helper**，daemon 本身仍非特权 | §6.7 → S5-① |
 | 5 | 沙箱是否提到编码智能体之前 | **是** —— 本文即 E7 的前置片 | S1 已就绪（脚本 + 冒烟 + 回滚，等 `--apply`） |
 
-### 9.2 新增待裁决（这一轮实测冒出来的）
+### 9.2 上一轮待裁决 —— 已裁决（2026-09-21 本轮）
 
-1. **HTTP 端口要不要收口？** `127.0.0.1:8321` 目前对**同机任何用户**开放，而它背后是完整的工具执行 API（loopback 不做 uid 检查）。
-   选项：(a) **只保留 unix socket**，`core.host` 不再监听 TCP；(b) 保留但加共享令牌（`trm` 客户端自动带上）；
-   (c) 不动，接受现状（单用户机器风险低）。**建议 (a)**，但要先确认没有别的客户端依赖 HTTP（当前 CLI 两路都支持，会按 socket 优先）。
-2. **`@debug` 的取舍**：默认挡 `ptrace` / `perf_event_open` / `pidfd_getfd`，代价是 daemon 派生的 `gdb` / `strace` / `perf` 会失败。
-   若认为「调试器是常用工具」，就带 `--allow-debug` 重跑 S1 脚本（开关已留，实测该变体下 `ptrace` 恢复可用、`bpf` 仍被挡）。
-3. **`ReadOnlyPaths=/opt/trimum` 是否保留**：当前没有任何「运行时写部署树」的行为（实测只有 `~/.local/share/trimum/trimum.log`
-   与 `context.db` 在写），但将来若有自更新需求要回退这一条。
+| # | 问题 | 裁决 |
+|---|---|---|
+| 1 | HTTP 端口要不要收口（§9.2 原第 1 条） | **只留 unix socket**（选项 (a)）。切割前必须先补的 RPC 面见 §9.3.5。 |
+| 2 | `@debug` 取舍 | **放行**：`ptrace` / `perf_event_open` / `pidfd_getfd` 可用（`gdb` / `strace` / `perf` 才能跑），`bpf` 仍在黑名单里。脚本默认 `ALLOW_DEBUG=1`，`--deny-debug` 可关。 |
+| 3 | `ReadOnlyPaths=/opt/trimum` 保留？ | **不保留**。脚本默认 `READONLY_DEPLOY=0`，`--readonly-deploy-tree` 可开。 |
+
+### 9.3 socket 收口：先把「socket 为什么老坏」查清楚（2026-09-21 实做）
+
+> 用户口径：*「刚刚回滚了，IPC socket 不存在，之前用 Socket 跑的时候一直出 bug 才暂时用 http 代替，现在改成 Socket 吧，你先看看吧」*
+> 本节就是「先看看」的产出：先把历史 bug 逐条坐实，再定改法。
+
+#### 9.3.1 现场（真机一手，全部只读）
+
+| 观测 | 事实 |
+|---|---|
+| 现役 daemon（pid 16989，20:50:02 起） | 绑 `/run/user/1000/trimum.sock`：`ss -xl` 里有 `u_str LISTEN`，connect 探测成功并回 `{"status":"ok","version":"0.5.0"}` |
+| `/run/trimum/` | **空目录**（`/run/trimum/trimum.sock` 不存在）—— 用户看到的「IPC socket 不存在」就是这条 |
+| 为什么是空的 | 加固那两次（20:40:10 / 20:50:01）socket **确实绑上了** `/run/trimum/trimum.sock`（daemon 日志有 `unix_socket_listening path=/run/trimum/trimum.sock`）；回滚撤掉 drop-in 后 daemon 回到 `/run/user/1000/...`，而 `/run/trimum` 这个目录是 `RuntimeDirectory` 建的、回滚后没人回收，只剩空壳 |
+| `trm status` | `source: rpc` / `endpoint: 127.0.0.1:8321 (socket=/run/user/1000/trimum.sock)`：**客户端补丁已经在部署树里**（`/opt/trimum/src/trimum_core/trimum_client.py` 含 `SYSTEM_RUNTIME_SOCKET`，sha256 `3a3caba4…`）；但开发树 `/home/guzhujushi/trimum/src` 那份**还是旧的**（无该符号） |
+
+#### 9.3.2 历史 bug 坐实：三条，都能在日志里指到行
+
+1. **父目录不存在 → bind `ENOENT` → 静默咽掉**（头号嫌疑，已坐实）
+   `~/.local/share/trimum/trimum.log` 里有一行 `{"error": "[Errno 2] No such file or directory", "event": "unix_socket_start_failed", "level": "warning"}`。
+   `ipc_handler._start_unix_socket()` 捕获后**只 `warning` 一声就 `return`**，daemon 照样 `active`、HTTP 照样服务 ——
+   「socket 到底起没起来」这件事对 systemd 和对人都不可见。系统服务启动时 `XDG_RUNTIME_DIR` 是空的，退回的
+   `/run/user/<uid>` 属于登录会话：开机时还不存在，daemon 又没权限建（`/run` 只 root 可写）。
+2. **双实例互踩**：日志里有 `{"event": "unix_socket_in_use", "detail": "已有进程在监听，本实例拒绝抢占"}`；journal 里 9/20 那一刻的
+   `restart counter` 已经涨到 **2134**，每条都是 `trmd: 启动中止 —— TCP 127.0.0.1:8321 已被占用` → `exit 3` → `Restart=always` 再来一次。
+   **socket 冲突是「退让」、TCP 冲突是「退出重启」**，两种语义混在一起，观测上就成了一锅粥。
+3. **客户端按「文件存在」挑，不按「能连通」挑**：`discover_socket()` 原来只做 `exists()`。进程被 SIGKILL 后残留的 stale
+   socket 文件会被选中 → 连不上 → `_utils.get_daemon_status()` 静默退回 HTTP（`source: http`）。
+   **这就是「切成 socket 了、看着还在走 HTTP」的观感来源。**
+
+#### 9.3.3 两次 apply（20:40 / 20:50）为什么失败
+
+**不是加固本身的问题，是冒烟抢跑。** 证据链：
+
+- `/tmp/.trm-status.out`（root 属主，20:50）内容 = `[OFFLINE] daemon is not running` —— 冒烟里那次 `trm status` 时，**RPC 与 HTTP 两条路都不通**；
+- 而同一时刻 daemon 已经绑上 socket（daemon 日志 `unix_socket_listening /run/trimum/trimum.sock`）；
+- journal：20:50:01 起、**20:50:02 就被回滚停掉**，只隔约 1 秒 —— 只有「抢在 daemon 就绪之前断言」才会快到这一步。
+
+`smoke()` 原来只等 `systemctl is-active`（`Type=simple` 下进程一起来就算 active），而 uvicorn 还要几百毫秒才 bind、IPC socket 更晚才建出来。
+**断言跑在就绪之前 → `[FAIL] IPC socket 不存在` → 自动回滚**，用户看到的就是这一行。
+
+修法：冒烟加 `wait_ready()`（60 × 0.5s 轮询「socket 真能连上」），FAIL 时把现场（`systemctl status` + journal + daemon 日志片段）
+打进 `$BK/smoke.log`。**上一轮两次 apply 失败后证据全丢，这次不许再丢。**
+
+#### 9.3.4 本轮改动（代码 + 脚本）
+
+| 文件 | 改动 | 治的是 |
+|---|---|---|
+| `config.py` | 新增 `SOCKET_ENV="TRIMUM_SOCKET"` / `SYSTEM_RUNTIME_SOCKET` / `socket_is_live()` / `socket_candidates()` / `discover_socket(extra=…)`；`default_socket_path()` 认 `TRIMUM_SOCKET` | 两端共用一份路径契约（§9.3.2-1、-2） |
+| `trimum_client.py` | 候选表加 `TRIMUM_SOCKET`；`discover_socket()` 改成**先挑真能连上的**，再退回「文件存在」 | §9.3.2-3 |
+| `ipc_handler.py` | bind 前 `makedirs(parent)`；失败从 `warning` 升级为 `logger.error` + **stderr**（`trmd: IPC socket 起不来 —— <path>（<errno>）`）+ 记 `socket_start_error` | §9.3.2-1 |
+| `api_server.py` | `await ipc.start()`（原来 `create_task`，失败被后台任务吞掉），失败再补一条 `ipc_socket_unavailable` error | §9.3.2-1、-2 |
+| `cli/_utils.py` | `rpc_call()` 走 `discover_socket(extra=[config.socket_path])`，不再拿 `config.socket_path` 硬连 | §9.3.2-3 |
+| `scripts/harden_trmd_unit.sh` | 单元改用 `Environment=TRIMUM_SOCKET=/run/trimum/trimum.sock`（**不再劫持 `XDG_RUNTIME_DIR`**）；加 `wait_ready()`；FAIL 留证到 `$BK/smoke.log`；默认 `ALLOW_DEBUG=1`、默认不加 `ReadOnlyPaths` | 本轮裁决 2 / 3 + §9.3.3 |
+
+测试：`tests/test_socket_path_consistency.py` **11 → 20 项**（新增：env 契约、两端候选表逐条一致、stale 文件被跳过、
+bind 失败不再静默、缺父目录自动创建）。本地 `18 passed / 2 skipped`（两项为 Windows 无 `AF_UNIX` 的 skip）。
+
+#### 9.3.5 剩余待办：把 TCP 收掉（裁决 1 的落地顺序）
+
+`core.host` 不再监听 TCP **之前**，必须先补齐 socket 这一侧的覆盖面，否则 CLI 会瘸：
+
+1. **`health` 返回 `pid` / `uptime`**：`trm status` 现在的 pid 靠 `psutil` 扫 `127.0.0.1:8321` 的监听者（`status.py::_find_daemon_pid`），TCP 一关就没得扫。
+2. **补 RPC 方法**：`/api/security/tokens`、`/api/security/learning`、`/api/security/learn` —— `cli/commands/security.py` 目前 **HTTP-only**，是关掉 TCP 后唯一会直接坏的命令面（`/api/workflows*` 没有 CLI 消费者）。
+3. **加开关 `core.http_enabled`**（默认先 `true`）：切 `false` 时 uvicorn 不监听，preflight 也只查 socket。
+4. **socket bind 失败在「无 HTTP」时升级为致命**：否则关掉 TCP 又没有 socket = daemon 什么都没提供，却仍然报 `active`。
+5. `trm agent` 已经 RPC 优先（`agent.py::_remote_agent_call`），不用改；`/api/events/stream`（SSE）没有 CLI 消费者。
 
 
 | 材料 | 位置 |
@@ -387,7 +451,9 @@ sudo bash /tmp/check_sandbox_caps_root.sh             # 系统级能力核对（
 
 ---
 
-> 本文是**调研 + 设计 + S1 脚本**。代码侧只动了一处，且是为 S1 服务的：`trimum_client.socket_candidates()` 增加 `/run/trimum/trimum.sock`（含测试），
-> 否则 daemon 绑了 socket 客户端也认不到。**未安装任何包、未重启任何服务、未改动运行中的单元**。
-> 下一步：**S1 落地**（`sudo bash /tmp/harden_trmd_unit.sh --apply`，冒烟失败会自动回滚），然后进 S2（施加点收口 + Landlock）。
-> 裁决记录见 §9.1；新冒出来的三条待裁决见 §9.2。
+> 本轮（2026-09-21 第二轮）在**代码侧**动了 socket 层：路径契约收敛到 `TRIMUM_SOCKET`、客户端按「能连通」挑、
+> bind 失败不再静默、`await ipc.start()`（见 §9.3.4）。**仍未安装任何包、未改动运行中的单元**；
+> 两次 `--apply` 试装都因冒烟抢跑被自动回滚（复盘与修法见 §9.3.3），`harden_trmd_unit.sh` 已随之改版。
+> 下一步：`sudo bash /tmp/sync_opt_socket_patch.sh`（先让部署树用上新代码）→ `sudo bash /tmp/harden_trmd_unit.sh --apply`
+> （默认放行 `@debug`、不加只读、冒烟先等就绪），过了再按 §9.3.5 收掉 TCP。
+> 裁决记录见 §9.1 / §9.2。

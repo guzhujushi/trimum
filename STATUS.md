@@ -16,6 +16,33 @@
 
 ---
 
+## 2026-09-21 S1 试装复盘 + socket 收口（✅ 代码与脚本已改；生产单元仍原样）
+
+> 用户口径：*「刚刚回滚了，IPC socket 不存在，之前用 Socket 跑的时候一直出 bug 才暂时用 http 代替，现在改成 Socket 吧，你先看看吧」*
+> —— 「先看看」的结论与落地都在 `docs/SANDBOX-PLAN.md` §9.3。
+
+**两次 `--apply`（20:40 / 20:50）都失败并自动回滚；真因不是加固，是冒烟抢跑。**
+`smoke()` 只等 `systemctl is-active`，而 uvicorn 还要几百毫秒才 bind、IPC socket 更晚才建；断言跑在就绪之前 →
+`[FAIL] IPC socket 不存在` → 回滚。证据：`/tmp/.trm-status.out`（root，20:50）= `[OFFLINE] daemon is not running`
+（那一刻 RPC 与 HTTP 都不通），而同一时刻 daemon 日志是 `unix_socket_listening /run/trimum/trimum.sock`；
+journal 显示 20:50:01 起、20:50:02 停，只隔 1 秒。
+
+**「IPC socket 不存在」是回滚后的正常现象**：drop-in 撤掉后 daemon 回到 `/run/user/1000/trimum.sock`
+（现在是活的：connect 探测返回 `{"status":"ok","version":"0.5.0"}`），`/run/trimum/` 只剩一个 `RuntimeDirectory` 建的空目录。
+
+**socket 历史 bug 坐实三条**（daemon 日志逐行可指）：① 父目录不存在 → bind `ENOENT` → 只 `warning` 一声静默咽掉（daemon 仍报 `active`）；
+② 双实例互踩（`unix_socket_in_use` + journal 的 `restart counter` 涨到 **2134**，全是 `TCP 8321 已被占用`）；
+③ 客户端按 `exists()` 挑候选 → 选中 SIGKILL 残留的 stale 文件 → 静默退回 HTTP。
+
+**已改**：`config.py`（`TRIMUM_SOCKET` 契约 + `socket_candidates()` / `discover_socket()`）、`trimum_client.py`（按「能连通」挑）、
+`ipc_handler.py`（缺父目录自动建；bind 失败 → `logger.error` + stderr + `socket_start_error`）、`api_server.py`（`await ipc.start()`，
+不再让 `create_task` 吞失败）、`cli/_utils.py`（`rpc_call` 走候选表）、`scripts/harden_trmd_unit.sh`（`TRIMUM_SOCKET` 取代
+`XDG_RUNTIME_DIR` 劫持 + 就绪门 + 失败留证 + 默认 `@debug` / 默认不加只读）。
+测试：`tests/test_socket_path_consistency.py` **11 → 20**（本地 18 passed / 2 skipped）。
+
+**未做**：TCP 收口（裁决 1）要先补 RPC 面（`health` 带 pid、`security.tokens/learning/learn`），顺序见 §9.3.5；
+生产单元仍未加固；**未安装任何包**。
+
 ## 2026-09-21 编码智能体调研：ECC 适合吗？（✅ 已完成，**只调研不改代码**）
 
 > 用户提问：① ECC 如何做成一个 coding Agent；② 参考 `~/.trimum/agents/` 别的 Agent 的文件格式；③ 还有没有其他可直接复用的开源项目；④ **先想 ECC 适合吗**。

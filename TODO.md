@@ -6,13 +6,14 @@
 
 ---
 
-## 📦 交接（2026-09-21，E7 设计 + 沙箱前置片 + **六条裁决**之后）
+## 📦 交接（2026-09-21，第三轮：S1 试装复盘 + **socket 收口**）
 
 ### 一句话现状
 
-**P0 安全响应链、E5 分发渠道、穿插三项都已收口**；沙箱成为 E7 的前置片，**六条裁决全部已定**（见下表）。
-S1（daemon 系统级加固）的脚本已就绪并做完真机只读验证，**生产 daemon 仍是原样**（未 apply）；
-下一步是 `sudo bash /tmp/harden_trmd_unit.sh --apply`，然后 S2（施加点收口 + Landlock）。
+**P0 安全响应链、E5 分发渠道、穿插三项都已收口**；沙箱是 E7 的前置片，**六条裁决 + 本轮三条新裁决全部已定**。
+S1 试装过两次，**两次都被冒烟抢跑误判回滚**（真因是断言跑在 daemon 就绪之前，不是加固有问题），复盘见
+`docs/SANDBOX-PLAN.md` §9.3.3；socket 层已按「先看看」的结论改完代码与脚本（§9.3.4），**生产单元仍是零加固原样**。
+下一步：`sudo bash /tmp/sync_opt_socket_patch.sh` → `sudo bash /tmp/harden_trmd_unit.sh --apply`，过了再按 §9.3.5 收掉 TCP。
 
 ### 本次（2026-09-21）完成
 
@@ -23,8 +24,9 @@ S1（daemon 系统级加固）的脚本已就绪并做完真机只读验证，**
 | `f51b86d` | 穿插项步骤 C：`WorkflowListener` 接线（`submit()` 当生产者 + daemon 装配 + `trm workflow submit`，命令面 77 → 78）+ 修两个真问题（日志器用错 / `ExecuteRequest` 字段名全错）+ 确认缺位由「放行」改「拒绝」 |
 | `36fedb7` | E7 规格与设计：`docs/CODING-AGENT-PLAN.md` + 生态战略 §5 的 E7 口径修订（原「身份与多用户」已由 E5 第三片 / E6 / 多用户边界文档落地） |
 | `69f56b5` / `adb0ce3` | 两次提交号回填（步骤 C、E7） |
-| 待提交 | **沙箱前置片**：`docs/SANDBOX-PLAN.md`（主流做法 + 真机实测 + 设计/分片）+ `scripts/setup_ubuntu_toolchain.sh`（默认 dry-run）+ `scripts/check_sandbox_caps{,_root}.sh`；脚本已传真机 `/tmp/`（sha256 与本地逐字一致） |
-| 待提交 | **S1 落地**：`scripts/harden_trmd_unit.sh`（drop-in + 冒烟 + 失败自动回滚）+ 六条裁决落档（`docs/SANDBOX-PLAN.md` §6.6/§6.7/§9、`docs/CODING-AGENT-PLAN.md` §8.1）+ `trimum_client.socket_candidates()` 加 `/run/trimum/trimum.sock`（含 3 个测试） |
+| `3d7e63b` | fix(core)：客户端候选表补 `/run/trimum/trimum.sock`（S1 让 IPC socket 真的被用上）+ 3 项测试 |
+| `ee69508` | docs+scripts：沙箱前置片（`docs/SANDBOX-PLAN.md` 十节 + 5 个脚本 + 六条裁决落档） |
+| 本轮 | **socket 收口**：路径契约收敛到 `TRIMUM_SOCKET`、客户端按「能连通」挑、bind 失败不再静默、`await ipc.start()`、S1 脚本改版（默认 `@debug` / 不加只读 / 就绪门 / 失败留证）+ 测试 11 → 20 |
 
 细节：`STATUS.md`「2026-09-21 穿插项步骤 C」「2026-09-21 E7 规格与设计」「2026-09-21 沙箱前置片」「2026-09-21 S1：daemon 系统级加固」四节；
 下方「🔧 穿插项实施计划」与「🌐 生态战略」E7 项。
@@ -35,21 +37,24 @@ S1（daemon 系统级加固）的脚本已就绪并做完真机只读验证，**
 ③ Docker 档 → **Phase 5**；④ daemon → **保持非特权 + 加特权 helper**；⑤ 沙箱 → **提到 E7 之前**；
 ⑥ E7 首发 → **默认出差异 + 跑只读验证**，写盘要确认，`--yes` 才自动落盘。另：入口定 **`trm exec --code`**，`skill.yaml` 与 `SKILL.md` **不合并**。
 
-**S1 现状**：`scripts/harden_trmd_unit.sh` 已写完并做完真机**只读**验证（dry-run / `--stage` 渲染 / 黑名单拦截效果 / `bash -n`）；
-**生产 daemon 仍是零加固原样**（未 apply，因为 `sudo` 要密码）。口径见 `docs/SANDBOX-PLAN.md` §6.6，helper 设计见 §6.7。
+**S1 现状**：`scripts/harden_trmd_unit.sh` 已按本轮裁决改版（**默认放行 `@debug`**、**默认不加 `ReadOnlyPaths`**、
+单元改用 `Environment=TRIMUM_SOCKET=/run/trimum/trimum.sock`、冒烟先等 socket 真能连上、FAIL 把现场写进 `$BK/smoke.log`）。
+**生产 daemon 仍是零加固原样**（两次 `--apply` 都因冒烟抢跑被自动回滚，复盘见 `docs/SANDBOX-PLAN.md` §9.3.3）。口径见 §6.6，helper 设计见 §6.7。
 
-**你要跑的（一条即可，冒烟失败会自动回滚）**：
+**你要跑的（两条，按顺序；apply 失败会自动回滚）**：
 
 ```bash
-sudo bash /tmp/harden_trmd_unit.sh            # 先看现状与将写入的 drop-in
-sudo bash /tmp/harden_trmd_unit.sh --apply    # 安装 + 重启 + 冒烟（失败自动回滚）
-sudo bash /tmp/harden_trmd_unit.sh --verify   # 事后复查
-sudo bash /tmp/check_sandbox_caps_root.sh     # 系统级能力核对（顺带回答 helper 那条）
+sudo bash /tmp/sync_opt_socket_patch.sh        # ① 把 socket 补丁装进 /opt/trimum/src（逐文件备份 + 可回滚）
+sudo bash /tmp/harden_trmd_unit.sh             # ② 先看现状与将写入的 drop-in
+sudo bash /tmp/harden_trmd_unit.sh --apply     #    安装 + 重启 + 冒烟（失败自动回滚，证据留在备份目录）
+sudo bash /tmp/harden_trmd_unit.sh --verify    #    事后复查
+sudo bash /tmp/check_sandbox_caps_root.sh      #    系统级能力核对（顺带回答 helper 那条）
 ```
 
 **之后**：S2 施加点收口（新增 `sandbox_exec`，6 个 spawn 点全改走它，Landlock + fail-closed）→ S3 seccomp 三档 → S4 子 Agent systemd transient → S5 可选档（helper / Docker / bwrap profile）。
+**S1 过了再收 TCP**（`docs/SANDBOX-PLAN.md` §9.3.5 的四步：`health` 带 pid → 补 `security.*` 三个 RPC → `core.http_enabled=false` → socket 失败升级为致命）。
 
-**新增待裁决三条**（`docs/SANDBOX-PLAN.md` §9.2）：HTTP 端口是否只留 unix socket（建议是）；`@debug` 是否放行（默认挡 ptrace，`--allow-debug` 可回退）；`ReadOnlyPaths=/opt/trimum` 是否保留。
+**本轮三条裁决（全部已定）**：① HTTP **只留 unix socket**；② `@debug` **放行**（`bpf` 仍挡）；③ `ReadOnlyPaths=/opt/trimum` **不保留**。
 
 ### E7 未决两项（不阻塞开工）
 

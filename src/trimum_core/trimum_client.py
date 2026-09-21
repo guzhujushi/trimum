@@ -30,42 +30,76 @@ from typing import Any
 #: 系统级 daemon 的 socket 位置（trmd.service 的 RuntimeDirectory=trimum）。
 SYSTEM_RUNTIME_SOCKET = Path("/run/trimum/trimum.sock")
 
+#: 显式指定 socket 路径的环境变量（与 daemon 侧 `config.SOCKET_ENV` 同名，
+#: 单元里 `Environment=TRIMUM_SOCKET=...` 一处生效、两端都认）。
+SOCKET_ENV = "TRIMUM_SOCKET"
+
 
 def socket_candidates() -> list[Path]:
-    """按优先级列出候选 socket 路径。
+    """按优先级列出候选 socket 路径（与 daemon 侧口径逐条对齐）。
 
-    顺序与 daemon 端 `trimum_core.config.default_socket_path()` 保持一致
-    （daemon 侧那三个分支），**多一条系统级 daemon 的位置**：系统单元把
-    `XDG_RUNTIME_DIR` 指向 `/run/trimum`，所以它的 socket 不在用户的
-    `/run/user/<uid>` 里 —— 客户端必须也认这条，否则两端对不上。
-    顺序：`XDG_RUNTIME_DIR` → `/run/trimum` → `/run/user/<uid>` → 数据目录。
+    顺序：`TRIMUM_SOCKET` → `XDG_RUNTIME_DIR` → `/run/trimum`（系统 daemon）
+    → `/run/user/<uid>`（登录会话）→ 数据目录。daemon 那边是
+    `trimum_core.config.socket_candidates()`，两边必须一致 ——
+    不一致就是 daemon 绑 A、客户端连 B、然后静默降级成 HTTP。
     """
     candidates: list[Path] = []
+
+    env = os.environ.get(SOCKET_ENV)
+    if env:
+        candidates.append(Path(env))
 
     xdg = os.environ.get("XDG_RUNTIME_DIR")
     if xdg:
         candidates.append(Path(xdg) / "trimum.sock")
 
-    # 系统级 daemon（trmd.service）的单元里有 RuntimeDirectory=trimum +
-    # XDG_RUNTIME_DIR=/run/trimum，socket 落在 /run/trimum/trimum.sock。
-    # 客户端的 XDG_RUNTIME_DIR 是登录会话的 /run/user/<uid>，两者不同名，
-    # 不把这条列进来就会永远对不上（daemon 绑了 A、客户端去连 B、静默降级成 HTTP）。
+    # 系统级 daemon（trmd.service）的单元里有 RuntimeDirectory=trimum，
+    # socket 落在 /run/trimum/trimum.sock；客户端的 XDG_RUNTIME_DIR 是登录
+    # 会话的 /run/user/<uid>，两者不同名。
     candidates.append(SYSTEM_RUNTIME_SOCKET)
 
     if hasattr(os, "getuid"):
         candidates.append(Path("/run") / "user" / str(os.getuid()) / "trimum.sock")
 
-    candidates.append(Path.home() / ".local" / "share" / "trimum" / "trimum.sock")
+    data_home = os.environ.get("XDG_DATA_HOME") or str(
+        Path.home() / ".local" / "share"
+    )
+    candidates.append(Path(data_home) / "trimum" / "trimum.sock")
     return candidates
+
+
+def _is_live(path: Path) -> bool:
+    """连得上才算有服务（socket 文件存在 ≠ 有进程在 listen）。
+
+    SIGKILL 会留下无人监听的 stale 文件；只按 exists() 挑会选中它，客户端连不上
+    就降级成 HTTP。Windows 无 AF_UNIX，恒 False。
+    """
+    if os.name == "nt":
+        return False
+
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        probe.settimeout(0.5)
+        probe.connect(str(path))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
 
 
 def discover_socket() -> str:
     """Find the trimum socket path from env or default locations."""
-    env = os.environ.get("TRIMUM_SOCKET")
+    env = os.environ.get(SOCKET_ENV)
     if env:
         return env
 
     candidates = socket_candidates()
+    # 先挑**真能连上**的那条，再退回「文件存在」的那条：真机上就是被 stale
+    # 文件坑了 —— 客户端以为在走 RPC，其实连的是死 socket，然后静默走 HTTP。
+    for candidate in candidates:
+        if _is_live(candidate):
+            return str(candidate)
     for candidate in candidates:
         if candidate.exists():
             return str(candidate)

@@ -30,6 +30,7 @@ import asyncio
 import json
 import os
 import socket as stdlib_socket
+import sys
 from typing import Any, Callable, Coroutine
 
 from pydantic import BaseModel
@@ -152,6 +153,9 @@ class IpcHandler:
 
         # 启动时发现 socket 已被别的实例监听 → True（本实例退让，不抢）
         self.socket_held_by_other = False
+        # bind 失败的原因（成功为 None）。原先只 warning 一声就咽了，于是
+        # 「daemon 报 active、IPC 通道其实不存在」这件事没人知道。
+        self.socket_start_error: str | None = None
         self._server: stdlib_socket.socket | None = None
         self._tcp_server: stdlib_socket.socket | None = None
 
@@ -185,6 +189,11 @@ class IpcHandler:
             os.unlink(path)
 
         try:
+            parent = os.path.dirname(path)
+            if parent:
+                # 父目录不存在时 bind() 直接 ENOENT（真机踩过：/run/trimum 没建出来
+                # 就静默没有 socket）。能建就建，建不了交给下面的 except 喊出来。
+                os.makedirs(parent, exist_ok=True)
             sock = stdlib_socket.socket(
                 stdlib_socket.AF_UNIX, stdlib_socket.SOCK_STREAM
             )
@@ -197,7 +206,16 @@ class IpcHandler:
             self._server = sock
             logger.info("unix_socket_listening", path=path)
         except Exception as e:
-            logger.warning("unix_socket_start_failed", error=str(e))
+            # 这里绝不能再是「warning 一声就完」：socket 起不来 = IPC 整条通道不存在，
+            # 而结构化日志落在 JSON 文件里、systemd 只看得到 active —— 只能靠 stderr
+            # 冒到 journal，人才会看见。
+            self.socket_start_error = str(e)
+            logger.error("unix_socket_start_failed", path=path, error=str(e))
+            print(
+                f"trmd: IPC socket 起不来 —— {path}（{e}）；"
+                "客户端会静默降级成 HTTP",
+                file=sys.stderr,
+            )
             return
 
         loop = asyncio.get_event_loop()

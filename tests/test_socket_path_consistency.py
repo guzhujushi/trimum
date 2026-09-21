@@ -5,13 +5,17 @@ uid=1000），而客户端 `trimum_client.discover_socket()` 走 `XDG_RUNTIME_DI
 换个 uid 两端就对不上（daemon 绑 A、客户端连 B）。
 """
 
+import asyncio
 import os
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from trimum_core import config as config_module
+from trimum_core import trimum_client as client_module
 from trimum_core.config import DEFAULT_CONFIG, Config, default_socket_path
 from trimum_core.trimum_client import (
     SYSTEM_RUNTIME_SOCKET,
@@ -137,3 +141,128 @@ class TestSystemRuntimeDirSocket:
         monkeypatch.setattr(Path, "exists", fake_exists)
 
         assert Path(discover_socket()) == session_socket
+
+
+class TestSocketEnvContract:
+    """`TRIMUM_SOCKET` 是两端共用的路径契约：单元里钉死，daemon 与客户端都认。"""
+
+    def test_env_wins_for_daemon(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TRIMUM_SOCKET", "/run/trimum/trimum.sock")
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+        assert default_socket_path() == Path("/run/trimum/trimum.sock")
+        assert config_module.socket_candidates()[0] == Path("/run/trimum/trimum.sock")
+
+    def test_env_wins_for_client(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TRIMUM_SOCKET", "/run/trimum/trimum.sock")
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+        assert discover_socket() == "/run/trimum/trimum.sock"
+        assert client_module.socket_candidates()[0] == Path("/run/trimum/trimum.sock")
+
+
+class TestCandidateParity:
+    """daemon 与客户端各算一份候选表，顺序必须逐条一致。
+
+    不一致就是「daemon 绑 A、客户端连 B」——真机上表现为客户端静默走 HTTP。
+    """
+
+    def test_lists_agree(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.delenv("TRIMUM_SOCKET", raising=False)
+
+        assert [str(p) for p in config_module.socket_candidates()] == [
+            str(p) for p in socket_candidates()
+        ]
+
+    def test_lists_agree_with_env(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TRIMUM_SOCKET", "/tmp/契约.sock")
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+        assert [str(p) for p in config_module.socket_candidates()] == [
+            str(p) for p in socket_candidates()
+        ]
+
+
+class TestLiveProbeDiscovery:
+    """只按 exists() 挑会选中 stale 文件（进程被 SIGKILL 后残留）→ 连不上 → 降级 HTTP。"""
+
+    def test_daemon_skips_stale_session_socket(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("TRIMUM_SOCKET", raising=False)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        (tmp_path / "trimum.sock").write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(
+            config_module,
+            "socket_is_live",
+            lambda path: str(path) == str(SYSTEM_RUNTIME_SOCKET),
+        )
+
+        assert config_module.discover_socket() == SYSTEM_RUNTIME_SOCKET
+
+    def test_client_skips_stale_session_socket(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("TRIMUM_SOCKET", raising=False)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        (tmp_path / "trimum.sock").write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(
+            client_module,
+            "_is_live",
+            lambda path: str(path) == str(SYSTEM_RUNTIME_SOCKET),
+        )
+
+        assert Path(discover_socket()) == SYSTEM_RUNTIME_SOCKET
+
+    def test_client_falls_back_to_existing_when_nothing_is_live(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.delenv("TRIMUM_SOCKET", raising=False)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        session_socket = tmp_path / "trimum.sock"
+        session_socket.write_text("", encoding="utf-8")
+        monkeypatch.setattr(client_module, "_is_live", lambda path: False)
+
+        assert Path(discover_socket()) == session_socket
+
+
+class TestIpcBindRobustness:
+    """真机踩过：父目录不存在 → bind ENOENT → 只 warning 一声，IPC 通道静默消失。"""
+
+    def test_missing_parent_dir_is_created(self, tmp_path):
+        if os.name == "nt":
+            pytest.skip("AF_UNIX 在 Windows 上不支持")
+        from trimum_core.ipc_handler import IpcHandler
+
+        target = tmp_path / "nest" / "deep" / "trimum.sock"
+        ipc = IpcHandler(socket_path=str(target))
+
+        async def scenario():
+            await ipc.start()
+            try:
+                assert ipc.socket_start_error is None
+                assert ipc._server is not None
+                assert target.exists()
+            finally:
+                await ipc.stop()
+            await asyncio.sleep(0)
+
+        asyncio.run(scenario())
+
+        assert not target.exists(), "stop() 要把 socket 文件收走"
+
+    def test_bind_failure_is_recorded_not_swallowed(self, tmp_path):
+        if os.name == "nt":
+            pytest.skip("AF_UNIX 在 Windows 上不支持")
+        from trimum_core.ipc_handler import IpcHandler
+
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a dir", encoding="utf-8")
+        ipc = IpcHandler(socket_path=str(blocker / "trimum.sock"))
+
+        async def scenario():
+            await ipc.start()
+
+        asyncio.run(scenario())
+
+        assert ipc.socket_start_error, "bind 失败必须留下原因，不能再静默"
+        assert ipc._server is None

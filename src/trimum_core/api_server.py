@@ -515,7 +515,16 @@ def create_app(config: Config) -> FastAPI:
         )
         _register_ipc_routes(ipc, state)
         state.ipc = ipc
-        asyncio.create_task(ipc.start())
+        # 必须 await：create_task 会把「socket 起不来」这一整类失败吞进后台任务，
+        # daemon 照样报 active，而 IPC 通道其实不存在（真机上就是这么坏的）。
+        await ipc.start()
+        if ipc.socket_start_error:
+            logger.error(
+                "ipc_socket_unavailable",
+                socket=config.socket_path,
+                error=ipc.socket_start_error,
+                detail="IPC 通道不可用，客户端只剩 HTTP 可走（同机谁都能连）",
+            )
 
         # Start WorkflowEventDriver (bridge between Engine and Agent)
         state.driver = WorkflowEventDriver(

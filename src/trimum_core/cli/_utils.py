@@ -161,9 +161,14 @@ def rpc_call(
 ) -> Any | None:
     """Call a JSON-RPC method on the daemon socket, returning ``None`` offline."""
     try:
+        from trimum_core.config import discover_socket
         from trimum_core.ipc_handler import RpcClient
 
-        client = RpcClient(config.socket_path, timeout=timeout)
+        # 路径要按「候选表 + 存活探测」挑，不能直接拿 config.socket_path：客户端
+        # 在登录会话里，daemon 可能是系统服务（socket 在 /run/trimum），那时
+        # config 里算出来的那条连不上 —— 然后静默降级成 HTTP。
+        # config.socket_path（YAML / TRIMUM_SOCKET 的显式配置）仍然最优先。
+        client = RpcClient(str(discover_socket(extra=[config.socket_path])), timeout=timeout)
         return client.call(method, params)
     except Exception:
         return None

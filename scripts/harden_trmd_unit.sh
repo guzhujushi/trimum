@@ -7,8 +7,8 @@
 #   sudo bash /tmp/harden_trmd_unit.sh --verify              # 只跑冒烟检查（apply 之后复查）
 #   sudo bash /tmp/harden_trmd_unit.sh --rollback            # 还原最近一次备份
 #   sudo bash /tmp/harden_trmd_unit.sh --stage /tmp/x.conf   # 只生成 drop-in 到文件（不装）
-#   --no-readonly-deploy-tree   不给 /opt/trimum 加只读（若 daemon 要往部署树写东西）
-#   --allow-debug               不挡 @debug（放开 ptrace/perf_event_open，gdb/strace/perf 才能跑）
+#   --readonly-deploy-tree      给 /opt/trimum 加只读（默认**不加**）
+#   --deny-debug                挡回 @debug（默认**放行**：ptrace/perf_event_open 可用，gdb/strace/perf 才能跑）
 #   --unit <名字>               默认 trmd
 #
 # 设计口径（逐条理由在生成的 drop-in 注释里）：
@@ -22,8 +22,8 @@ set -uo pipefail
 UNIT=trmd
 MODE=dryrun
 STAGE_FILE=""
-READONLY_DEPLOY=1
-ALLOW_DEBUG=0
+READONLY_DEPLOY=0
+ALLOW_DEBUG=1
 DEPLOY_ROOT=/opt/trimum
 TRM_BIN=/opt/trimum/venv/bin/trm
 RUNTIME_NAME=trimum
@@ -33,12 +33,17 @@ DROPIN_DIR=""
 DROPIN=""
 
 PASS=0; WARN=0; FAIL=0
-ok()   { printf '  [PASS] %s\n' "$1"; PASS=$((PASS+1)); }
-warn() { printf '  [WARN] %s\n' "$1"; WARN=$((WARN+1)); }
-bad()  { printf '  [FAIL] %s\n' "$1"; FAIL=$((FAIL+1)); }
-sec()  { printf '\n== %s\n' "$1"; }
+# 留证：检查结果同时落盘（上一轮两次 apply 失败后谁也不知道是哪几条 FAIL）。
+EVIDENCE_LOG=""
+logline() { [ -n "$EVIDENCE_LOG" ] && printf '%s\n' "$1" >> "$EVIDENCE_LOG"; return 0; }
 
-usage() { sed -n '2,20p' "$0"; exit 0; }
+PASS=0; WARN=0; FAIL=0
+ok()   { printf '  [PASS] %s\n' "$1"; logline "  [PASS] $1"; PASS=$((PASS+1)); }
+warn() { printf '  [WARN] %s\n' "$1"; logline "  [WARN] $1"; WARN=$((WARN+1)); }
+bad()  { printf '  [FAIL] %s\n' "$1"; logline "  [FAIL] $1"; FAIL=$((FAIL+1)); }
+sec()  { printf '\n== %s\n' "$1"; logline ""; logline "== $1"; }
+
+usage() { sed -n '2,19p' "$0"; exit 0; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -47,8 +52,10 @@ while [ $# -gt 0 ]; do
     --verify) MODE=verify ;;
     --stage) MODE=stage; shift || true; STAGE_FILE="${1:-}" ;;
     --stage=*) MODE=stage; STAGE_FILE="${1#--stage=}" ;;
-    --no-readonly-deploy-tree) READONLY_DEPLOY=0 ;;
-    --allow-debug) ALLOW_DEBUG=1 ;;
+    --readonly-deploy-tree) READONLY_DEPLOY=1 ;;
+    --no-readonly-deploy-tree) READONLY_DEPLOY=0 ;;   # 兼容旧写法（默认已是关）
+    --allow-debug) ALLOW_DEBUG=1 ;;                    # 兼容旧写法（默认已是开）
+    --deny-debug) ALLOW_DEBUG=0 ;;
     --unit) shift || true; UNIT="${1:-trmd}" ;;
     --unit=*) UNIT="${1#--unit=}" ;;
     -h|--help) usage ;;
@@ -84,7 +91,7 @@ EOF
     printf '# 部署树只读：S1 之后 daemon 不该再往自己的代码目录写东西（pyc 由 PYTHONDONTWRITEBYTECODE 关掉）。\n'
     printf 'ReadOnlyPaths=%s\n' "$DEPLOY_ROOT"
   else
-    printf '# ReadOnlyPaths=%s 已按 --no-readonly-deploy-tree 关闭。\n' "$DEPLOY_ROOT"
+    printf '# 部署树不加只读（S1 默认；要加用 --readonly-deploy-tree）：%s\n' "$DEPLOY_ROOT"
   fi
   cat <<EOF
 ProtectKernelTunables=yes
@@ -122,7 +129,8 @@ SystemCallFilter=~acct bpf capset chroot fanotify_init fanotify_mark nfsservctl 
 SystemCallFilter=~userfaultfd io_uring_setup process_vm_readv process_vm_writev
 EOF
   if [ "$ALLOW_DEBUG" -eq 1 ]; then
-    printf '# @debug 已按 --allow-debug 放行（ptrace / perf_event_open / pidfd_getfd 可用）。\n'
+    printf '# @debug 默认**放行**（ptrace / perf_event_open / pidfd_getfd 可用，gdb/strace/perf 才能跑）；
+# 要挡回去用 --deny-debug。bpf 仍在下面的黑名单里，不受这条影响。\n'
   else
     cat <<EOF
 # @debug：挡 ptrace / perf_event_open / pidfd_getfd —— 跨进程读写别人内存、改寄存器、
@@ -133,12 +141,19 @@ EOF
   fi
   cat <<EOF
 # ── runtime 目录与 IPC socket ──────────────────────────────────
-# 真机现状：daemon 的 IPC socket **根本没起来**（默认路径 /run/user/<uid> 下没有文件），
-# 客户端一路静默降级成 HTTP，而 HTTP 端口同机任何用户都能连（见 docs/SANDBOX-PLAN.md §6.6）。
-# 名字固定为 /run/${RUNTIME_NAME}：客户端 trimum_client.SYSTEM_RUNTIME_SOCKET 认的就是这条路。
+# 路径由单元**钉死**，不靠环境猜：
+#   * RuntimeDirectory=trimum → systemd 以 root 建 /run/trimum（chown 给 User=），
+#     不依赖「用户登录会话的 /run/user/<uid>」；
+#   * TRIMUM_SOCKET → daemon（config.default_socket_path）与客户端
+#     （trimum_client.discover_socket）读同一个变量，两端不会各算各的。
+# 为什么必须钉死（真机 2026-09-21 实测）：服务启动时 XDG_RUNTIME_DIR 是空的，
+# 退回的 /run/user/<uid> 属于登录会话 —— 开机时还不存在，daemon 又没权限建
+# （/run 只 root 可写），bind 直接 ENOENT；那条路径原来只 warning 一声，
+# 于是 IPC 通道静默消失、客户端一路降级成 HTTP，而 HTTP 口同机谁都能连。
+# 见 docs/SANDBOX-PLAN.md §9.3。
 RuntimeDirectory=${RUNTIME_NAME}
 RuntimeDirectoryMode=0750
-Environment=XDG_RUNTIME_DIR=/run/${RUNTIME_NAME}
+Environment=TRIMUM_SOCKET=${SOCKET_PATH}
 # ── 环境 ───────────────────────────────────────────────────────
 Environment=PYTHONDONTWRITEBYTECODE=1
 EOF
@@ -156,6 +171,56 @@ wait_active() {
   return 1
 }
 
+# ── 就绪判定：断言之前必须先等 daemon 真的「能服务」 ──────────────
+# 上一轮两次 apply 都栽在这一条上：`wait_active` 只等 systemd 报 active（进程一
+# 起来就算），而 uvicorn 还要几百毫秒才 bind、IPC socket 更晚才建出来。冒烟抢在
+# 那之前断言，于是报「IPC socket 不存在」→ 自动回滚，把一套没问题的加固白扔掉。
+socket_live() {
+  if [ -S "$SOCKET_PATH" ] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$SOCKET_PATH" <<'PY' 2>/dev/null
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(0.5)
+sys.exit(0 if s.connect_ex(sys.argv[1]) == 0 else 1)
+PY
+    return $?
+  fi
+  [ -S "$SOCKET_PATH" ]
+}
+
+wait_ready() {
+  local i
+  for i in $(seq 1 60); do
+    if socket_live; then
+      printf '  [PASS] daemon 就绪（等了约 %s 秒）：socket %s 可连接\n' "$((i / 2))" "$SOCKET_PATH"
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
+# 失败现场：把能一眼看出原因的原始材料全打出来，同时落进证据文件。
+dump_failure_context() {
+  local u home log ctx
+  u="$(unit_user)"; [ -n "$u" ] || u=root
+  home="$(getent passwd "$u" 2>/dev/null | cut -d: -f6)"
+  log="${home:-/home/$u}/.local/share/trimum/trimum.log"
+  ctx="$( {
+    echo "--- systemctl status $UNIT ---"
+    systemctl status "$UNIT" --no-pager -n 15 2>&1
+    echo "--- journalctl -u $UNIT（最近 40 行）---"
+    journalctl -u "$UNIT" -n 40 --no-pager 2>&1
+    echo "--- $log：socket / 错误相关（最近 30 条）---"
+    grep -E 'unix_socket|socket_start_failed|Traceback|"level": ?"error"' "$log" 2>/dev/null | tail -30
+    echo "--- $log：tail 20 ---"
+    tail -20 "$log" 2>/dev/null
+  } 2>&1 )"
+  printf '%s\n' "$ctx" | sed 's/^/     /'
+  [ -n "$EVIDENCE_LOG" ] && printf '%s\n' "$ctx" >> "$EVIDENCE_LOG"
+  return 0
+}
+
 smoke() {
   PASS=0; WARN=0; FAIL=0
   sec "冒烟检查（任一 FAIL 就回滚）"
@@ -164,6 +229,14 @@ smoke() {
 
   if wait_active; then ok "$UNIT 已 active（重启后 30s 内起得来）"
   else bad "$UNIT 没起来（看 systemctl status $UNIT / journalctl -u $UNIT）"; return 1; fi
+
+  # 先等就绪再断言：后面每一条都建立在「daemon 已经在服务」之上。
+  # 没就绪就是真问题（socket 建不出来），此时才该 FAIL —— 并且把现场打出来。
+  if ! wait_ready; then
+    bad "30s 内没就绪：$SOCKET_PATH 连不上（socket 没建出来？路径对不上？）"
+    dump_failure_context
+    return 1
+  fi
 
   local eff; eff="$(systemctl show "$UNIT" -p ProtectSystem --value)"
   if [ "$eff" = full ]; then ok "ProtectSystem=full 已生效"; else bad "ProtectSystem 实际是 '$eff'"; fi
@@ -200,15 +273,18 @@ smoke() {
     warn "读不到 /proc/$pid/status，跳过进程内实测"
   fi
 
-  if [ -S "$SOCKET_PATH" ]; then ok "IPC socket 存在：$SOCKET_PATH"
-  else bad "IPC socket 不存在：$SOCKET_PATH（日志里找 unix_socket_start_failed）"; fi
+  # socket 文件在 ≠ 有服务（SIGKILL 会留下 stale 文件），所以这里要真连一次。
+  if [ -S "$SOCKET_PATH" ]; then
+    if socket_live; then ok "IPC socket 存在且有人监听：$SOCKET_PATH"
+    else bad "IPC socket 文件在、但连不上（stale 文件？被别的实例占了？）：$SOCKET_PATH"; fi
+  else bad "IPC socket 不存在：$SOCKET_PATH（daemon 日志里找 unix_socket_start_failed）"; fi
 
   if [ -x "$TRM_BIN" ]; then
     if runuser -u "$u" -- "$TRM_BIN" status >/tmp/.trm-status.out 2>&1; then
       ok "trm status（用户 $u）通过"
       if grep -q 'daemon running' /tmp/.trm-status.out; then ok "  且报告 daemon running"; else warn "  没看到 daemon running"; fi
       if grep -q 'source: rpc' /tmp/.trm-status.out; then ok "  传输：rpc（socket 通了）"
-      else warn "  传输仍是 http —— 客户端改动还没部署到 $DEPLOY_ROOT/src（见 docs/SANDBOX-PLAN.md §6.6）"; fi
+      else warn "  传输不是 rpc —— 看 $DEPLOY_ROOT/src 里的客户端补丁是否已部署（docs/SANDBOX-PLAN.md §6.6）"; fi
     else
       bad "trm status（用户 $u）失败：$(head -3 /tmp/.trm-status.out | tr '\n' ' ')"
     fi
@@ -243,11 +319,11 @@ PY
   else
     ok "landlock_* / seccomp / prctl 未被自己的过滤器误伤（S2/S3 前提成立）"
   fi
-  if [ "$ALLOW_DEBUG" -eq 0 ]; then
+  if [ "$ALLOW_DEBUG" -eq 1 ]; then
+    ok "@debug 已放行（ptrace / perf_event_open 可用；bpf 仍挡）"
+  else
     if printf '%s' "$out" | grep -qE '^(bpf|ptrace|mount) errno=1 '; then ok "该挡的确实挡住了（bpf / ptrace / mount → EPERM）"
     else bad "黑名单没挡住 bpf/ptrace/mount（过滤器没生效）"; fi
-  else
-    ok "--allow-debug 已放行 @debug（ptrace/perf_event_open 可用，bpf 仍挡）"
   fi
 
   if journalctl -u "$UNIT" --since '-3 min' --no-pager 2>/dev/null | grep -q 'unix_socket_start_failed'; then
@@ -257,6 +333,10 @@ PY
   fi
 
   printf '\n  冒烟小结：PASS=%d WARN=%d FAIL=%d\n' "$PASS" "$WARN" "$FAIL"
+  if [ "$FAIL" -gt 0 ]; then
+    logline "冒烟小结：PASS=$PASS WARN=$WARN FAIL=$FAIL"
+    dump_failure_context
+  fi
   [ "$FAIL" -eq 0 ]
 }
 
@@ -290,7 +370,7 @@ case "$MODE" in
     echo "已生成：$STAGE_FILE"
     exit 0
     ;;
-  verify) smoke; exit $? ;;
+  verify) EVIDENCE_LOG="${EVIDENCE_LOG:-/tmp/trmd-smoke.log}"; : > "$EVIDENCE_LOG"; smoke; exit $? ;;
   rollback)
     need_root --rollback
     sec "回滚 $UNIT 的 S1 加固"
@@ -303,9 +383,10 @@ sec "现状（改之前）"
 printf '  单元文件：%s\n' "$(systemctl show "$UNIT" -p FragmentPath --value)"
 printf '  用户：%s / 工作目录：%s\n' "$(unit_user)" "$(systemctl show "$UNIT" -p WorkingDirectory --value)"
 printf '  现有 drop-in：%s\n' "$(ls -1 "$DROPIN_DIR" 2>/dev/null | tr '\n' ' ')"
-printf '  部署树：%s（目标：只读）\n' "$DEPLOY_ROOT"
+if [ "$READONLY_DEPLOY" -eq 1 ]; then printf '  部署树：%s（目标：只读）\n' "$DEPLOY_ROOT"
+else printf '  部署树：%s（不加只读，S1 默认）\n' "$DEPLOY_ROOT"; fi
 if [ -S "$SOCKET_PATH" ]; then printf '  IPC socket：%s（现在已存在）\n' "$SOCKET_PATH"
-else printf '  IPC socket：%s（现在不存在）\n' "$SOCKET_PATH"; fi
+else printf '  IPC socket：%s（现在不存在 —— 由 drop-in 的 TRIMUM_SOCKET + RuntimeDirectory 钉住）\n' "$SOCKET_PATH"; fi
 _nowpid="$(systemctl show "$UNIT" -p MainPID --value)"
 if [ -n "$_nowpid" ] && [ "$_nowpid" != 0 ] && [ -r "/proc/$_nowpid/mountinfo" ]; then
   printf '  daemon 当前 mountinfo 条目数：%s（宿主基线 47 = 没有命名空间）\n' "$(wc -l < "/proc/$_nowpid/mountinfo")"
@@ -326,6 +407,14 @@ fi
 
 need_root --apply
 
+# 备份目录先建出来：冒烟的证据（FAIL 明细 + systemctl / journal / daemon 日志片段）
+# 要往里写。上一轮两次 apply 失败后只剩一句「FAIL」的记忆，这次别再丢证据。
+TS=$(date +%Y%m%d-%H%M%S)
+BK="${BACKUP_ROOT}/harden-${TS}"
+mkdir -p "$BK"
+EVIDENCE_LOG="$BK/smoke.log"
+echo "  留证：本次 apply 的全部检查结果写 $EVIDENCE_LOG"
+
 sec "语法与语义预检（systemd-analyze verify）"
 EFF=/tmp/.${UNIT}-effective.service
 { systemctl cat "$UNIT" 2>/dev/null; echo; render_dropin; } > "$EFF"
@@ -338,9 +427,7 @@ else
 fi
 
 sec "备份"
-TS=$(date +%Y%m%d-%H%M%S)
-BK="${BACKUP_ROOT}/harden-${TS}"
-mkdir -p "$BK"
+
 systemctl cat "$UNIT" > "$BK/unit-before.txt" 2>&1 || true
 if [ -f "$DROPIN" ]; then cp -a "$DROPIN" "$BK/10-hardening.conf"; fi
 {
@@ -366,7 +453,7 @@ if smoke; then
   if command -v systemd-analyze >/dev/null; then
     printf '  加固评分（改之后）：%s\n' "$(systemd-analyze security "$UNIT" 2>/dev/null | tail -1)"
   fi
-  echo "  文档：docs/SANDBOX-PLAN.md §6.6（口径与取舍）/ §8（S1 验收）"
+  echo "  文档：docs/SANDBOX-PLAN.md §6.6（口径与取舍）/ §8（S1 验收）/ §9.3（socket 收口）"
   echo "  回滚： sudo bash $0 --rollback"
   exit 0
 else
@@ -374,5 +461,6 @@ else
   do_rollback_backup
   echo >&2
   echo "加固没装上，已回滚到改动前的状态。上面的 FAIL 项就是原因。" >&2
+  echo "证据（FAIL 明细 + systemctl status + journal + daemon 日志）：$EVIDENCE_LOG" >&2
   exit 1
 fi
