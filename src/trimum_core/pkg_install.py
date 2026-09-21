@@ -16,6 +16,11 @@
 agent 包额外写一份证书（``agents/<name>/cert.json``）：官方 → ``cert_type: official``
 （``check_agent_trust`` 判为 TRUSTED，不弹确认），降级安装 → ``cert_type: none`` +
 ``scope: untrusted``（判为 CONFIRM，且运行期逐条确认）。
+
+**卸载是这条链的逆操作**（第三片）：``remove_package`` 只做两件事 —— 删掉**登记过**的落地
+目录、划掉登记行。它不碰 ``certs/`` / ``audit/`` / ``memory/``（用户数据与安全记录与包无关），
+也不接受「登记里被改成别处」的路径：手改 ``installed.json5`` 指向类型根之外即拒
+（``TRM-4009``）。卸载**不看** ``trust`` —— 它不是授权动作。
 """
 
 from __future__ import annotations
@@ -406,6 +411,118 @@ def install_from_index(
     )
 
 
+# ---------------------------------------------------------------------------
+# 卸载
+# ---------------------------------------------------------------------------
+
+
+def _same_path(one: Path, other: Path) -> bool:
+    """Compare two paths the way this platform does (Windows ignores case)."""
+    return os.path.normcase(str(one)) == os.path.normcase(str(other))
+
+
+def _removal_target(name: str, record: dict[str, Any]) -> Path:
+    """Resolve the registered path, or refuse.
+
+    红线：ledger 是可手改的文本文件，所以「登记里的 path」不能直接信 —— 只有恰好等于
+    ``<TYPE_ROOTS[type]>/<name>`` 才放行。这比「落在类型根下」更严：手改成兄弟 agent 的
+    目录、指向 ``certs/`` 或工作区外，一样拒（``TRM-4009``），什么都不删。
+    """
+    kind = str(record.get("type") or "")
+    if kind not in TYPE_ROOTS:
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_INVALID,
+            message=f"登记里的类型不认识：{name} -> {kind!r}",
+        )
+    raw = str(record.get("path") or "")
+    if not raw:
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_INVALID, message=f"登记里的 {name} 没有落地路径"
+        )
+    target = Path(raw)
+    expected = trimum_path(TYPE_ROOTS[kind], name)
+    if not _same_path(target, expected):
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_INVALID,
+            message=(
+                f"登记路径不是本渠道写下的位置，拒绝删除：{target}"
+                f"（应为 {expected}）—— installed.json5 被手工改过就得手工处理"
+            ),
+            context={"path": str(target), "expected": str(expected)},
+        )
+    if target.is_symlink():
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_INVALID,
+            message=f"登记路径是符号链接，拒绝删除：{target}",
+            context={"path": str(target)},
+        )
+    return target
+
+
+def _bundled_agent_names() -> set[str]:
+    """内置（随发行版发布）agent 的名字 —— 卸载不得碰它们。"""
+    from .agent_cert import discover_bundled_agents
+
+    return set(discover_bundled_agents())
+
+
+def remove_package(name: str, *, dry_run: bool = False) -> dict[str, Any]:
+    """Uninstall one package that this channel installed.
+
+    两个动作，都得做：删掉 **ledger 指名的** 落地目录，再划掉 ledger 那一行。故意不做的三件事：
+
+    * 不碰 ``certs/`` / ``audit/`` / ``memory/`` —— 用户数据与安全记录跟包没关系；
+    * 不看 ``trust`` —— 卸载不是授权动作，``--allow-untrusted`` 与它无关；
+    * 不猜：名字没登记过就报 ``TRM-4011``，不凭名字推路径、不静默成功。
+
+    ``dry_run`` 只回报「将删什么」并停在那里（盘与 ledger 都不动），但**红线照查** ——
+    干跑说「可以删」之后真删却被拒，比不干跑更糟。
+
+    登记的目录已经不在（用户手工删过）当成**过期登记**：划掉登记行并如实回报
+    ``path_missing``，而不是崩在 ``rmtree`` 上。
+    """
+    record = installed_records().get(name)
+    if record is None:
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_NOT_FOUND,
+            message=f"没有通过官方渠道装过 {name}（trm install --list 看已装清单）",
+        )
+
+    target = _removal_target(name, record)
+    kind = str(record.get("type") or "")
+    if kind == "agent" and name in _bundled_agent_names():
+        # install_package() 只挡「已存在且没 --force」，所以 --force 可能覆盖过内置 agent 的
+        # 落地目录；登记里没记「装之前 dest 在不在」，还原不回来 —— 那就一个字节都不删。
+        raise TrimumError(
+            TRMErrorCode.PACKAGE_INVALID,
+            message=(
+                f"{name} 是 trimum 内置 agent（随发行版发布），不能通过卸载删除；"
+                "确认要移除请手工处理该目录"
+            ),
+        )
+
+    existed = target.is_dir()
+    if not dry_run:
+        if existed:
+            shutil.rmtree(target)
+        ledger = load_ledger()
+        packages = ledger.get("packages")
+        if isinstance(packages, dict):
+            packages.pop(name, None)
+        save_ledger(ledger)
+
+    return {
+        "name": name,
+        "type": kind,
+        "version": str(record.get("version") or ""),
+        "trust": str(record.get("trust") or ""),
+        "path": str(target),
+        "removed": not dry_run,
+        "dry_run": bool(dry_run),
+        "path_missing": not existed,
+    }
+
+
 __all__ = [
     "CACHE_DIR",
     "DEFAULT_INDEX_URL",
@@ -423,6 +540,7 @@ __all__ = [
     "load_ledger",
     "read_source_bytes",
     "read_source_text",
+    "remove_package",
     "resolve_url",
     "save_ledger",
     "untrusted_names",

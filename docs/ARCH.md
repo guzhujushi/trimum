@@ -499,10 +499,10 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 |---|---|
 | `src/trimum_core/trmpkg.py` | 包格式（`manifest.json5` + 逐文件 sha256 + `SIGNATURE` + `chain.json`）、打包、校验、安全解包；`verify_chain()` 与 `verify_document_signature()` 是「什么算可信」的唯一实现 |
 | `src/trimum_core/pkg_index.py` | 官方目录索引（`trmindex/1`，容器 `{document, signature, chain}`）：回答「去哪拿这个包」，索引本身也必须签名 |
-| `src/trimum_core/pkg_install.py` | 校验 → 按类型落地（`agents/` / `tools/` / `workflows/` / `skills/`）→ 登记 `~/.trimum/config/installed.json5` |
+| `src/trimum_core/pkg_install.py` | 校验 → 按类型落地（`agents/` / `tools/` / `workflows/` / `skills/`）→ 登记 `~/.trimum/config/installed.json5`；`remove_package()` 是逆操作（删登记过的目录 + 划掉登记行） |
 | `src/trimum_core/capability.py` | 能力清单的运行期交集（E6 遗留）：多来源取最严，只收紧、不放宽 |
 | `src/trimum_core/cli/commands/pkg.py` | `trm pkg {verify,info,create,extract,root-init,signer-init}` |
-| `src/trimum_core/cli/commands/install.py` | `trm install [name]` / `--file` / `--list` / `--index` / `--allow-untrusted`（无参数仍是原向导） |
+| `src/trimum_core/cli/commands/install.py` | `trm install [name]` / `--file` / `--list` / `--index` / `--allow-untrusted` / `--remove` / `--yes` / `--dry-run`（无参数仍是原向导） |
 | `config/trust/trimum-root.crt` | 内置官方根（只有公钥；私钥留在发布方 `~/.trimum/trust/`，仓库外） |
 
 ### 关键设计
@@ -518,6 +518,12 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 - **requires**：安装时按 PATH 探测，缺依赖只警告不拒装（与 `AgentRegistry.check_dependencies` 同一口径）。
 - **发布方工具**：`root-init` / `signer-init` 拒绝把私钥写进 git 工作树（除非 `--insecure-key-output`），
   落盘 0600；换根 = 旧包全部作废（见 `config/trust/README.md`）。
+- **卸载只删登记过的那个路径**：`trm install --remove <name>` 读 ledger 里的 `path`，只有恰好等于
+  `<TRIMUM_HOME>/<TYPE_ROOTS[type]>/<name>` 才动手 —— 手改 `installed.json5` 把路径指到工作区外、
+  `certs/`、或兄弟 agent 的目录，一律拒（`TRM-4009`）且一个字节都不删。销账与删目录成对：
+  ledger 行划掉后，`--list` 与运行期 `untrusted_names()`（`capability.py` 读的就是它）同时不再认它。
+- **卸载是破坏性动作**：交互式问一句，非交互必须 `--yes`（stdin 不是 TTY 时 `ask_confirm` 直接答 no，
+  不挂住），`--dry-run` 恒不执行；`--remove` 与 `--file` 互斥。
 - **运行期 Layer 2.6**：`ToolGateway` 在 L2.5 之后、L4 之前做能力交集 —— deny → `capability_denied`
   审计并拒绝；confirm → 升级为 `Action.CONFIRM`（interactive 弹窗，非交互交给后续层）。
   风险取管线判定的 risk（PolicyEngine / LLM 策略），不是执行后的观测值。
@@ -528,10 +534,14 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 - 私钥永不进仓库：CLI 守卫 + `.gitignore` 的 `*.key` / `*.pem` 双保险。
 - 校验不通过就不落地：先校验后解包，不留「先解开再判断」的中间态。
 - 能力清单读不懂（缺字段 / `max_risk` 非法）→ confirm，而不是当作无限制。
+- 内置（随发行版发布）agent 的目录不可被卸载删掉：名字命中 `discover_bundled_agents()` 的 agent 包即拒
+  （`install_package(force=True)` 可能覆盖过内置目录，而登记里没记「装之前 dest 在不在」，还原不回来）。
+- 卸载不碰 `certs/` / `audit/` / `memory/` —— 用户数据与安全记录跟包无关；agent 证书就是包目录里的
+  `cert.json`，随目录一起走，不单独删。
 
 ### 测试
 
-`tests/test_trmpkg.py`（16）、`tests/test_cli_pkg.py`（25）、`tests/test_pkg_install.py`（28）、
+`tests/test_trmpkg.py`（16）、`tests/test_cli_pkg.py`（25）、`tests/test_pkg_install.py`（42）、
 `tests/test_capability.py`（20）。
 
 ## 范围边界与验收（生态轮）

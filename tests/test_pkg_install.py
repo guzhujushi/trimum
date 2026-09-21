@@ -1,14 +1,15 @@
 """`trm install` / `pkg_install` —— 官方渠道的安装与登记（E5 第三片）。
 
 覆盖：按类型落地、登记表、agent 证书（official → TRUSTED / 降级 → CONFIRM）、
-签名索引（哈希承诺、未签名索引、目录里没有的名字）、以及
-``--allow-untrusted`` 只放宽「来源」而**不放宽包内路径**这条红线。
+签名索引（哈希承诺、未签名索引、目录里没有的名字）、``--allow-untrusted`` 只放宽「来源」
+而**不放宽包内路径**这条红线，以及卸载（``--remove``）的红线与确认口径。
 """
 
 from __future__ import annotations
 
 import io
 import json
+import shutil
 import sys
 import tarfile
 from pathlib import Path
@@ -17,7 +18,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from trimum_core import pkg_index, pkg_install, trmpkg  # noqa: E402
+from trimum_core import agent_cert as agent_cert_mod  # noqa: E402
+from trimum_core import pkg_index, pkg_install, trmpkg
 from trimum_core.agent_cert import CertTrustLevel, check_agent_trust  # noqa: E402
 from trimum_core.cli import main  # noqa: E402
 from trimum_core.models import TRMErrorCode, TrimumError  # noqa: E402
@@ -448,3 +450,164 @@ class TestCliWiring:
         assert pkg_install.resolve_url(str(index), "demo.trmpkg") == str(tmp_path / "dist" / "demo.trmpkg")
         assert pkg_install.resolve_url("https://x.dev/p/index.json5", "demo.trmpkg") == "https://x.dev/p/demo.trmpkg"
         assert pkg_install.resolve_url(str(index), "https://y.dev/demo.trmpkg") == "https://y.dev/demo.trmpkg"
+
+
+class TestRemove:
+    """`trm install --remove` —— 卸载只删登记过的那个路径，且全程可干跑、可幂等。"""
+
+    def _install(self, capsys, channel, name: str) -> None:
+        assert main(["install", "--file", str(channel["packages"][name])]) == 0
+        capsys.readouterr()
+
+    def test_removing_a_tool_drops_the_directory_and_the_registration(self, home, channel, capsys):
+        self._install(capsys, channel, "demo-tool")
+
+        assert main(["--json", "install", "--remove", "demo-tool", "--yes"]) == 0
+        report = json.loads(capsys.readouterr().out)
+
+        assert report["removed"] is True
+        assert report["dry_run"] is False
+        assert report["path_missing"] is False
+        assert report["type"] == "tool"
+        assert report["path"] == str(home / "tools" / "demo-tool")
+        assert not (home / "tools" / "demo-tool").exists()
+        assert pkg_install.installed_records() == {}
+
+        assert main(["--json", "install", "--list"]) == 0
+        assert json.loads(capsys.readouterr().out)["count"] == 0
+
+    def test_removing_an_agent_takes_its_certificate_along(self, home, channel, capsys):
+        self._install(capsys, channel, "demo-agent")
+        dest = home / "agents" / "demo-agent"
+        assert (dest / "cert.json").is_file()
+        sentinels = {
+            home / "certs" / "official" / "keep.cert.json": "{}\n",
+            home / "certs" / "elsewhere.txt": "certs stay\n",
+            home / "memory" / "keep.json": "{}\n",
+        }
+        for path, body in sentinels.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+        capsys.readouterr()
+
+        assert main(["install", "--remove", "demo-agent", "--yes"]) == 0
+
+        assert not dest.exists()  # 证书就在包目录里，随目录一起走
+        assert check_agent_trust("demo-agent")[0] is not CertTrustLevel.TRUSTED
+        for path, body in sentinels.items():
+            assert path.read_text(encoding="utf-8") == body
+
+    def test_an_uninstalled_name_reports_package_not_found(self, home, capsys):
+        assert main(["install", "--remove", "ghost", "--yes"]) == 1
+
+        assert "TRM-4011" in capsys.readouterr().err
+
+    def test_removing_twice_fails_the_second_time(self, home, channel, capsys):
+        self._install(capsys, channel, "demo-tool")
+        assert main(["install", "--remove", "demo-tool", "--yes"]) == 0
+        capsys.readouterr()
+
+        assert main(["install", "--remove", "demo-tool", "--yes"]) == 1
+        assert "TRM-4011" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("where", ["outside", "audit"])
+    def test_a_hand_edited_ledger_path_is_refused(self, home, channel, capsys, where):
+        """ledger 是可手改的文本：把 path 指到别处 → 拒，且那个「别处」一个字都不动。"""
+        if where == "outside":
+            victim = home.parent / "outside" / "demo-tool"
+        else:
+            victim = home / "audit" / "demo-tool"
+        victim.mkdir(parents=True)
+        (victim / "keep.txt").write_text("still here", encoding="utf-8")
+        self._install(capsys, channel, "demo-tool")
+        ledger = pkg_install.load_ledger()
+        ledger["packages"]["demo-tool"]["path"] = str(victim)
+        pkg_install.save_ledger(ledger)
+
+        assert main(["install", "--remove", "demo-tool", "--yes"]) == 1
+
+        assert "TRM-4009" in capsys.readouterr().err
+        assert (victim / "keep.txt").is_file()
+        assert (home / "tools" / "demo-tool" / "main.py").is_file()
+        assert "demo-tool" in pkg_install.installed_records()
+
+    def test_a_bundled_agent_name_is_refused(self, home, channel, tmp_path, monkeypatch, capsys):
+        base = tmp_path / "bundled"
+        (base / "demo-agent").mkdir(parents=True)
+        (base / "demo-agent" / "agent.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(agent_cert_mod, "bundled_agent_dirs", lambda: [base])
+        self._install(capsys, channel, "demo-agent")
+
+        assert main(["install", "--remove", "demo-agent", "--yes"]) == 1
+
+        assert "内置" in capsys.readouterr().err
+        assert (home / "agents" / "demo-agent" / "main.py").is_file()
+        assert "demo-agent" in pkg_install.installed_records()
+
+    def test_a_tool_may_share_a_bundled_agents_name(self, home, channel, tmp_path, monkeypatch, capsys):
+        """内置名字只保护 agent：同名 tool 落在 tools/，删它碰不到任何内置目录。"""
+        base = tmp_path / "bundled"
+        (base / "demo-tool").mkdir(parents=True)
+        (base / "demo-tool" / "agent.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(agent_cert_mod, "bundled_agent_dirs", lambda: [base])
+        self._install(capsys, channel, "demo-tool")
+
+        assert main(["install", "--remove", "demo-tool", "--yes"]) == 0
+        assert not (home / "tools" / "demo-tool").exists()
+
+    def test_dry_run_reports_without_touching_anything(self, home, channel, capsys):
+        self._install(capsys, channel, "demo-tool")
+
+        assert main(["--json", "install", "--remove", "demo-tool", "--dry-run"]) == 0
+        report = json.loads(capsys.readouterr().out)
+
+        assert report["dry_run"] is True
+        assert report["removed"] is False
+        assert report["path"] == str(home / "tools" / "demo-tool")
+        assert (home / "tools" / "demo-tool" / "main.py").is_file()
+        assert "demo-tool" in pkg_install.installed_records()
+
+        # 人类路径说同一种话：干跑不冒充实删
+        assert main(["install", "--remove", "demo-tool", "--dry-run"]) == 0
+        assert "would remove demo-tool" in capsys.readouterr().out
+
+    def test_a_missing_payload_only_drops_the_registration(self, home, channel, capsys):
+        self._install(capsys, channel, "demo-tool")
+        shutil.rmtree(home / "tools" / "demo-tool")
+
+        assert main(["--json", "install", "--remove", "demo-tool", "--yes"]) == 0
+        report = json.loads(capsys.readouterr().out)
+
+        assert report["removed"] is True
+        assert report["path_missing"] is True
+        assert "demo-tool" not in pkg_install.installed_records()
+
+    def test_a_non_interactive_run_without_yes_aborts(self, home, channel, capsys):
+        self._install(capsys, channel, "demo-tool")
+
+        assert main(["install", "--remove", "demo-tool"]) == 1
+
+        assert "--yes" in capsys.readouterr().err
+        assert (home / "tools" / "demo-tool" / "main.py").is_file()
+
+    def test_remove_and_file_are_mutually_exclusive(self, home, channel, capsys):
+        args = ["install", "--remove", "--file", str(channel["packages"]["demo-tool"])]
+
+        assert main(args) == 1
+        assert "cannot be combined" in capsys.readouterr().err
+
+    def test_remove_without_a_name_is_refused(self, home, capsys):
+        assert main(["install", "--remove"]) == 1
+
+        assert "needs a package name" in capsys.readouterr().err
+
+    def test_the_untrusted_runtime_hook_forgets_it(self, home, foreign_package, capsys):
+        """删掉降级安装的包之后，运行期那张表（capability.py 读的就是它）也要跟着空。"""
+        assert main(["install", "--file", str(foreign_package), "--allow-untrusted"]) == 0
+        capsys.readouterr()
+        assert pkg_install.untrusted_names() == {"outside"}
+
+        assert main(["install", "--remove", "outside", "--yes"]) == 0
+
+        assert pkg_install.untrusted_names() == set()
+        assert not (home / "agents" / "outside").exists()
