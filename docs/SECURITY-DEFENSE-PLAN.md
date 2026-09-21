@@ -114,6 +114,57 @@ SecMonitor 是常驻进程，监听 Event Bus，对接每个经过 ToolGateway �
   pid 传 0：执行前还没有子进程，绝不拿 daemon 自己的 PID 冒充（FREEZE/KILL 会打到自己）。
 ```
 
+### 装配：L4 不是可选依赖（2026-09-21）
+
+L4 以前是「谁记得给网关注入 `sec_monitor` 谁才有」—— daemon 装了，`trm ask` /
+`trm exec` / workflow 的兜底网关都没装，同一条威胁命令在那三条路上既不广播也不阻断。
+现在装配只有一处定义：
+
+```python
+SecurityRuntime.daemon(event_bus)   # daemon：审计落 ~/.trimum/audit/security.log + 通知 + 阻断
+SecurityRuntime.local(event_bus)    # 裸 CLI：同一条事件链，审计**不落盘**
+runtime.attach(tool_gateway)
+```
+
+- `ToolGateway(layer4=True)`（默认）：**没被注入监控时自建** `SecurityRuntime.local()`，
+  所以任何入口建出来的网关都过 L4；要显式关掉（纯网关单测 / 受限沙箱）传 `layer4=False`。
+- daemon 由 `main.init_security()` 用 `SecurityRuntime.daemon()` 覆盖网关自带的那份。
+- 两者只差「审计是否落盘」：`security.monitor_result` / `security.alert` /
+  `security.blocked` / `workflow.trigger` 都照发，剧本与实时控制台行为一致。
+- 裸 CLI 不写 `~/.trimum` 的审计文件，拦截记录走网关自己的 `AuditStore`（`security_blocked`）。
+
+### 网关处置：`defense` → 网关动作（2026-09-21）
+
+执行前闸门的子进程**还没 spawn**（`pid=0`），所以「对进程动手」的响应在执行前等价于
+**不让它跑**。映射表在 `tool_gateway.layer4_gateway_action()`，表以外一律只广播：
+
+| 威胁的 `defense` | 网关动作 | 理由 |
+|---|---|---|
+| `deny` | `Action.DENY`（`status=denied` / `exit_code=137` / `security_blocked` 审计） | 直接拒绝 |
+| `kill` / `freeze` / `isolate` | `Action.DENY`（同上，风险 `critical`） | 执行前没有子进程可杀/冻/隔离，拒绝执行就是等价处置；同时 `SecExecutor` 仍照发通知 |
+| `confirm` | `Action.CONFIRM`（`interactive=True` 时弹确认，非交互放行、`status=confirmed`） | 供应链投毒 / 提示注入这类「可疑但不一定恶意」 |
+| 其它（`allow` / `workflow`） | 放行 + 广播 | 只上报，不阻断 |
+
+真要做 `FREEZE` / `KILL`，需要「执行后闸门」（spawn 拿到真实子进程 PID 后再扫一次），
+今天**不做**：契约里 `pid=0` 的语义就是「没有可动手的进程」，`SecBlocker` 对 `pid<=0` 直接返回。
+
+### 签名收敛：动手才拦，看看不算（2026-09-21）
+
+L4 常开的前提是签名不误报 —— 否则正常操作、以及**内置剧本自己要跑的只读命令**都会被自己的检测器挡住
+（`threat-cron-audit` 就跑 `crontab -l`、`threat-systemd-audit` 跑 `systemctl list-units`）。
+收敛后的口径（真阳/真阴表见 `tests/test_threat_signatures.py`）：
+
+| 签名 | 拦（动手） | 不拦（看看） |
+|---|---|---|
+| `ld_preload` | `LD_PRELOAD=...`、写入 `/etc/ld.so.preload` | `cat /etc/ld.so.preload` |
+| `kernel_module` | `insmod` / `modprobe` / `rmmod` / `init_module` | `lsmod`、`ls /lib/modules/*.ko` |
+| `ssh_key_steal` | 触碰 `id_rsa` 等私钥、写/搬运/外传 `.ssh/` 内容 | `cat ~/.ssh/authorized_keys`、`ls -la ~/.ssh/` |
+| `cron_persistence` | `crontab -e`、写入 `/etc/cron*` | `crontab -l`、`ls /etc/cron.d/` |
+| `systemd_persistence` | `systemctl enable/mask/...`、写 `/etc/systemd/system/`、`systemd-run` | `systemctl status/list-units`、读 `/etc/systemd/system/` |
+| `memfd_exec` | `memfd_create`、执行 `/proc/self/fd/<n>` | `ls /proc/self/fd/` |
+
+---
+
 ### `security.monitor_result` 载荷契约（扁平，2026-09-21 冻结）
 
 生产端唯一入口是 `sec_monitor.monitor_result_payload()`，**不嵌套** `{"threat": ...}`。

@@ -125,8 +125,8 @@ def run() -> None:
 
     from .api_server import create_app
     from .event_bus import EventBus
-    from .sec_monitor import SecMonitor, ThreatMatcher, OpContextClassifier
-    from .sec_executor import SecExecutor, SecAudit, SecNotif
+    from .sec_monitor import SecMonitor
+    from .sec_executor import SecurityRuntime
     from .tool_gateway import ToolGateway
     from .logger import setup_logging, get_logger
     import asyncio
@@ -134,18 +134,12 @@ def run() -> None:
 
     # ── 初始化安全组件 ─────────────────────────────────────────
     async def init_security(tool_gateway: ToolGateway, event_bus: EventBus) -> SecMonitor:
-        sec_audit = SecAudit()
-        sec_notif = SecNotif(event_bus)
-        sec_executor = SecExecutor(event_bus, sec_audit, sec_notif)
-        threat_matcher = ThreatMatcher()
-        op_context = OpContextClassifier()
-        sec_monitor = SecMonitor(event_bus, threat_matcher, op_context, sec_executor)
-        await sec_monitor.start()
-        # 挂载到 ToolGateway
-        tool_gateway.sec_monitor = sec_monitor
-        tool_gateway.sec_executor = sec_executor
-        tool_gateway.op_context = op_context
-        return sec_monitor
+        # 装配只有一处定义（SecurityRuntime）：daemon 用全链路版（审计落盘 + 通知 +
+        # 阻断 + 工作流触发），覆盖网关自带的 SecurityRuntime.local（不落盘）。
+        runtime = SecurityRuntime.daemon(event_bus)
+        await runtime.start()
+        runtime.attach(tool_gateway)
+        return runtime.monitor
 
     # ── 启动 ───────────────────────────────────────────────────
     # 先初始化安全组件（同步包装）

@@ -50,9 +50,9 @@ _BUILTIN_SIGNATURES: list[ThreatSignature] = [
         category=ThreatCategory.PRIV_ESCAPE,
         defense=DefenseAction.DENY,
         patterns=[
-            r"\bld\.so\.preload\b",
-            r"\bLD_PRELOAD\b",
-            r"echo\s+[^>]*>>\s*/etc/ld\.so\.preload",
+            r"\bLD_PRELOAD\s*=",
+            r">>?\s*\S*/etc/ld\.so\.preload",
+            r"\b(?:tee|cp|install|mv|ln)\b[^\n|;]*ld\.so\.preload",
         ],
         description="LD_PRELOAD 预加载劫持",
         trigger_workflow="threat-prelink-check",
@@ -78,7 +78,7 @@ _BUILTIN_SIGNATURES: list[ThreatSignature] = [
             r"\binsmod\b",
             r"\bmodprobe\b",
             r"\brmmod\b",
-            r"\.ko\b",
+            r"\b(?:init_module|finit_module)\b",
         ],
         description="内核模块加载/卸载",
         trigger_workflow="threat-kernel-scan",
@@ -127,10 +127,10 @@ _BUILTIN_SIGNATURES: list[ThreatSignature] = [
         category=ThreatCategory.DATA_THEFT,
         defense=DefenseAction.DENY,
         patterns=[
-            r"~/.ssh/",
-            r"\.ssh[/\\]id_(rsa|ed25519|ecdsa)",
-            r"authorized_keys",
-            r"\bssh-rsa\b",
+            r"\.ssh[/\\]id_(rsa|dsa|ecdsa|ed25519)",
+            r">>?\s*\S*\.ssh[/\\]authorized_keys",
+            r"\b(?:cp|scp|rsync|tar|base64|dd|curl|nc|ncat)\b[^\n|;]*\.ssh[/\\]",
+            r"ssh-(rsa|ed25519)\s+AAAA",
         ],
         description="SSH 私钥/凭证窃取",
         trigger_workflow="threat-ssh-audit",
@@ -153,10 +153,10 @@ _BUILTIN_SIGNATURES: list[ThreatSignature] = [
         category=ThreatCategory.MALWARE,
         defense=DefenseAction.DENY,
         patterns=[
-            r"\bcrontab\b",
-            r"/etc/cron",
-            r"@reboot",
-            r"\bcron\.d\b",
+            r"\bcrontab\b(?!\s+-l\b)",
+            r">>?\s*\S*/etc/cron",
+            r"\b(?:cp|mv|install|tee|ln)\b[^\n|;]*/etc/cron",
+            r"@reboot\b",
         ],
         description="cron 持久化",
         trigger_workflow="threat-cron-audit",
@@ -166,9 +166,10 @@ _BUILTIN_SIGNATURES: list[ThreatSignature] = [
         category=ThreatCategory.MALWARE,
         defense=DefenseAction.DENY,
         patterns=[
-            r"systemctl\s+enable",
-            r"/etc/systemd/system/",
-            r"\bsystemd\b",
+            r"\bsystemctl\s+(?:--\S+\s+)*(?:enable|mask|reenable|link|preset|add-wants)\b",
+            r">>?\s*\S*/etc/systemd/system/",
+            r"\b(?:cp|mv|install|tee|ln)\b[^\n|;]*/etc/systemd/system/",
+            r"\bsystemd-run\b",
         ],
         description="systemd 持久化",
         trigger_workflow="threat-systemd-audit",
@@ -193,7 +194,7 @@ _BUILTIN_SIGNATURES: list[ThreatSignature] = [
         patterns=[
             r"memfd_create",
             r"\bmemfd\b",
-            r"/proc/self/fd/",
+            r"\b(?:bash|sh|python\S*|perl|ruby|exec)\b[^\n|;]*/proc/self/fd/\d+",
         ],
         description="memfd 内存文件执行",
         trigger_workflow="threat-memfd-scan",
@@ -419,8 +420,9 @@ def monitor_result_payload(threat: ThreatMatch, event: SystemEvent) -> dict[str,
 class SecMonitor:
     """Security monitor main class.
 
-    Subscribes to the Event Bus and bridges ThreatMatcher/OpContextClassifier
-    with SecExecutor.
+    Bridges ThreatMatcher/OpContextClassifier with SecExecutor.  扫描入口只有一个
+    :meth:`inspect`（不订阅事件）；``executor`` 允许为 ``None`` —— 裸 CLI 进程没有
+    daemon 的审计链，那就只广播、不落盘。
     """
 
     def __init__(
@@ -428,7 +430,7 @@ class SecMonitor:
         event_bus: EventBus,
         threat_matcher: ThreatMatcher,
         context_tracker: OpContextClassifier,
-        executor: "SecExecutor",
+        executor: Optional["SecExecutor"] = None,
     ) -> None:
         self.event_bus = event_bus
         self.threat_matcher = threat_matcher
@@ -482,6 +484,9 @@ class SecMonitor:
         ``threats[0].defense`` 决定自己的处置 —— ``DENY`` 就拒绝执行。
         未命中不发任何事件：「没有威胁」不是告警；设计里的 LLM 深度判断兜底
         （旧 ``security.alert`` + ``needs_llm``）目前没有生产者，留给后续一轮。
+
+        ``executor=None``（裸 CLI 进程没有 daemon 的审计链）时只广播事件，不产生任何
+        副作用（不冻/杀进程、不写 ``~/.trimum`` 审计文件）。
         """
         threats = await self.scan_command(
             agent_id=event.payload.get("agent_id") or "unknown",
@@ -508,4 +513,5 @@ class SecMonitor:
                 payload=monitor_result_payload(threat, event),
             )
         )
-        await self.executor.execute(threat, event)
+        if self.executor is not None:
+            await self.executor.execute(threat, event)

@@ -54,7 +54,7 @@ from .audit_store import AuditStore
 from .tool_dispatchers import DispatcherRegistry
 from .tool_file_loader import is_enabled, scan_tools
 from .sec_monitor import OpContextClassifier, SecMonitor
-from .sec_executor import SecExecutor
+from .sec_executor import SecExecutor, SecurityRuntime
 from .logger import get_logger
 
 if TYPE_CHECKING:
@@ -401,6 +401,22 @@ _FILE_READ = "file.read"
 _FILE_WRITE = "file.write"
 
 
+def layer4_gateway_action(defense: DefenseAction | str) -> Optional[Action]:
+    """把 L4 命中的威胁翻成网关自己的动作。
+
+    执行前闸门的子进程**还没 spawn**（``pid=0``），所以 KILL / FREEZE / ISOLATE
+    这些「对进程动手」的响应在执行前等价于**不让它跑** —— 和 DENY 一样拦截；
+    CONFIRM 类威胁（供应链投毒 / 提示注入）转成终端确认；其余（ALLOW / WORKFLOW）
+    只广播、不拦。
+    """
+    value = defense.value if hasattr(defense, "value") else str(defense)
+    if value in ("deny", "kill", "freeze", "isolate"):
+        return Action.DENY
+    if value == "confirm":
+        return Action.CONFIRM
+    return None
+
+
 class ToolGateway:
     """Execute tool commands with two-layer permission checking.
 
@@ -426,6 +442,7 @@ class ToolGateway:
         security_rule: Optional[SecurityRule] = None,
         sec_monitor: Optional[SecMonitor] = None,
         sec_executor: Optional[SecExecutor] = None,
+        layer4: bool = True,
         behavior_monitor: Optional[BehaviorMonitor] = None,
         enable_security_rule: bool = True,
         event_bus: Optional[EventBus] = None,
@@ -463,6 +480,15 @@ class ToolGateway:
             )
         else:
             self.security_rule = None
+        # Layer 4：没被注入监控时**自建**一条本地链路（见 SecurityRuntime.local）——
+        # 任何入口（daemon / `trm ask` / `trm exec` / workflow 兜底网关）都过 L4，
+        # 而不是「谁记得注入谁才有」。要显式关掉（纯网关单测、受限沙箱）传
+        # layer4=False；daemon 由 main.init_security() 用 SecurityRuntime.daemon() 覆盖。
+        if sec_monitor is None and layer4:
+            runtime = SecurityRuntime.local(event_bus)
+            sec_monitor = runtime.monitor
+            sec_executor = sec_executor or runtime.executor
+            op_context = op_context or runtime.context_tracker
         self.sec_monitor = sec_monitor
         # 防御动作由 SecMonitor 内部持有的 executor 执行（见 SecMonitor.inspect）；
         # 网关保留注入位只是为了装配对称，不自己调它。
@@ -738,11 +764,13 @@ class ToolGateway:
             )
             if threats:
                 top = threats[0]
-                if top.defense == DefenseAction.DENY:
+                verdict = layer4_gateway_action(top.defense)
+                if verdict is Action.DENY:
                     logger.warning(
                         "gateway.layer4_blocked",
                         command=cmd_str,
                         threat=top.threat_name,
+                        defense=top.defense,
                         reason=top.reason,
                     )
                     resp = ExecuteResponse(
@@ -756,6 +784,32 @@ class ToolGateway:
                     )
                     self._record_audit("security_blocked", request, resp)
                     return resp
+                if verdict is Action.CONFIRM:
+                    # 威胁仍在广播 + 交 SecExecutor（响应链不变），网关只是把「自动
+                    # 放行」改成「要人点头」；非交互路径退化成与 L2.5 的 confirm 一致。
+                    reason = f"[L4] {top.reason}"
+                    action = Action.CONFIRM
+                    if self.interactive:
+                        confirmed = await self._prompt_confirm(
+                            cmd_str,
+                            RiskLevel.HIGH,
+                            reason,
+                            request.agent_id or "terminal",
+                        )
+                        if not confirmed:
+                            resp = ExecuteResponse(
+                                execution_id=execution_id,
+                                status="denied",
+                                error="User cancelled",
+                                exit_code=1,
+                                risk=RiskLevel.HIGH,
+                                action=Action.DENY,
+                                reason="User declined confirmation prompt",
+                            )
+                            self._record_audit("user_cancelled", request, resp)
+                            return resp
+                        action = Action.AUTO
+                        reason = f"User confirmed: {reason}"
 
         # ------------------------------------------------------------------
         # Layer 3: JIT 授权检查

