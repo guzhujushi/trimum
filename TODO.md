@@ -700,6 +700,7 @@ shell 真的过网关（`args==["echo hi"]` + `raw_command`）/ 被拒上报 / *
 
 | 分支 | 状态 | 备注 |
 |------|------|------|
+| `server`（2026-09-21 E7 设计轮） | ✅ 已提交 | `36fedb7` E7 规格与设计（自研编码智能体）：`docs/CODING-AGENT-PLAN.md`（现状勘察 / 定位裁决 / 红线 / 五步分片 / 待裁决两条）+ 生态战略 §5 E7 口径修订；**只加文档**，全量仍 1489/5/8 |
 | `server`（2026-09-21 穿插项 A/B/C） | ✅ 已推送 | `d5d4b02` 剧本自动触发策略（取证 8 条武装 / 处置 8 条不武装 / 自动触发不派子 Agent）+ `tests/test_playbook_auto_trigger.py`（40 项）；`dd3c0a2` 总线硬化（索引接线 / 失败可观测 / 严格模式 / 订阅修正）+ `tests/test_event_bus.py`（103）+ `tests/test_live_console.py`（7）；步骤 C `WorkflowListener` 接线（`submit()` 当生产者 / daemon 装配 / `trm workflow submit`，命令面 78）+ `tests/test_workflow_listener.py`（12）—— `f51b86d` |
 | `server` | ✅ 已同步 | 当前工作分支；E1 `779c0e0` / E6 `ab26edf` / 清理+证书 `1456aba` / E3 `4331437` / E2 `634e62a` / **M3 `e7a30f5`** / **真机修复轮 `209c98e`** |
 | `server`（2026-09-21 E5 第二片 1/4） | ✅ 已推送 | `2aec23b` `trm pkg` CLI（verify / info / create / extract / root-init / signer-init）+ `tests/test_cli_pkg.py`（25 项） |

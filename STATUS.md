@@ -76,7 +76,8 @@
 
 ## 2026-09-21 E7 规格与设计：自研编码智能体（草案，待裁决）
 
-> 立项依据：`TODO.md`「🌐 生态战略」E7 项；本轮**只写文档，不改代码**。产物：`docs/CODING-AGENT-PLAN.md`。
+> 提交：`36fedb7`（server 分支）。立项依据：`TODO.md`「🌐 生态战略」E7 项；本轮**只写文档，不改代码**。
+> 产物：`docs/CODING-AGENT-PLAN.md`（规格 + 设计 + 五步分片计划）。
 > 同轮修正一处口径冲突：`docs/ECOSYSTEM-STRATEGY.md` §5 的 **E7** 原写作「身份与多用户」，
 > 那份内容已由 E5 第三片（能力清单运行期交集）+ E6（官方 Agent 证书）+ `docs/MULTI-USER-BOUNDARY.md` 落地，
 > 故 E7 让位给「自研编码智能体」（修订说明写进该文档）。
