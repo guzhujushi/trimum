@@ -262,7 +262,7 @@ trm workflow enable threat-cron-audit --yes
                                    # 内置剧本落盘成自己的 workflow（落盘 = 显式启用）
 ```
 
-要点（语义细节见 `ARCH.md`「Workflow 执行语义（W1）」）：
+要点（语义细节见 `docs/ARCH.md`「Workflow 执行语义（W1）」）：
 
 - **谁在跑**：daemon 启动时会建一个 `WorkflowRuntime`，订阅 Event Bus 全部事件，按每个 workflow 的
   `steps[].trigger` 命中后驱动 `WorkflowEngine` 执行。`trm workflow run` 是同一个运行时的一次性用法。

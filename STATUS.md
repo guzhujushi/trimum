@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-20（M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信审计**）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理：删除 `PRD.md`、`ARCH.md` 去重后移入 `docs/`**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -1316,3 +1316,47 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 - 内置剧本的启用开关只有 `trm workflow enable <id>`（落盘法），没有「原地开关」。
 - daemon 只暴露只读端点；`POST /api/workflows/{id}/trigger` 这类执行入口**故意没开**（避免无鉴权执行面）。
 - 散文式步骤需要装了 Agent 脚本的 driver 才能真正跑（`trm-agent`），否则节点明确失败。
+
+---
+
+## 2026-09-21 根目录文档合并与清理（PRD / ARCH → `docs/`，tmp 清空）
+
+> 诉求：核对 `PRD.md` / `ARCH.md` 与 `TODO.md` / `STATUS.md` 的重复度，重复则合并清除，并清理临时文件与过期文件。
+> 结论：**`PRD.md` 重复度 ≈ 95%（直接删除）；`ARCH.md` 约 1/3 是与 `docs/` 专题文档重复的规划快照，去重后移入 `docs/ARCH.md`。**
+> ⚠️ 本文档历史记录里出现的 `ARCH.md` 一律指现在的 `docs/ARCH.md`。
+
+### 为什么删 PRD.md
+
+| PRD.md 章节 | 内容已存在于 |
+|---|---|
+| 产品目标 / 用户场景 | `README.md`（本次把用户场景并入 README「典型场景」） |
+| 功能需求（已交付 Phase1-3 / E1 / E6 / E3 / E2 / M3） | `STATUS.md` 各里程碑小节 + `TODO.md`「已完成」 |
+| 功能需求（规划中） | `docs/ECOSYSTEM-STRATEGY.md` §7 / §7.1 / §7.2 / §7.3 |
+| 范围边界 / 验收标准 | 移入 `docs/ARCH.md`「范围边界与验收（生态轮）」 |
+
+### ARCH.md → `docs/ARCH.md`（去重后）
+
+- **搬移**：根 `ARCH.md` → `docs/ARCH.md`。架构文档按 `AGENTS.md` 的文档纪律归 `docs/`，根目录不再保留 `PRD.md` / `ARCH.md`。
+- **删除的小节**（与 `docs/` 专题重复的规划快照，共约 70 行）：
+  `MCP 接入（规划）`（已被 E2 / M4.5 小节取代）、`生态四层（规划）`（并入新的「生态四层（L0–L3）」速查表 + `docs/ECOSYSTEM-STRATEGY.md` §3）、
+  `官方分发渠道（规划）` 与 `身份、证书能力与多用户（规划）`（`docs/ECOSYSTEM-STRATEGY.md` §7 / §7.1 / §7.2 全文覆盖）。
+- **新增**：`范围边界与验收（生态轮）`（来自 PRD.md）。
+
+### 引用同步（tracked）
+
+| 文件 | 改动 |
+|---|---|
+| `scripts/sync_opt_tree.sh` | 顶层文件同步去掉 `ARCH.md` / `PRD.md`，改为 `docs/ARCH.md` → `/opt/trimum/ARCH.md` |
+| `docs/OPERATIONS.md` | W1 语义细节引用 `ARCH.md` → `docs/ARCH.md` |
+| `TODO.md` | 「已完成」表新增本行；Phase 3 审计的「基准文档」补注（那 3 份文档已于 2026-09-20 删除）；`ARCH.md` 引用改 `docs/ARCH.md` |
+| `README.md` | 删除过期口径（`cli-anything-browser-cdp` 已否决 → 自研 CDP 19 action）；修正过期的组件行（Event Index 未接线 / Token 显示 / 结构化审计 / 流式输出）与 Phase 3.5 状态；并入 PRD 的「典型场景」 |
+| `AGENTS.md` | 新增「文档地图」小节 |
+
+### 清理的临时 / 过期文件
+
+| 路径 | 处置 |
+|---|---|
+| `tmp/`（476 个文件 / 14.4 MB：本轮各次调研脚本、`*.tar` 快照、`e4home*` / `w1root` / `sk_repo*` 试验目录、`pytest-tmp`） | 清空；**保留 `tmp/research/`** —— `docs/` 多处引用的原始件，且是 `trm mcp catalog import` 的默认输入（`tmp/research/awesome-README.md`，也是 `tests/test_mcp_catalog.py` 的快照比对源） |
+| `.pytest_cache/`、`**/__pycache__/` | 删除（可再生） |
+| `.sonar/`（2026-09-01 扫描残留） | 删除（重扫时重建） |
+| `memory/2026-09-08.md` | 删除（工作区早已删掉的遗留条目，本次随清理提交） |

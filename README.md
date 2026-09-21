@@ -11,6 +11,12 @@ trimum 是纯 Python 写的 AI Agent 运行基础设施（Harness）——常驻
 
 与 TypeScript 生态的 SemaClaw / skelm / Sandcastle 不同，trimum 用 Python 构建，面向 Linux 服务器场景。
 
+### 典型场景
+
+- 开发者用 `trm ask` / `trm exec` 让 AI 在本机执行命令，高风险操作被拦截或要求确认。
+- 子 Agent 在受限配额下并行跑长任务，全部动作可审计、可回溯。
+- 通过 `~/.trimum/mcp/` 启用第三方 MCP server，其工具与内置工具享受同一套策略与审计。
+
 ---
 
 ## 🚀 快速开始：CLI 用法
@@ -123,27 +129,29 @@ Shell / Git / HTTP / Process / System / Env / File / Knowledge / Notification
 | **Workflow Engine** | 预置流程匹配执行 | ✅ |
 | **Security Agent** | 弹性沙箱决策中心 | ✅ |
 | **Tool Gateway** | 统一 Tool 注册/发现/权限校验 | ✅ |
-| **Memory Classifier** | 记忆分类索引（domain/category），SQLite 快速检索 | ✅ 新增 |
-| **Event Index** | 事件流分桶匹配，替代线性扫描 | ✅ 新增 |
-| **Token 消耗显示** | 对话后显示 token 统计 | ⛔ 待实现 |
-| **结构化审计日志** | JSON 格式审计记录 | ⏳ 部分实现 |
-| **CLI 流式输出** | LLM 应答实时渲染 | ⛔ 待实现 |
+| **Memory Classifier** | 记忆分类索引（domain/category），SQLite 快速检索 | ✅ |
+| **Event Index** | 事件流分桶匹配，替代线性扫描 | 🟡 已实现但未接进 `EventBus` |
+| **Token 消耗显示** | 对话后显示 token 统计（TokenUsageTracker + LiveConsole 面板） | ✅ |
+| **结构化审计日志** | JSON 审计落盘（`audit.jsonl` 轮转）+ `trm log audit` 结构化查询 | ✅ |
+| **CLI 流式输出** | LLM 应答实时渲染（SSE 流式） | ✅ |
 
 ## 浏览器工具（browser）
 
-`~/.trimum/tools/browser/` 是新的浏览器自动化工具，用于替代已废弃的 `opencli`。
+`~/.trimum/tools/browser/`（`main.py` + `_cdp.py`）是**自研纯 Python CDP 实现**，19 个 action；
+默认连本机 `--remote-debugging-port=9222` 的 Chrome（复用登录态），支持 `page.open` / `page.title` /
+`page.snapshot` / `util.text` / `act.click` / `act.type` / `util.screenshot` 等动作。
 
-- 默认走 `cli-anything-browser-cdp`，直接连接已有 Chrome（可复用登录态），支持 `page.open`、`page.title`、`page.snapshot`、`util.text`、`act.click`、`act.type`、`util.screenshot` 等动作。
-- 使用前先启动一个 Chrome CDP 实例：
+```bash
+# 无头启动（不要传初始 URL，避免 Chrome “Multiple targets” 限制）
+chrome --headless=new --remote-debugging-port=9222 --remote-allow-origins=* \
+  --user-data-dir="$HOME/.trimum/tools/browser/chrome-profile" \
+  --no-first-run --disable-gpu
+```
 
-  ```bash
-  # 无头（适合后台运行；不要传初始 URL，避免 Chrome “Multiple targets” 限制）
-  chrome --headless=new --remote-debugging-port=9222 --remote-allow-origins=* \
-    --user-data-dir="$HOME/.trimum/tools/browser/chrome-profile" \
-    --no-first-run --disable-gpu
-  ```
-
-- 可选后端 `backend: "domshell"` 调用 `cli-anything-browser`，需要 DOMShell Chrome 扩展 + `DOMSHELL_TOKEN`，尚需人工配置。
+- CDP 地址优先级：`cdp` 请求参数 > `CLI_ANYTHING_CDP_URL` > `http://localhost:9222`。
+- 可选后端 `backend: "domshell"`（DOMShell Chrome 扩展 + `DOMSHELL_TOKEN`），只作对照，不是默认。
+- CLI-Anything 的 `browser` 方案已**调研否决**（依赖 Node.js + npx + DOMShell，与「去 Node」冲突）；
+  证据见 `docs/CLI-ANYTHING-RESEARCH.md`，路由与分层细节见 `docs/ARCH.md`。
 
 ## 配置与密钥
 
@@ -181,7 +189,8 @@ Shell / Git / HTTP / Process / System / Env / File / Knowledge / Notification
 | Phase 2 | Harness Runtime Core — 23 模块 | ✅ |
 | Phase 2.5 | Tool Dispatcher 重构 — 14 种原生 Tool | ✅ |
 | Phase 3 | 弹性沙箱体系（Security + Behavior + System Monitor + 三重记忆 + Agent Socket + Workflow v2） | ✅ |
-| Phase 3.5 | Token 管理 + 结构化审计 | ⏳ 进行中 |
+| Phase 3.5 | Token 管理 + 结构化审计 | ✅ |
+| 生态四层（E0–E7） | L0 环境清单 `trm env` / L1 MCP / L2 Agent Skills / L3 workflow 目录 | ⏳ E1–E4 + W1 已实现，E5 官方分发渠道待做 |
 | Phase 4 | Landlock LSM + Namespace + Seccomp 沙箱 | 📝 设计 |
 
 ---

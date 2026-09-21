@@ -90,13 +90,18 @@ sync_tree scripts 0755
 # ---------------------------------------------------------------------------
 echo "== [3/5] 顶层文件 =="
 DOC_OWNER="$(stat -c '%U:%G' "$APP_DIR")"
-for doc in AGENTS.md ARCH.md PRD.md STATUS.md TODO.md pyproject.toml; do
+for doc in AGENTS.md STATUS.md TODO.md pyproject.toml; do
     if [[ -f "$SRC/$doc" ]]; then
         [[ $DRY_RUN -eq 0 ]] && install -o "${DOC_OWNER%%:*}" -g "${DOC_OWNER##*:}" -m 0644 \
             "$SRC/$doc" "$APP_DIR/$doc"
         echo "  $doc -> $APP_DIR/$doc ($DOC_OWNER)"
     fi
 done
+if [[ -f "$SRC/docs/ARCH.md" ]]; then
+    [[ $DRY_RUN -eq 0 ]] && install -o "${DOC_OWNER%%:*}" -g "${DOC_OWNER##*:}" -m 0644 \
+        "$SRC/docs/ARCH.md" "$APP_DIR/ARCH.md"
+    echo "  docs/ARCH.md -> $APP_DIR/ARCH.md ($DOC_OWNER)"
+fi
 if [[ -f "$SRC/docs/OPERATIONS.md" ]]; then
     [[ $DRY_RUN -eq 0 ]] && install -o "${DOC_OWNER%%:*}" -g "${DOC_OWNER##*:}" -m 0644 \
         "$SRC/docs/OPERATIONS.md" "$APP_DIR/OPERATIONS.md"

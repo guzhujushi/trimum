@@ -39,3 +39,9 @@
 ## 详细运维流程
 - 见 `docs/OPERATIONS.md`。
 - 收尾/待办见 `TODO.md`、`STATUS.md`。
+
+## 文档地图（2026-09-21）
+- **架构**：`docs/ARCH.md`（2026-09-21 由根目录 `ARCH.md` 移入；根目录不再保留 `PRD.md` / `ARCH.md`）。
+- **需求 / 生态战略**：`docs/ECOSYSTEM-STRATEGY.md`、`docs/MCP-INTEGRATION-PLAN.md`、`docs/CLI-ANYTHING-RESEARCH.md`。
+- **运维**：`docs/OPERATIONS.md`；**进度 / 待办**：`STATUS.md` / `TODO.md`。
+- **原始调研件**：`tmp/research/`（已 gitignore，`docs/` 有多处引用，且是 `trm mcp catalog import` 的默认输入，不要整目录清空）。

@@ -1,4 +1,7 @@
-# ARCH — trimum
+# ARCH — trimum 架构
+
+> **架构单一事实源**（2026-09-21 由根目录 `ARCH.md` 移入 `docs/`；同时删掉与 `docs/` 专题文档重复的规划快照，根目录不再保留 `PRD.md` / `ARCH.md`）。
+> 需求与生态方案见 `docs/ECOSYSTEM-STRATEGY.md` / `docs/MCP-INTEGRATION-PLAN.md`，运维见 `docs/OPERATIONS.md`；进度与待办见 `STATUS.md` / `TODO.md`。
 
 ## 技术选型
 
@@ -6,8 +9,6 @@
 - Web 框架：FastAPI
 - 数据模型：Pydantic v2
 - 工具插件：`~/.trimum/tools/<name>/{tool.json5,main.py}`
-
-本文档即完整架构说明（旧版 `docs/ARCHITECTURE.md` 与 `docs/ARCH.md` 属重复副本，已于 2026-09-20 清除，历史见 `git log`）。
 
 ## browser 路由设计
 
@@ -141,24 +142,21 @@
 - 部署模板见 `scripts/agent-template/main.py`。
 
 
-## MCP 接入（规划，2026-09-20）
+## 生态四层（L0–L3）
 
-> 完整方案见 `docs/MCP-INTEGRATION-PLAN.md`。现状核实：`MCPDispatcher`
-> （`src/trimum_core/tool_dispatchers.py:716`）为占位实现，固定返回 `MCP bridging not yet available`。
-> ⚠️ 本节是 E2 立项前的**规划快照**，已被下方「MCP 接入（E2：M0/M1/M2）」与
-> 「MCP 远端工具聚合（M4.5）」取代：立项时设想的 `mcp_bridge.py` 直到 M4.5 才落地。
+> 战略、竞品对比与路线图（E0–E7）见 `docs/ECOSYSTEM-STRATEGY.md`。核心判断：**做生态集成器，不做生态复制品**。
 
-- **模块**：`mcp_client.py`（`stdio` / `streamable-http` 传输）、`mcp_registry.py`
-  （`~/.trimum/mcp/<name>.json5` 定义 + 懒启动/空闲回收）、`mcp_bridge.py`
-  （远端工具映射进 `ToolRegistry`，命名 `<server>__<tool>`）。
-- **鉴权**：MCP 调用统一走 `ToolGateway.execute()` 既有分层（Layer 1 Policy → Layer 2 Agent 权限 →
-  Layer 2.5 SecurityRule → Layer 3 JIT），不新开旁路；`trust: cloud` 的 server 默认对写类工具强制 confirm。
-- **审计**：每次调用记 `mcp.call` 事件（server / tool / 耗时 / 状态）入 `audit.jsonl`，
-  并广播 `task.audit.mcp_call`。
-- **约束**：deny-by-default（server 定义默认 `enabled: false`）；子进程输出落日志文件而非 PIPE
-  （沿用 `agent_launcher.py` 的既有约定）；Linux 上 `apply_cgroup(pid)`；返回内容经 `ContextCompactor` 限长。
-- **策展**：`awesome-mcp-servers` 仅作目录参考，经导入器生成 `config/mcp-catalog.yaml` 候选清单，
-  人工审核后才写入 `~/.trimum/mcp/`；优先 `uvx` / `pip install` / 单二进制，`npx` 派系默认不收。
+| 层 | 内容 | 落点 |
+|---|---|---|
+| **L0 环境清单** | `trm env inventory` / `trm env install`（探测 + 显式安装；不自建包仓库） | `env_toolchain.py`（见「环境层与工具链安装（E3）」） |
+| **L1 协议（MCP）** | MCP client + `~/.trimum/mcp/*.json5` + 远端工具聚合 | `mcp_client.py` / `mcp_registry.py` / `mcp_bridge.py` |
+| **L2 知识（Agent Skills）** | `trm skill list/import/sync`，`SKILL.md` 分发进各宿主技能目录 | `skill_sync.py`（见「命令面契约与技能分发（E1）」） |
+| **L3 目录（workflow）** | `workflows/*.yaml`（Warp 式）→ 编译进 Workflow / TARL 引擎 | `workflow_catalog.py` / `workflow_runtime.py`（见「Workflow 执行语义（W1）」） |
+
+- **统一底座**：四层产出的能力注册进同一张生态表（`trust` / `risk` / `requires` / `source_url` 元数据），
+  一律经 ToolGateway 分层与审计；第三方来源默认 `enabled: false`。
+- **自描述能力面**：`trm commands --all/--json/--check`，让 Agent 运行时枚举全部能力。
+- **第三方 harness 只作可选导入源**，不写进默认安装，不改技术栈依赖。
 
 ## 浏览器工具（2026-09-20 调研结论）
 
@@ -168,22 +166,6 @@
   `browser-cdp` 在该仓库中并不存在。证据见 `docs/CLI-ANYTHING-RESEARCH.md`。
 - 仅借鉴其约定：工具自带 SKILL.md、registry 的 `requires` 依赖前置声明字段、能力矩阵（`cli-hub can <task>`）
   与 Workflow TARL 匹配的同构关系。
-## 生态四层（规划，2026-09-20）
-
-> 完整战略见 `docs/ECOSYSTEM-STRATEGY.md`。核心判断：**做生态集成器，不做生态复制品**。
-
-| 层 | 内容 | 对接现有代码 |
-|---|---|---|
-| **L0 环境清单** | `trm env inventory`（pacman/apt/mise/winget/PATH 探测）、`trm env install` 调系统包管理器 | 新模块，不自建包仓库 |
-| **L1 协议（MCP）** | MCP client + `~/.trimum/mcp/*.json5` + 工具聚合 | 见上一节与 `docs/MCP-INTEGRATION-PLAN.md` |
-| **L2 知识（Agent Skills）** | `trm skill list/import`；技能符号链接进 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills` | 复用 `~/.trimum/skills/` |
-| **L3 目录（workflow）** | `workflows/*.yaml`（Warp 式低门槛格式）→ 编译进 Workflow / TARL 引擎 | 复用 `workflow_engine.py` |
-
-- **统一底座**：四层产出的能力注册进同一张生态表，带 `trust` / `risk` / `requires` / `source_url` 元数据，
-  一律经 ToolGateway 分层与审计；第三方来源默认 `enabled: false`。
-- **自描述能力面**：`trm commands --all/--json/--check`（对照 Omarchy 的 `# omarchy:` 注释契约），
-  让 Agent 运行时枚举全部能力。
-- **第三方 harness（如 CLI-Anything）** 只作为可选导入源，不写进默认安装，不改技术栈依赖。
 
 ## 命令面契约与技能分发（E1，2026-09-20 已实现）
 
@@ -506,34 +488,29 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 | 事件广播、退出码收窄 | 一次事件会触发**所有**命中的 workflow（运行时按 workflow 各自判定，不做独占）。但 `trm workflow run <id> --event ...` 的退出码只认 `<id>` 自己的运行，其余进 `other_triggered`；点名的那份没被命中而别的被命中 → 退出码 1 并回报实际触发到的 id |
 | 散文式步骤会明确失败 | 内置剧本里「比对上次 hash 基线」这类步骤编译成 `trm-agent`，没有 driver / 没装 Agent 脚本时节点 FAILED 并说明原因，**不假装成功** |
 
-## 官方分发渠道（规划，2026-09-20）
+## 官方分发渠道与身份证书（规划，E5）
 
-- 官网发布官方 Agent / Tool / Workflow；包格式 `.trmpkg` = `tar.gz` + `manifest.json5`
-  （含逐文件 sha256）+ `SIGNATURE` + `chain.pem`。
-- 校验链：解包 → 逐文件哈希 → **内置官方根证书**（`config/trust/trimum-root.crt`）验链 → 验签 → 检查 `requires`；
-  任一步失败即拒绝。等价于发行版软件源签名模型，用户无需选择信任自签证书。
-- `trm install <name>`（官方目录）与 `trm install --file <pkg>`（本地包）共用同一校验器；目录索引同样签名。
-- **安装 ≠ 授权**：官方包以 `trust: official` 注册，运行仍走 ToolGateway 分层与审计；
-  `--allow-untrusted` 仅在显式开启时使用，且标记 `trust: untrusted`、运行期强制 confirm。
+> 设计与信任模型见 `docs/ECOSYSTEM-STRATEGY.md` §7（内置官方根证书 / `.trmpkg` 校验链 / 安装 ≠ 授权）、
+> §7.1（来源 + 身份 + 能力三层职责，证书只在运行时收紧策略）、§7.2（多用户前瞻）。
+> 现状：`agent_cert.py` 已有 official / self_signed / none 三档信任雏形，官方 Agent 证书由 `trm setup` 幂等签发；
+> 官网渠道本身未开工。本节原为 2026-09-20 的规划快照，按单一事实源原则并入上述文档，此处只留指针。
 
-## 身份、证书能力与多用户（规划，2026-09-20）
+## 范围边界与验收（生态轮）
 
-- **三层职责分离**：来源（官方根 + 逐文件哈希，E5）/ 身份（每用户密钥对 + `user_id` + `machine_id`）/
-  能力（证书内 capability 清单：`tools` 白名单 + `max_risk` + `expires_at` + `scope`）。
-- **官方 Agent**：**trimum 自己开发的 Agent 一律是官方 Agent**，走 `cert_type=official` 证书（`issued_by: trimum`、
-  `scope: official`），因此**不需要用户确认**；`agent_cert.discover_bundled_agents()` 从 `<repo>/agents` 与
-  `/opt/trimum/agents` 发现随发行包分发的官方 Agent（刻意排除 `~/.trimum/agents`，那里放的是用户拷进来的、
-  可能是第三方的 Agent），`ensure_official_certs()` 幂等签发。用户自签证书是 `scope: local`，与官方证书互不覆盖。
-- **能力块**：`AgentCert.capabilities = {tools, max_risk, expires_at, scope}`（旧证书缺该字段时按空处理，
-  向后兼容）。向导步骤顺序 `hosts → identity → official → toolchain → skills`。
-- **数据根**：`agent_cert` 的 `certs/` 与 `agents/` 目录改走 `paths.trimum_home()`（`TRIMUM_HOME` 可覆盖，
-  默认仍是 `~/.trimum`），与 E6 的多用户预留保持同一入口。
-- **现状雏形**：`src/trimum_core/agent_cert.py` 已实现 official / self_signed / none 三档信任，
-  自签证书带 `machine_id`，换机器降级为 `CONFIRM`；agent 文件夹自带 `cert.json`
-  （`~/.trimum/agents/<name>/cert.json`）把「代码 + 证书 + 记忆 + 经验」打成一体，是迁移 / 隔离的最小单位。
-- **合并规则**：证书 capability 与 `security_rule.py`、ToolGateway 分层**取交集**，证书只收紧不放宽；
-  `trust: official` 只影响来源判定，不跳过任何一层检查。
-- **多用户待决**：`~/.trimum/`（用户私有）vs `/etc/trimum/`（系统公共：根证书 + 公共工具）的边界；
-  审计日志补 `user_id` 字段；私钥保护（文件权限 / DPAPI / 系统 keyring）；官方证书多用户共用、自签证书每用户各一份。
-- **不假设预装**：`skill_sync.py` 当前硬编码 7 个目标根，需改为**按探测到的宿主动态决定**；
-  一个宿主都没有时只落 `~/.trimum/agent-skills`（首启引导 `trm setup` 负责选装 + 生成密钥 + 探测，见 ECOSYSTEM-STRATEGY §7.3）。
+> 2026-09-21 由已删除的根 `PRD.md` 并入（PRD 的其余章节与 `STATUS.md` / `TODO.md` / `docs/ECOSYSTEM-STRATEGY.md` 重复）。
+
+**范围边界**
+
+- 生态四层只在 trimum 自有模块内新增代码（`src/trimum_core/`），不改既有对外接口语义、不引入 Node 生态依赖。
+- 不安装 / 不内嵌 CLI-Anything（需 Node，调研已否决）；第三方 harness 只作**可选导入源**。
+- **不自建包仓库**：`trm env install` 只调机器上的系统包管理器（pacman / apt / dnf / zypper / apk / brew / winget / scoop）。
+- MCP 按阶段推进：M0/M1/M2（stdio + 注册 + 审计）、M3（策展导入器）、M4/M4.5（传输与生命周期 + 远端工具聚合）已交付。
+- 官方分发渠道（E5：官网 + 官方根证书 + `.trmpkg` 校验器）只出设计，不写实现。
+
+**验收标准**
+
+- 文档中每一项勾选状态都能对应到代码实现，或明确标注为缺口。
+- 调研结论可复现：`docs/CLI-ANYTHING-RESEARCH.md` 每条结论都附证据（registry / README / 本机检查）。
+- 生态四层每项交付都能用一条命令复现：`trm commands --json`、`trm env inventory --json`、`trm setup --dry-run --json`。
+- 安装类命令的安全红线可验证：`--dry-run` 不执行、非交互无 `--yes` 必 abort、已装幂等退出 0（`tests/test_env_toolchain.py`）。
+- 既有测试基线不回归（本地基线失败项均为宿主环境问题：Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网）。
