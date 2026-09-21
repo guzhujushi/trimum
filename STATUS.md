@@ -223,7 +223,7 @@ L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线
 > 「296/297 pass 修 AuditEvent 导出」（已被本地 1156 passed 取代）。
 
 1. ✅ **P0 安全响应链接线**（2026-09-20 审计新立，**2026-09-21 闭环**）—— L4 只拦不报 → 现在「扫描 → 广播（扁平载荷）→ SecExecutor（审计/通知/阻断）→ 网关处置（deny/kill/freeze/isolate → 拒绝，confirm → 确认）→ 剧本被 `security.monitor_result` 驱动」一条链全通，且**任何入口**的网关都过 L4。四个提交（统一契约 `087a476` → L4 走 `inspect()` `d5393a6` → 装配/处置/签名 `dbc411e` → 定 `workflow.trigger` 归属 `f6ecfe4`）见 `TODO.md`「EventBus 通信缺口」
-2. 🟠 **E5 官方分发渠道**（分发面已闭环，剩第三片）—— 第一片 `9b40be2`（`.trmpkg` 包格式 + 校验器）；第二片 `2aec23b` → `4e29b4e`（`trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + E6 遗留的证书 `capabilities` 运行期交集）。剩：`trm install --remove`（卸载 + 注销登记）、官网服务端与目录托管（`DEFAULT_INDEX_URL` 仍是占位）、多用户边界（`docs/ECOSYSTEM-STRATEGY.md` §7.2）
+2. 🟠 **E5 官方分发渠道**（分发面已闭环，剩第三片）—— 第一片 `9b40be2`（`.trmpkg` 包格式 + 校验器）；第二片 `2aec23b` → `4e29b4e`（`trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + E6 遗留的证书 `capabilities` 运行期交集）。剩：`trm install --remove`（卸载 + 注销登记）、官网服务端与目录托管（`DEFAULT_INDEX_URL` 仍是占位）、多用户边界（`docs/ECOSYSTEM-STRATEGY.md` §7.2）；**逐条实施计划（红线 + 测试清单）见 `TODO.md`「🚚 E5 第三片实施计划」**
 3. 🟠 **总线硬化**（P0 的配套）—— `_safe_call` 别静默吞异常 + 兑现 `TRM-9005`；`EventIndex` 接进 `EventBus`；修 `LiveConsole.subscribe_events` 的订阅 / 比对不匹配；清死订阅与过期文档
 4. 🟠 **W1 遗留：`WorkflowListener` / TARL 三段式接线** —— `event.transform.completed` 无生产者、`TransformAgent` 无调用点、`WorkflowListener` 未实例化（要把 TransformAgent 接进 daemon + 决策 + 确认，比 P0 大）；另：运行记录只在内存、内置剧本只有落盘式开关
 5. 🟡 **桌面/WebSocket 确认通道**（P2）—— `SecurityAgent.confirm()` 目前只有 CLI 交付手段

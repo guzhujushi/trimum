@@ -1,11 +1,12 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）**）
-> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5 + E4**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；**E4 三个导入器（CLI / workflow / skill）已落地**；E5 / E7 待做
+> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集**）
+> 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5 + E4**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；**E4 三个导入器（CLI / workflow / skill）已落地**；**E5 分发面已闭环**（第二片：`trm pkg` + 内置根 + 签名索引 + `trm install` + 能力交集），剩 `--remove` / 官网托管 / 多用户边界；E7 待做
 > 测试：本地 **1301 passed / 5 failed / 8 skipped**（2026-09-21 E5 第二片之后；5 项失败 = 既有基线：Windows 沙箱写 `~/.trimum` 被拒 + PATH 缺 `python.exe` + LLM 断网）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → **E5 第二片 1301**；基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
 > 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固/M4 均已推送四分支（M4：server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）；**M4.5 收口小项提交号见 `STATUS.md` 的「提交与分支」表**（幽灵条目 `9e63a81` / env+网关确认 `d34054a` / install 向导 `bd00990`，四分支已同步）。
 > ✅ **真机部署已完成（2026-09-20 20:52）**：`sudo bash /tmp/sync_opt_tree.sh` 全树同步落地，`/opt/trimum` 三个关键文件与本地 HEAD 逐文件对上（`mcp_bridge.py` `f503f505…` / `mcp_registry.py` `86447a65…` / `tool_gateway.py` `47d8a205…`），部署树 `[4b/5]` 自检通过；daemon 20:52:27 启动 → 跑的就是新代码（`trm status` 的 `source: rpc`，PID 23850）。真机聚合实测 4 条 `source=mcp`（`echo__echo` / `echo__fail` / `echo__slow` / …），总数 17；幽灵缓存已清（备份 `/tmp/mcp-tools.json.bak-20260920`），清后 `tool list --mcp` 为 0 条、总数 13。
-> ▶ **下次继续从这里开始（2026-09-21，E5 第二片之后）**：**E5 第三片** = `trm install --remove`（卸载 + 注销登记 + 删 agent 证书）+ 官网服务端 / 目录托管（`DEFAULT_INDEX_URL = https://trimum.dev/packages/index.json5` 仍是占位；发布流程可先用 `trm pkg create` + 本地索引跑通）+ 多用户边界（`/etc/trimum` vs `~/.trimum`，见 `docs/ECOSYSTEM-STRATEGY.md` §7.2）。第一片 `9b40be2` / 第二片 `2aec23b`→`4e29b4e` 已落地，见 `STATUS.md`「E5 第二片」。穿插候选：**剧本自动触发策略**（内置剧本默认 `enabled=False`，要不要给只读自查子集开自动触发）、总线硬化（P0 配套）、W1 遗留 `WorkflowListener` 接线。
+> ▶ **下次继续从这里开始（2026-09-21，E5 第二片之后）**：**E5 第三片** = `trm install --remove`（卸载 + 注销登记 + 删 agent 证书）+ 官网服务端 / 目录托管（`DEFAULT_INDEX_URL = https://trimum.dev/packages/index.json5` 仍是占位；发布流程可先用 `trm pkg create` + 本地索引跑通）+ 多用户边界（`/etc/trimum` vs `~/.trimum`，见 `docs/ECOSYSTEM-STRATEGY.md` §7.2）。第一片 `9b40be2` / 第二片 `2aec23b`→`4e29b4e` 已落地，见 `STATUS.md`「E5 第二片」；
+> **逐条实施计划（红线 + 测试清单）见下方「🚚 E5 第三片实施计划」**。穿插候选：**剧本自动触发策略**（内置剧本默认 `enabled=False`，要不要给只读自查子集开自动触发）、总线硬化（P0 配套）、W1 遗留 `WorkflowListener` 接线。
 > 📌 更早的指针（2026-09-20 EventBus 审计之后）：W1 已闭环（真机 `accept_w1.py` 48/0）；只读审计发现**安全响应链未接线**——拦得住，但不会响应、不会记录、不会通知（见下方「EventBus 通信缺口」）→ 下一步 = **P0 安全链接线**（三条动作，顺序不能乱）→ 然后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`；W1 遗留见 STATUS「W1 遗留」（`WorkflowListener` 未接线 / 运行记录只在内存 / 内置剧本只有落盘式开关）。
 
 ---
@@ -355,6 +356,7 @@ trm config set <key> <value>       # 设置配置项
   登记 `~/.trimum/config/installed.json5`）+ `--allow-untrusted` 降级路径 + 证书 capabilities 运行期交集
   （`capability.py` + 网关 Layer 2.6，E6 遗留一并落地）；错误码 `TRM-4011`（总数 68）。
   第三片未做：`trm install --remove`（卸载 + 注销登记 + 删 agent 证书）、官网服务端与目录托管、多用户边界。
+  **第三片实施计划见下方「🚚 E5 第三片实施计划（2026-09-21 定，待开工）」**（含逐条红线与测试清单）。
   原始需求：官网提供官方 Agent / Tool / Workflow，下载即用；
   官方根证书内置（`config/trust/trimum-root.crt`），用户无需信任自签证书；
   `.trmpkg` 包（manifest + 逐文件 sha256 + 签名 + 证书链）→ 内置根验证 → `trm install <name>` / `--file <pkg>`
@@ -372,11 +374,109 @@ trm config set <key> <value>       # 设置配置项
   - 硬约束（已满足）：**零预装可跑** —— 不依赖 `claude` / `codex` / `opencode` 等第三方 coding agent，也不假设它们会被实际使用
   - [x] 官方 Agent 证书：`cert_type=official` + `capabilities` 能力块；`discover_bundled_agents()` / `ensure_official_certs()`；
     向导新增 `official` 步骤（trimum 自研 Agent 全部免确认；用户自签 `scope=local` 不被覆盖）
-  - 遗留：证书 `capabilities` 与 ToolGateway / `security_rule.py` 的**运行时合并尚未接线**（当前证书只是身份锚点 + 登记，不参与执行判定）
+  - [x] 已接线（2026-09-21 E5 第二片）：证书 `capabilities` 与策略的**运行期交集**已落地（`capability.py` + 网关 Layer 2.6，多来源取最严、只收紧不放宽）；详见 `STATUS.md`「E5 第二片」
 - [ ] **E7. 自研 coding Agent（候选）**：参考 `affaan-m/ECC`（262,999★，agent harness operating system，903 个 `SKILL.md` / 30+ 宿主目录）
   设计 trimum 自己的 coding Agent；调研原始件 `tmp/research/ecosystem/ecc-*`（已 gitignore）
 
 > 统一底座：四层产出的能力都注册进同一张表，一律经 ToolGateway 分层 + 审计。
+
+## 🚚 E5 第三片实施计划（2026-09-21 定，待开工）
+
+> 来源：E5 第二片收尾时列的三个缺口。**开工先读**：`STATUS.md`「2026-09-21 E5 第二片」、
+> `docs/ECOSYSTEM-STRATEGY.md` §7 / §7.4 / §7.5、`docs/ARCH.md`「官方分发渠道（E5）」。
+> 顺序 1 → 2 → 3，**只有步骤 1 是必须的代码工作**。
+
+### 交接前提（环境与纪律，别踩）
+
+- 分支 `server`；`git add` / `commit` / `push` 需提权（`.git` 在沙箱里只读）。
+  写文件用 `[System.IO.File]::WriteAllText` + UTF-8 **无 BOM** + LF；
+  `Set-Content -Encoding utf8` 会加 BOM（禁用）；不用 `apply_patch`。
+- 测试：`python -m pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider`；
+  基线 **1301 passed / 5 failed / 8 skipped**，5 项失败 = `test_depends_on` 1 +
+  `test_learning_engine` 3（沙箱写真实 `~/.trimum` 被拒）+ `test_llm_integration` 1（LLM 断网），**不算回归**。
+- 命令面：`trm commands --check` → **76 commands**。动了 `__command_meta__` 的 `args` 必须同步。
+- 三个测试陷阱：① `TRIMUM_TRUST_ROOT` 必须固定到 fixture 根（内置根已是**真实**根）；
+  ② 改完签名索引要重签；③ 相对 `url` 的索引与包必须放同一目录。
+
+### 步骤 1 — `trm install --remove`（本片唯一必做）
+
+**目标**：卸载 + 注销登记 + 删 agent 证书，运行期不再把它当已装。
+
+**命令归属决策**：走 `trm install --remove`（与 `--list` 对称），**不新增顶层命令**
+——命令面保持 76，`trm uninstall` 之类的别名不做。
+
+| 文件 | 动作 |
+|---|---|
+| `src/trimum_core/pkg_install.py` | 新增 `remove_package(name, *, dry_run=False) -> dict`，加进 `__all__` |
+| `src/trimum_core/cli/commands/install.py` | 新增 `--remove` / `--yes` / `--dry-run`；`handler()` 分支；`_human_remove()`；`__command_meta__["install"]["args"]` 同步 |
+| `tests/test_pkg_install.py` | 新增 `TestRemove`（清单见下） |
+| `docs/ARCH.md` + `docs/ECOSYSTEM-STRATEGY.md` | 模块表 / 红线 / §7.5 补卸载口径（或新开 §7.6） |
+
+**`remove_package()` 的行为（逐条，实现时照做）**
+
+1. 查 `load_ledger()["packages"][name]`；没有 → `TRM-4011 PACKAGE_NOT_FOUND`。
+2. **红线：只删登记路径，且必须落在 `TYPE_ROOTS[type]` 期望的目录下。**
+   手改 `installed.json5` 把 `path` 指到工作区外或 `~/.trimum/audit` → 直接拒（`TRM-4009`），目标不删。
+3. **红线：命中内置 agent 名字就拒删。** `install_package()` 只挡「已存在且没 `--force`」
+   （`pkg_install.py:273`），所以 `--force` 可能覆盖过内置 agent 目录；
+   登记里**没记**「安装前 `dest` 是否存在」，无法还原 —— 用
+   `agent_cert.discover_bundled_agents()` 判命中即拒并提示手工处理。
+4. 删 `dest` 整棵目录。agent 证书就是 `dest/cert.json`（`_write_agent_cert` 写在**包目录里**），
+   随目录一起走，**不需要**单独删；**不要**去碰 `certs/` / `audit/` / `memory/`。
+5. 删 ledger 条目 → `save_ledger()`；返回
+   `{name, type, version, trust, path, removed: True, dry_run: bool}`。
+6. `dry_run=True`：只回报「将删什么」，盘不动、ledger 不动。
+7. **幂等**：未安装 → 退出码 1 + 明确文案（不崩溃、不静默 0）。
+8. 卸载**不看** `trust`，`--allow-untrusted` 与它无关（卸载不是授权动作）。
+
+**破坏性动作的确认口径**（沿用 `trm env install` 的既有约定）：
+交互式 → 提示确认；非交互 → 必须 `--yes`，否则 abort；`--dry-run` 恒不执行。
+`--remove` 与 `--file` 互斥（报「不能同时」）；`--yes` / `--dry-run` 只作用于包渠道，
+**不要**影响无参数的旧向导路径。
+
+**错误码决策**：**复用 `TRM-4011`，不新增** —— 少一次全量错误码计数（当前 68）波动。
+只有当实现时确认「没装过」必须与「目录不存在」区分开，才加 `TRM-4012`，并同步
+`models.py` + `docs/ERROR-CODE-SPEC.md` + `tests/test_error_codes.py`。
+
+**`TestRemove` 清单**
+- 卸 tool：目录消失 + ledger 条目消失 + `trm install --list --json` 里没了
+- 卸 agent：`dest` 与 `dest/cert.json` 一起消失；`certs/` / `audit/` 有哨兵文件且不受影响
+- 未安装的名字 → 退出码 1 + `TRM-4011`
+- 幂等：连删两次，第二次明确报错
+- **ledger 被手改成越界路径** → 拒绝，且目标文件仍在
+- 名字命中内置 agent → 拒绝
+- `--dry-run` 不动盘、不动 ledger
+- 非交互无 `--yes` → abort；`--remove` + `--file` → 报「不能同时」
+- 删掉 `--allow-untrusted` 装的 tool 后 `pkg_install.untrusted_names()` 不再含它
+  （运行期联动点：`capability.py:197` 读的就是这张表）
+
+### 步骤 2 — 目录托管与发布流程（可只做本地闭环）
+
+- **`DEFAULT_INDEX_URL` 仍是占位**（`https://trimum.dev/packages/index.json5`，本机没有服务端）。
+- 建议加 `trm pkg index <dir> -o index.json5` 子命令：扫目录里的 `.trmpkg` → 生成 `trmindex/1`
+  document → 用签名者签 → 落盘。理由：`pkg.py` 已有 `root-init` / `signer-init` / `create`，
+  发布方闭环缺的正好是「建索引」这最后一步，且子命令可测（比 shell 脚本好）。
+- 验收：`trm pkg index` → `TRIMUM_PKG_INDEX=<dir> trm install <name>` 一条链跑通
+  （`tests/test_pkg_install.py` 里已有本地索引的建法可复用）。
+- **官网服务端不做**（要域名 / 托管 / CI，属产品决策）。改为写
+  `docs/PACKAGE-CHANNEL-OPS.md`：造根 → 建签名者 → 打包 → 建索引 → 上线 → **轮换根**
+  （换根 = 旧包全部作废）→ 自建镜像（`--index` 指内网）。
+
+### 步骤 3 — 多用户边界（调研 + 设计，**不写实现**）
+
+- 见 `docs/ECOSYSTEM-STRATEGY.md` §7.2 的三个子问题：`/etc/trimum/`（系统公共）vs
+  `~/.trimum/`（用户私有）的边界、审计日志 `user_id` 归属、私钥保护（文件权限 / DPAPI / keyring）。
+- 现状单点已经存在：`paths.py::trimum_home()` 是唯一改点；
+  `agents/<name>/cert.json` 已把「来源 + 证书 + 版本 + 登记」捆在最小单位。
+- 产出：把 §7.2 扩写成带方案的章节（或 `docs/MULTI-USER-BOUNDARY.md`），含迁移成本。
+- 除非发现现有设计有硬伤，否则**不动代码**。
+
+### 本片红线（写进代码与测试）
+
+- 卸载只删**登记过的**路径，且必须落在 `TYPE_ROOTS` 期望的目录下；越界即拒。
+- 内置 agent 目录不可被卸载删掉。
+- 卸载不碰 `certs/` / `audit/` / `memory/`（用户数据与安全记录与包无关）。
+- 破坏性动作：`--dry-run` 恒不执行；非交互无 `--yes` 必 abort。
 
 ## 🔌 MCP 接入（P1，2026-09-20 立项）
 
