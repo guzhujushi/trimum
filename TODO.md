@@ -355,8 +355,9 @@ trm config set <key> <value>       # 设置配置项
   + `trmindex/1` 签名目录索引（`pkg_index.py`）+ `trm install <name>|--file|--list` 接线（`pkg_install.py`，
   登记 `~/.trimum/config/installed.json5`）+ `--allow-untrusted` 降级路径 + 证书 capabilities 运行期交集
   （`capability.py` + 网关 Layer 2.6，E6 遗留一并落地）；错误码 `TRM-4011`（总数 68）。
-  第三片未做：`trm install --remove`（卸载 + 注销登记 + 删 agent 证书）、官网服务端与目录托管、多用户边界。
-  **第三片实施计划见下方「🚚 E5 第三片实施计划（2026-09-21 定，待开工）」**（含逐条红线与测试清单）。
+  第三片已收口（2026-09-21）：`trm install --remove`（卸载 + 注销登记，步骤 1）、`trm pkg index`（发布方闭环，步骤 2）、
+  多用户边界（调研 + 设计，**不改代码**，步骤 3）；仅剩官网服务端与目录托管（域名 / 托管 / CI = 产品决策）。
+  **第三片实施计划与逐条红线见下方「🚚 E5 第三片实施计划（✅ 三步骤全部完工）」**。
   原始需求：官网提供官方 Agent / Tool / Workflow，下载即用；
   官方根证书内置（`config/trust/trimum-root.crt`），用户无需信任自签证书；
   `.trmpkg` 包（manifest + 逐文件 sha256 + 签名 + 证书链）→ 内置根验证 → `trm install <name>` / `--file <pkg>`
@@ -380,7 +381,7 @@ trm config set <key> <value>       # 设置配置项
 
 > 统一底座：四层产出的能力都注册进同一张表，一律经 ToolGateway 分层 + 审计。
 
-## 🚚 E5 第三片实施计划（2026-09-21 定，待开工）
+## 🚚 E5 第三片实施计划（2026-09-21 定，✅ 三步骤全部完工）
 
 > 来源：E5 第二片收尾时列的三个缺口。**开工先读**：`STATUS.md`「2026-09-21 E5 第二片」、
 > `docs/ECOSYSTEM-STRATEGY.md` §7 / §7.4 / §7.5、`docs/ARCH.md`「官方分发渠道（E5）」。
@@ -607,6 +608,7 @@ trm config set <key> <value>       # 设置配置项
 | `server`（2026-09-21 E5 第二片 4/4） | ✅ 已推送 | `784992c` `capability.py` 能力交集 + 网关 Layer 2.6（L2.5 后、L4 前）+ `tests/test_capability.py`（20 项） |
 | `server`（2026-09-21 E5 第三片 1/3） | ✅ 已提交 | `d7aced2` `trm install --remove`（卸载 + 注销 + 两条红线 + 确认口径）+ `tests/test_pkg_install.py`（28 → 42）+ 文档（ARCH / 生态战略 §7.6） |
 | `server`（2026-09-21 E5 第三片 2/3） | ✅ 已提交 | `trm pkg index` 发布方闭环（`pkg_index.entries_from_directory` + CLI 子命令，命令面 77）+ `tests/test_cli_pkg.py::TestIndex`（10）+ 端到端 1 项 + `docs/PACKAGE-CHANNEL-OPS.md` |
+| `server`（2026-09-21 E5 第三片 3/3） | ✅ 已提交 | `8646fe7` 多用户边界（调研 + 设计，**不改代码**）：`docs/MULTI-USER-BOUNDARY.md`（现状对照表 / 公共层 / 审计 `user_id` 归属 / 私钥三档 / 六条不变量 / 实现顺序与风险）+ 生态战略 §7.2/§7.8 + ARCH / AGENTS 指向；全量仍 1326/5/8 |
 | `server`（2026-09-21 E5 第二片文档口径） | ✅ 已推送 | `4e29b4e` `docs/ARCH.md` 实现节 + `docs/ECOSYSTEM-STRATEGY.md` §7.5 + requires PATH 探测（缺依赖只警告不拒装） |
 | `server`（2026-09-21 E5 第一片） | ✅ 已提交 | `9b40be2` `.trmpkg` 包格式 + 打包/校验器（`trmpkg.py` + 16 项测试 + 错误码 `TRM-4009/4010` + `config/trust/README.md` + `docs/ECOSYSTEM-STRATEGY.md` §7.4） |
 | `server`（2026-09-21 P0 步骤 3） | ✅ 已提交 | `f6ecfe4` 定 `workflow.trigger` 归属：剧本只走 `security.monitor_result`，`SecExecutor` 不再发 `workflow.trigger`；端到端用例（L4 广播真的驱动剧本）；内置剧本触发器契约锁 |

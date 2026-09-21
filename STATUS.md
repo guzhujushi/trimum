@@ -116,6 +116,7 @@
 |---|---|
 | E5 第三片 步骤 1（`trm install --remove` + `TestRemove` + 文档 §7.6） | `d7aced2` |
 | E5 第三片 步骤 2（`trm pkg index` + `TestIndex` + `docs/PACKAGE-CHANNEL-OPS.md` + 文档 §7.7） | `fcecbfe` |
+| E5 第三片 步骤 3（多用户边界：调研 + 设计，**不改代码**；`docs/MULTI-USER-BOUNDARY.md` + 生态战略 §7.2/§7.8 + ARCH / AGENTS 指向） | `8646fe7` |
 
 ---
 
