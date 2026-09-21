@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -9,10 +9,50 @@
 > **P0 安全响应链接线已闭环**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，剧本在真机上永远不会被自动触发）：
 > 2026-09-21 四步走完 —— 步骤 1/3（载荷契约扁平化）、步骤 2/3（L4 改走 `SecMonitor.inspect()`）、
 > 步骤 2 补丁（装配统一 + 处置映射 + 签名收敛）、步骤 3/3（定 `workflow.trigger` 归属）；
-> **E5 官方分发渠道**的分发面已闭环（2026-09-21 第二片：`.trmpkg` + `trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + 证书能力运行期交集）；剩 `trm install --remove`、官网服务端与目录托管、多用户边界。P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
+> **E5 官方分发渠道**已闭环（2026-09-21 第二片：`.trmpkg` + `trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + 证书能力运行期交集；**第三片步骤 1**：`trm install --remove` 卸载与注销）；剩 官网服务端与目录托管、目录索引生成入口（`trm pkg index`）、多用户边界（§7.2）。P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
 > 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
 > E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
 > 失败项均为既有宿主状态基线（Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网），与本轮各次开工前同名同数，无回归。
+
+---
+
+## E5 第三片 —— 卸载与注销（✅ 步骤 1 已完成，2026-09-21）
+
+> 计划与红线：`TODO.md`「🚚 E5 第三片实施计划」；口径：`docs/ECOSYSTEM-STRATEGY.md` §7.6、
+> 模块与红线：`docs/ARCH.md`「官方分发渠道（E5）」。
+> 提交：`d7aced2`（`feat(e5): trm install --remove`）。
+
+**做了什么**：`trm install --remove <name>` —— 与 `--list` 对称，不新增顶层命令（命令面仍是 76）。
+两个动作成对：删掉 **ledger 指名的**落地目录 + 划掉登记行，不留「目录没了但还登记着」的半截状态。
+
+**两条红线（越界就一个字节都不删，报 `TRM-4009`）**
+
+| 红线 | 为什么 | 怎么判 |
+|---|---|---|
+| 登记路径越界即拒 | `installed.json5` 是可手改的文本，「登记里的 path」不作数 | 只有恰好等于 `<TRIMUM_HOME>/<TYPE_ROOTS[type]>/<name>` 才动手（比「落在类型根下」更严） |
+| 内置 agent 名字即拒 | `install_package(force=True)` 可能覆盖过内置 agent 目录，登记里没记「装之前 dest 在不在」 | 命中 `discover_bundled_agents()` 的 agent 包即拒并提示手工处理；**只管 agent**，同名 tool 可卸 |
+
+**确认口径**（沿用 `trm env install`）：交互式问一句；非交互必须 `--yes`（`ask_confirm` 在非 TTY 直接答 no，
+不挂住），否则 abort → 退出码 1；`--dry-run` 恒不执行，但**红线照查**（干跑说「可以删」之后真删却被拒，比不干跑更糟）；
+`--remove` 与 `--file` 互斥；`--yes` / `--dry-run` 只作用于包渠道，不影响无参数的旧向导路径。
+
+**边界与联动**：卸载**不看** `trust`（不是授权动作），但删掉降级安装的包之后 `untrusted_names()`
+（`capability.py` 运行期读的就是这张表）同步不再含它；名字没登记过 → `TRM-4011` + 退出码 1（连删两次，
+第二次明确报错，不静默 0）；登记目录已不在 → 当**过期登记**划账并回报 `path_missing`，不崩在 `rmtree` 上；
+不碰 `certs/` / `audit/` / `memory/`（agent 证书就是包目录里的 `cert.json`，随目录一起走）。
+错误码**复用 `TRM-4011`，不新增**。
+
+**测试**：`tests/test_pkg_install.py` 28 → **42**（`TestRemove` 14 项：越界 ledger 两种 / 内置 agent 拒删 /
+同名 tool 可卸 / 干跑不动盘不动账 / 幂等连删 / 非交互 abort / `--file` 互斥 / 缺名字 / 过期登记 / 运行期联动）。
+全量 **1315 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线：沙箱写 `~/.trimum` 被拒 ×4 + LLM 断网 ×1，无回归）。
+
+### 提交与分支
+
+> 分支纪律见 `AGENTS.md`：**日常只推 `server`**，`main` / `ubuntu` / `arch-linux` 只在收尾阶段同步。
+
+| 内容 | server |
+|---|---|
+| E5 第三片 步骤 1（`trm install --remove` + `TestRemove` + 文档 §7.6） | `d7aced2` |
 
 ---
 
