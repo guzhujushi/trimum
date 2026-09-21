@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -9,7 +9,7 @@
 > **P0 安全响应链接线已闭环**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，剧本在真机上永远不会被自动触发）：
 > 2026-09-21 四步走完 —— 步骤 1/3（载荷契约扁平化）、步骤 2/3（L4 改走 `SecMonitor.inspect()`）、
 > 步骤 2 补丁（装配统一 + 处置映射 + 签名收敛）、步骤 3/3（定 `workflow.trigger` 归属）；
-> 之后是 **E5 官方分发渠道**；P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
+> **E5 官方分发渠道**的分发面已闭环（2026-09-21 第二片：`.trmpkg` + `trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + 证书能力运行期交集）；剩 `trm install --remove`、官网服务端与目录托管、多用户边界。P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
 > 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
 > E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
 > 失败项均为既有宿主状态基线（Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网），与本轮各次开工前同名同数，无回归。
@@ -223,7 +223,7 @@ L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线
 > 「296/297 pass 修 AuditEvent 导出」（已被本地 1156 passed 取代）。
 
 1. ✅ **P0 安全响应链接线**（2026-09-20 审计新立，**2026-09-21 闭环**）—— L4 只拦不报 → 现在「扫描 → 广播（扁平载荷）→ SecExecutor（审计/通知/阻断）→ 网关处置（deny/kill/freeze/isolate → 拒绝，confirm → 确认）→ 剧本被 `security.monitor_result` 驱动」一条链全通，且**任何入口**的网关都过 L4。四个提交（统一契约 `087a476` → L4 走 `inspect()` `d5393a6` → 装配/处置/签名 `dbc411e` → 定 `workflow.trigger` 归属 `f6ecfe4`）见 `TODO.md`「EventBus 通信缺口」
-2. 🔴 **E5 官方分发渠道** —— `.trmpkg`（manifest + 逐文件 sha256 + 签名 + 证书链）→ 内置根验证 → `trm install <name>` / `--file <pkg>`；含 E6 遗留的证书 `capabilities` 运行期合并（设计见 `docs/ECOSYSTEM-STRATEGY.md` §7）
+2. 🟠 **E5 官方分发渠道**（分发面已闭环，剩第三片）—— 第一片 `9b40be2`（`.trmpkg` 包格式 + 校验器）；第二片 `2aec23b` → `4e29b4e`（`trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + E6 遗留的证书 `capabilities` 运行期交集）。剩：`trm install --remove`（卸载 + 注销登记）、官网服务端与目录托管（`DEFAULT_INDEX_URL` 仍是占位）、多用户边界（`docs/ECOSYSTEM-STRATEGY.md` §7.2）
 3. 🟠 **总线硬化**（P0 的配套）—— `_safe_call` 别静默吞异常 + 兑现 `TRM-9005`；`EventIndex` 接进 `EventBus`；修 `LiveConsole.subscribe_events` 的订阅 / 比对不匹配；清死订阅与过期文档
 4. 🟠 **W1 遗留：`WorkflowListener` / TARL 三段式接线** —— `event.transform.completed` 无生产者、`TransformAgent` 无调用点、`WorkflowListener` 未实例化（要把 TransformAgent 接进 daemon + 决策 + 确认，比 P0 大）；另：运行记录只在内存、内置剧本只有落盘式开关
 5. 🟡 **桌面/WebSocket 确认通道**（P2）—— `SecurityAgent.confirm()` 目前只有 CLI 交付手段
@@ -1565,3 +1565,52 @@ workflow，同一次威胁就会被两条链各跑一遍。
 `trm install <name>` / `--file <pkg>` 接线、`--allow-untrusted` 降级路径
 （装成 `trust: untrusted` + 运行期强制 confirm）、证书 `capabilities` 与 `security_rule.py`
 的**运行期交集**（E6 遗留，与本节同源，建议与 `trm install` 一起做）。
+
+---
+
+## 2026-09-21 E5 第二片：`trm pkg` + 真实内置根 + 签名目录索引 + `trm install` + 能力交集
+
+> 提交（server）：`2aec23b` CLI → `5c836e1` 真实官方根 → `2c091c4` 索引 + 安装 → `784992c` 能力交集 →
+> `4e29b4e` 文档口径 + requires 探测。E5「官方分发渠道」的**分发面已闭环**：用户侧 `trm install <name>`
+> 与发布方 `trm pkg create` 走同一条信任链，信任锚是真的（不再是占位）。
+
+### 做了什么
+
+| 位置 | 内容 |
+|---|---|
+| `cli/commands/pkg.py` | **新建**：`trm pkg {verify,info,create,extract,root-init,signer-init}`（发布方 3 条 + 使用者 3 条）；`test_cli_pkg.py` 25 项 |
+| `config/trust/trimum-root.crt` | **真实官方根**（Ed25519，key_id `sha256:65da4663…`）：只有公钥进仓库，私钥在发布方 `~/.trimum/trust/`；`README.md` 重写，3 项内置根测试 |
+| `src/trimum_core/pkg_index.py` | **新建**：目录索引 `trmindex/1`，容器 `{document, signature, chain}`，签名覆盖 document 规范字节，证书链与包**共用** `verify_chain()` |
+| `src/trimum_core/pkg_install.py` | **新建**：校验 → 按 `TYPE_ROOTS` 落地（agents / tools / workflows / skills）→ 登记 `~/.trimum/config/installed.json5`；agent 包写 `cert.json`（official → TRUSTED / untrusted → CONFIRM） |
+| `src/trimum_core/capability.py` | **新建**（E6 遗留）：能力交集 `evaluate()` / `tighten()`，多来源取最严，只收紧不放宽；`test_capability.py` 20 项 |
+| `tool_gateway.py` Layer 2.6 | L2.5 之后、L4 之前 `_check_capabilities()`：deny → `capability_denied` 审计并拒绝；confirm → `Action.CONFIRM`；三处重复弹窗收敛为 `_confirm_interactively()` |
+| `models.py` / `docs/ERROR-CODE-SPEC.md` | 新增 `TRM-4011 PACKAGE_NOT_FOUND`（总数 67 → **68**） |
+
+### 关键设计（写进代码与测试）
+
+- **索引也是签名文档**：索引回答「去哪拿这个包」，所以它没有豁免 —— 索引与包对「什么算可信」不可能有两种解释。
+- **索引条目的 `sha256` 是承诺**：下载后先比哈希再进校验，不一致直接拒，不进解包流程。
+- **安装三动作**：校验 → 落地 → 登记（trust / 签名者与根指纹 / 包哈希 / 来源 / requires / 能力块）。
+- **`--allow-untrusted` 只放宽「来源」**：包的证书链与索引签名放宽，运行期额外强制逐条 confirm；
+  但包内绝对路径 / `..` / 符号链接 / 硬链接 / 设备文件**照挡**。
+- **`requires` 只探测不判死**：缺依赖只警告（与 `AgentRegistry.check_dependencies` 同口径）——
+  装不装得到是环境的事，不是包的问题。
+- **风险取管线判定值**：Layer 2.6 用的是 PolicyEngine / LLM 策略给出的 `risk`，不是执行后的观测值 ——
+  `max_risk` 挡的是「策略认为有多危险」，不是「实际有多危险」。
+- **私钥红线**：`root-init` / `signer-init` 拒绝把私钥写进 git 工作树（除非 `--insecure-key-output`），落盘 0600。
+
+### 验证
+
+- 新增测试：`test_cli_pkg.py`（25）、`test_pkg_install.py`（28）、`test_capability.py`（20）、`test_trmpkg.py`（16）→ 四文件 **89 passed**
+- 全量：`python -m pytest tests -q` → **1301 passed / 5 failed / 8 skipped**（5 项既有宿主基线，无回归）
+- 命令面：`trm commands --check` → **76 commands, no problems**
+- 关键路径（真包 / 真根 / 真索引，非 mock）：用真实签名者打的包 `trm pkg verify` **不带任何参数即通过**；
+  载荷改一字节 / 改 manifest / 换根 / 索引 sha256 不符 / 相对 url 越界，逐条拒绝；
+  `trm install --list --json` 能回读登记，缺依赖走警告而非拒装。
+
+### 这一片没做（E5 第三片）
+
+`trm install --remove`（卸载 + 注销登记 + 删 agent 证书）、官网服务端与目录托管
+（`DEFAULT_INDEX_URL = https://trimum.dev/packages/index.json5` 仍是占位；发布流程可先用 `trm pkg create`
++ 本地索引跑通）、多用户边界（`/etc/trimum` vs `~/.trimum`，`docs/ECOSYSTEM-STRATEGY.md` §7.2）、
+`requires` 只探测不解决（缺依赖仅警告）。

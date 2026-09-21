@@ -2,10 +2,10 @@
 
 > 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）**）
 > 当前阶段：Phase 3 收尾已完成。**生态战略已推进到 E2 + M4 + M4.5 + E4**：不做「生态复制品」，做「生态集成器」——四层 = 环境清单（Omarchy 式）+ MCP + Agent Skills + workflow 目录（`docs/ECOSYSTEM-STRATEGY.md`）；CLI-Anything 降级为可选导入源；**E4 三个导入器（CLI / workflow / skill）已落地**；E5 / E7 待做
-> 测试：本地 **1228 passed / 5 failed / 7 skipped**（2026-09-21 E5 第一片之后；5 项失败 = 既有基线：Windows 沙箱写 `~/.trimum` 被拒 + PATH 缺 `python.exe` + LLM 断网）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228；基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
+> 测试：本地 **1301 passed / 5 failed / 8 skipped**（2026-09-21 E5 第二片之后；5 项失败 = 既有基线：Windows 沙箱写 `~/.trimum` 被拒 + PATH 缺 `python.exe` + LLM 断网）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → **E5 第二片 1301**；基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
 > 当前工作分支：`server`；E1/E6/清理/E3/E2/M3/单实例加固/M4 均已推送四分支（M4：server `20ce9d2`+`19561e0` / main `f813fc8`+`8778a40` / ubuntu `2480869`+`76a2dee` / arch-linux `117e85b`+`5ff33b9`）；**M4.5 收口小项提交号见 `STATUS.md` 的「提交与分支」表**（幽灵条目 `9e63a81` / env+网关确认 `d34054a` / install 向导 `bd00990`，四分支已同步）。
 > ✅ **真机部署已完成（2026-09-20 20:52）**：`sudo bash /tmp/sync_opt_tree.sh` 全树同步落地，`/opt/trimum` 三个关键文件与本地 HEAD 逐文件对上（`mcp_bridge.py` `f503f505…` / `mcp_registry.py` `86447a65…` / `tool_gateway.py` `47d8a205…`），部署树 `[4b/5]` 自检通过；daemon 20:52:27 启动 → 跑的就是新代码（`trm status` 的 `source: rpc`，PID 23850）。真机聚合实测 4 条 `source=mcp`（`echo__echo` / `echo__fail` / `echo__slow` / …），总数 17；幽灵缓存已清（备份 `/tmp/mcp-tools.json.bak-20260920`），清后 `tool list --mcp` 为 0 条、总数 13。
-> ▶ **下次继续从这里开始（2026-09-21，E5 第一片之后）**：**E5 下一片** = `trm pkg verify|create|root-init` CLI + 内置根的实际生成与提交 + `trm install <name>` / `--file <pkg>` 接线 + `--allow-untrusted` 降级路径 + 证书 `capabilities` 与 `security_rule.py` 的运行期交集（E6 遗留，一起做）。包格式与校验器已落地（`9b40be2`，见 `STATUS.md`「E5 第一片」）。穿插候选：**剧本自动触发策略**（内置剧本默认 `enabled=False`，要不要给只读自查子集开自动触发）、总线硬化（P0 配套）、W1 遗留 `WorkflowListener` 接线。
+> ▶ **下次继续从这里开始（2026-09-21，E5 第二片之后）**：**E5 第三片** = `trm install --remove`（卸载 + 注销登记 + 删 agent 证书）+ 官网服务端 / 目录托管（`DEFAULT_INDEX_URL = https://trimum.dev/packages/index.json5` 仍是占位；发布流程可先用 `trm pkg create` + 本地索引跑通）+ 多用户边界（`/etc/trimum` vs `~/.trimum`，见 `docs/ECOSYSTEM-STRATEGY.md` §7.2）。第一片 `9b40be2` / 第二片 `2aec23b`→`4e29b4e` 已落地，见 `STATUS.md`「E5 第二片」。穿插候选：**剧本自动触发策略**（内置剧本默认 `enabled=False`，要不要给只读自查子集开自动触发）、总线硬化（P0 配套）、W1 遗留 `WorkflowListener` 接线。
 > 📌 更早的指针（2026-09-20 EventBus 审计之后）：W1 已闭环（真机 `accept_w1.py` 48/0）；只读审计发现**安全响应链未接线**——拦得住，但不会响应、不会记录、不会通知（见下方「EventBus 通信缺口」）→ 下一步 = **P0 安全链接线**（三条动作，顺序不能乱）→ 然后 **E5 官方分发渠道**（`.trmpkg` + 内置根证书 + 能力清单）→ **E7 自研 coding Agent**。审核入口（人工、非阻塞）：`trm mcp catalog list --unreviewed`；W1 遗留见 STATUS「W1 遗留」（`WorkflowListener` 未接线 / 运行记录只在内存 / 内置剧本只有落盘式开关）。
 
 ---
@@ -347,18 +347,21 @@ trm config set <key> <value>       # 设置配置项
   - 遗留：`WorkflowListener`（Transform TARL 三段式）仍未接线；运行记录只在内存；
         内置剧本只有「落盘式」启用开关
 
-- [ ] **E5. 官方分发渠道**（2026-09-20 需求确认）—— 🚧 **第一片已落地（2026-09-21，`9b40be2`）**：
-  `.trmpkg` 包格式 + 打包/校验器（`src/trimum_core/trmpkg.py`，16 项测试；签名覆盖 manifest 规范字节、
-  manifest 覆盖逐文件 sha256、证书链到内置根、解包路径安全、校验不过不解包；错误码 `TRM-4009/4010`）。
-  下一片：CLI（`trm pkg verify|create|root-init`）、内置根生成与提交、`trm install` 接线、`--allow-untrusted`、
-  证书 capabilities 运行期交集。
+- [ ] **E5. 官方分发渠道**（2026-09-20 需求确认）—— 🚧 **分发面已闭环（2026-09-21，第二片之后）**：
+  第一片 `9b40be2`：`.trmpkg` 包格式 + 打包/校验器（`src/trimum_core/trmpkg.py`，16 项测试；签名覆盖
+  manifest 规范字节、manifest 覆盖逐文件 sha256、证书链到内置根、解包路径安全、校验不过不解包）。
+  第二片 `2aec23b`→`4e29b4e`：`trm pkg` CLI（6 条）+ **真实官方根** `config/trust/trimum-root.crt`（Ed25519）
+  + `trmindex/1` 签名目录索引（`pkg_index.py`）+ `trm install <name>|--file|--list` 接线（`pkg_install.py`，
+  登记 `~/.trimum/config/installed.json5`）+ `--allow-untrusted` 降级路径 + 证书 capabilities 运行期交集
+  （`capability.py` + 网关 Layer 2.6，E6 遗留一并落地）；错误码 `TRM-4011`（总数 68）。
+  第三片未做：`trm install --remove`（卸载 + 注销登记 + 删 agent 证书）、官网服务端与目录托管、多用户边界。
   原始需求：官网提供官方 Agent / Tool / Workflow，下载即用；
   官方根证书内置（`config/trust/trimum-root.crt`），用户无需信任自签证书；
   `.trmpkg` 包（manifest + 逐文件 sha256 + 签名 + 证书链）→ 内置根验证 → `trm install <name>` / `--file <pkg>`
   设计见 `docs/ECOSYSTEM-STRATEGY.md` 第 7 节；安装 ≠ 授权，运行时仍走 ToolGateway 分层
-  - 子项：身份与能力模型 —— 证书携带**能力清单**（可动用工具 / 风险上限 / 有效期），运行期与内置策略取交集（只收紧）
-  - 子项：自签证书**仅本机本用户**可用（绑 `machine_id` + 用户 keystore）；他人使用需重新自签（`agent_cert.py` 已有雏形）
-  - 子项：多用户前瞻 —— `~/.trimum/`（用户私有）vs `/etc/trimum/`（系统公共）边界、审计日志 `user_id` 归属、私钥保护方案
+  - [x] 子项：身份与能力模型 —— 证书携带**能力清单**（可动用工具 / 风险上限 / 有效期），运行期与内置策略取交集（只收紧）（第二片落地：`capability.py` + 网关 Layer 2.6）
+  - [x] 子项：自签证书**仅本机本用户**可用（绑 `machine_id` + 用户 keystore）；他人使用需重新自签（`agent_cert.py` 已有雏形）
+  - [ ] 子项：多用户前瞻（**未做**）—— `~/.trimum/`（用户私有）vs `/etc/trimum/`（系统公共）边界、审计日志 `user_id` 归属、私钥保护方案
 - [x] **E6. 选装模型 + 首次安装引导**（2026-09-20 完成）：全套开发者工具链大部分为**选装**，引导逐项询问，默认全不装
   - [x] `src/trimum_core/hosts.py`：14 个已知宿主 + 三路探测（`TRIMUM_HOSTS*` 环境变量 / 配置目录 / PATH 上的 CLI）
   - [x] `src/trimum_core/paths.py`：`TRIMUM_HOME` 统一数据根（给多用户 / `/etc/trimum` 预留单一改点）
@@ -437,6 +440,7 @@ trm config set <key> <value>       # 设置配置项
 | **2026-09-20 E2 MCP 接入（M0/M1/M2）** | ✅ stdio 客户端 + 文件化注册（deny-by-default）+ `MCPDispatcher` 实装 + `mcp_call` 审计 + `trm mcp`；73 项新测试 |
 | **2026-09-20 M3 MCP 策展导入器** | ✅ `mcp_catalog.py` + `trm mcp catalog import/list` + `config/mcp-catalog.yaml`（4,118 → 232 条候选，红线逐条计数可查）；52 项新测试 |
 | **2026-09-21 E5 第一片：`.trmpkg` 包格式 + 打包/校验器** | ✅ `src/trimum_core/trmpkg.py`：manifest.json5 + SIGNATURE + chain.json；签 manifest 规范字节 → manifest 覆盖逐文件 sha256；证书链追到内置根（`config/trust/trimum-root.crt`，只提交公钥）；解包拒绝绝对路径 / `..` / 链接 / 设备文件；`tests/test_trmpkg.py` 16 项（含四类拒绝路径）。CLI 与 `trm install` 接线在下一片 |
+| **2026-09-21 E5 第二片：`trm pkg` + 真实内置根 + 索引 + `trm install` + 能力交集** | ✅ `trm pkg` CLI 6 条（发布方 3 + 使用者 3）+ 真实官方根（Ed25519，私钥只在发布方 `~/.trimum/trust/`）+ `pkg_index.py`（`trmindex/1` 签名索引，条目 `sha256` 是承诺）+ `pkg_install.py`（校验 → 落地 → 登记 `installed.json5`）+ `capability.py` + 网关 Layer 2.6（E6 遗留一并落地）；错误码 `TRM-4011`（总数 68）；新增 73 项测试（`test_cli_pkg` 25 / `test_pkg_install` 28 / `test_capability` 20）。剩 `--remove` / 官网托管 / 多用户边界 |
 | **2026-09-21 P0 步骤 3/3：定 `workflow.trigger` 归属** | ✅ 剧本自动触发只走 `security.monitor_result`（L4 唯一生产者）；`SecExecutor` 不再发 `workflow.trigger`（意图驱动那条链留给未接线的 `WorkflowListener`）；新增端到端用例（L4 广播 → W1 Runtime → 剧本步骤经网关执行）+ 内置剧本触发器契约测试。**P0 安全响应链闭环** |
 | **2026-09-21 P0 步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** | ✅ `SecurityRuntime`（`daemon()` / `local()`）一处装配 + 网关默认自建 `local()` → `trm ask` / `trm exec` / workflow 兜底全都过 L4；kill/freeze/isolate → 网关 `DENY`；6 组签名收敛到「动手才拦」（`crontab -l` / `systemctl status` 等只读命令解封）；新增 `tests/test_threat_signatures.py`（28 项）+ `test_gateway_layer4.py` +7 |
 | **2026-09-21 P0 步骤 2/3：L4 改走 `SecMonitor.inspect()`** | ✅ 扫描 → 广播 → SecExecutor（审计/通知/阻断/`workflow.trigger`）→ 网关拒绝，一条链全通；删掉 `agent.executing` 死订阅；修掉 L4 误传 `pid=os.getpid()`（会打到 daemon 自己）；新建 `tests/test_gateway_layer4.py`（9 项，真链路断言） |
@@ -479,6 +483,11 @@ trm config set <key> <value>       # 设置配置项
 | 分支 | 状态 | 备注 |
 |------|------|------|
 | `server` | ✅ 已同步 | 当前工作分支；E1 `779c0e0` / E6 `ab26edf` / 清理+证书 `1456aba` / E3 `4331437` / E2 `634e62a` / **M3 `e7a30f5`** / **真机修复轮 `209c98e`** |
+| `server`（2026-09-21 E5 第二片 1/4） | ✅ 已推送 | `2aec23b` `trm pkg` CLI（verify / info / create / extract / root-init / signer-init）+ `tests/test_cli_pkg.py`（25 项） |
+| `server`（2026-09-21 E5 第二片 2/4） | ✅ 已推送 | `5c836e1` 生成并提交**真实官方根** `config/trust/trimum-root.crt` + `README.md` 重写 + 3 项内置根测试 |
+| `server`（2026-09-21 E5 第二片 3/4） | ✅ 已推送 | `2c091c4` `pkg_index.py` 签名目录索引 + `pkg_install.py` 安装/登记 + `trm install` 接线 + `TRM-4011` + `tests/test_pkg_install.py`（28 项） |
+| `server`（2026-09-21 E5 第二片 4/4） | ✅ 已推送 | `784992c` `capability.py` 能力交集 + 网关 Layer 2.6（L2.5 后、L4 前）+ `tests/test_capability.py`（20 项） |
+| `server`（2026-09-21 E5 第二片文档口径） | ✅ 已推送 | `4e29b4e` `docs/ARCH.md` 实现节 + `docs/ECOSYSTEM-STRATEGY.md` §7.5 + requires PATH 探测（缺依赖只警告不拒装） |
 | `server`（2026-09-21 E5 第一片） | ✅ 已提交 | `9b40be2` `.trmpkg` 包格式 + 打包/校验器（`trmpkg.py` + 16 项测试 + 错误码 `TRM-4009/4010` + `config/trust/README.md` + `docs/ECOSYSTEM-STRATEGY.md` §7.4） |
 | `server`（2026-09-21 P0 步骤 3） | ✅ 已提交 | `f6ecfe4` 定 `workflow.trigger` 归属：剧本只走 `security.monitor_result`，`SecExecutor` 不再发 `workflow.trigger`；端到端用例（L4 广播真的驱动剧本）；内置剧本触发器契约锁 |
 | `server`（2026-09-21 P0 步骤 2 补丁） | ✅ 已提交 | `dbc411e` L4 装配统一（`SecurityRuntime`：任何入口都过 L4）+ 处置映射（kill/freeze/isolate → 网关 DENY）+ 签名收敛（动手才拦）；`tests/test_threat_signatures.py` 新建（28 项） |
