@@ -69,6 +69,10 @@ class TRMErrorCode(str, Enum):
     FILE_PERMISSION_DENIED = "TRM-4006"
     MCP_CALL_FAILED = "TRM-4007"
     MCP_SERVER_NOT_FOUND = "TRM-4008"
+    # 分发包（.trmpkg）：E5 官方分发渠道 —— 4xxx 归 Tool，因为包本身就是
+    # 「生态件的到达方式」（agent / tool / workflow / skill）
+    PACKAGE_INVALID = "TRM-4009"
+    PACKAGE_VERIFY_FAILED = "TRM-4010"
 
     # 5xxx — Workflow
     WORKFLOW_PARSE_ERROR = "TRM-5001"

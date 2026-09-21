@@ -258,6 +258,45 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
 
 ---
 
+### 7.4 `.trmpkg` 落地口径（E5 第一片，2026-09-21）
+
+实现：`src/trimum_core/trmpkg.py`（打包 + 校验，离线可测）；测试：`tests/test_trmpkg.py`（16 项，
+含四类拒绝路径）。设计意图不变，落地时定死了这几处：
+
+**包结构**（`tar.gz`）
+
+```
+manifest.json5      # format / name / type / version / requires / entry / capabilities
+                    # / files{路径: "sha256:..."} / created_at
+SIGNATURE           # { alg: "ed25519", key_id, signed: "manifest.json5", signature }
+chain.json          # [签名者证书, 根证书]（JSON 证书）
+<载荷文件…>
+```
+
+**信任链**：内置根（`config/trust/trimum-root.crt`，只有公钥，是锚；运行态优先
+`~/.trimum/trust/`，可用 `TRIMUM_TRUST_ROOT` 覆盖）→ 根签发**签名者证书**
+（`issued_by` + `issuer_signature`）→ 签名者签 manifest 的**规范字节**
+（`sort_keys` + 紧凑分隔符 + UTF-8）→ manifest 里逐文件 sha256 覆盖整个载荷。
+
+**校验顺序**（`verify_package()`，失败项全部列进 `errors`，不抛异常）：
+解包安全 → manifest 格式 / 类型 → 逐文件哈希（多一个文件也算失败）→ 证书链到内置根
+→ 签名 →（证书 `expires_at`）。解包前先拒绝**绝对路径 / `..` / 符号链接 / 硬链接 / 设备文件**；
+`extract_package()` 校验不过就不落地，不留「先解开再判断」的中间态。
+
+**两处与本文档早先口径的差异（有意，已定）**：
+
+| 早先写法 | 落地口径 | 理由 |
+|---|---|---|
+| `chain.pem` | `chain.json` | 本仓库证书一直是 JSON 文档（`agent_cert` / `identity`，Ed25519 公钥 + 能力块），不是 X.509；叫 `.pem` 会误导实现者去引入证书格式转换 |
+| 逐文件签名 | `SIGNATURE` 只签 manifest | manifest 已覆盖每个载荷文件的 sha256，签 manifest 即可 —— 包更小、校验更快、没有「签了一半」的中间态 |
+
+**错误码**：`TRM-4009 PKG_INVALID`（结构不合法）、`TRM-4010 PKG_VERIFY_FAILED`（哈希 / 链 / 签名不过）。
+
+**这一片没做（下一步）**：`trm pkg verify|create|root-init` CLI、内置根的实际生成与提交、
+`trm install <name>` / `--file <pkg>` 接线、`--allow-untrusted` 降级路径（装成 `trust: untrusted`
++ 运行期强制 confirm）、证书 `capabilities` 与 `security_rule.py` 的**运行期交集**。
+最后一项是 E6 遗留，与本节同源，建议与 `trm install` 一起做。
+
 ## 8. 原始件（`tmp/research/ecosystem/`，已 gitignore）
 
 | 文件 | 内容 |
