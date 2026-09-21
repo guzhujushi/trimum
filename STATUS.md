@@ -220,7 +220,7 @@ daemon 与 CLI 都显式传 `trimum_path("workflows")`；低匹配转 Planner �
 | E5 第三片 步骤 3（多用户边界：调研 + 设计，**不改代码**；`docs/MULTI-USER-BOUNDARY.md` + 生态战略 §7.2/§7.8 + ARCH / AGENTS 指向） | `8646fe7` |
 | 穿插项 步骤 A（剧本自动触发策略：取证 8 条武装 / 处置 8 条不武装 / 自动触发不派子 Agent） | `d5d4b02` |
 | 穿插项 步骤 B（总线硬化：索引接线 / 失败可观测 / 严格模式 / 订阅修正） | `dd3c0a2` |
-| 穿插项 步骤 C（`WorkflowListener` 接线：`submit()` 当生产者 + daemon 装配 + `trm workflow submit`）+ 两个真 bug | 见 `TODO.md`「克隆/分支同步」（本条提交号由后续文档提交回填） |
+| 穿插项 步骤 C（`WorkflowListener` 接线：`submit()` 当生产者 + daemon 装配 + `trm workflow submit`）+ 两个真 bug | `f51b86d` |
 
 ---
 
