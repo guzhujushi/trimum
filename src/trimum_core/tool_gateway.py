@@ -50,6 +50,7 @@ from .llm_policy import LlmPolicyEngine
 from .security_config import SecurityConfig
 from .file_trust import FileTrustTracker
 from .security_rule import SecurityRule, DecisionResult
+from . import capability
 from .audit_store import AuditStore
 from .tool_dispatchers import DispatcherRegistry
 from .tool_file_loader import is_enabled, scan_tools
@@ -546,6 +547,8 @@ class ToolGateway:
         Layer 2: Agent permissions check (from AgentManifest if available).
         Layer 2.5: SecurityRule 决策（deny 走 security_blocked 审计，confirm 升级为
                    Action.CONFIRM；interactive=True 时弹窗）.
+        Layer 2.6: 证书能力交集（capability.py）—— 身份层，只收紧；deny 走
+                   capability_denied 审计，confirm 升级为 Action.CONFIRM.
         Layer 4: SecMonitor 威胁扫描.
         Layer 3: JIT 授权检查（高风险操作需令牌）.
         Execution: Dispatched via DispatcherRegistry.
@@ -644,21 +647,15 @@ class ToolGateway:
 
         # ── 终端交互确认（interactive=True 且 action=confirm） ──
         if action == Action.CONFIRM and self.interactive:
-            confirmed = await self._prompt_confirm(
-                cmd_str, risk, reason, request.agent_id or "terminal"
+            denied = await self._confirm_interactively(
+                request=request,
+                execution_id=execution_id,
+                cmd_str=cmd_str,
+                risk=risk,
+                reason=reason,
             )
-            if not confirmed:
-                resp = ExecuteResponse(
-                    execution_id=execution_id,
-                    status="denied",
-                    error="User cancelled",
-                    exit_code=1,
-                    risk=risk,
-                    action=Action.DENY,
-                    reason="User declined confirmation prompt",
-                )
-                self._record_audit("user_cancelled", request, resp)
-                return resp
+            if denied is not None:
+                return denied
             # 用户确认后，降级为 AUTO 继续执行
             action = Action.AUTO
             reason = f"User confirmed: {reason}"
@@ -719,25 +716,56 @@ class ToolGateway:
             action = Action.CONFIRM
             reason = f"SecurityRule: {decision.reason}"
             if self.interactive:
-                confirmed = await self._prompt_confirm(
-                    cmd_str,
-                    _risk_from_decision(decision),
-                    reason,
-                    request.agent_id or "terminal",
+                denied = await self._confirm_interactively(
+                    request=request,
+                    execution_id=execution_id,
+                    cmd_str=cmd_str,
+                    risk=_risk_from_decision(decision),
+                    reason=reason,
                 )
-                if not confirmed:
-                    resp = ExecuteResponse(
-                        execution_id=execution_id,
-                        status="denied",
-                        error="User cancelled",
-                        exit_code=1,
-                        risk=_risk_from_decision(decision),
-                        action=Action.DENY,
-                        reason="User declined confirmation prompt",
-                    )
-                    self._record_audit("user_cancelled", request, resp)
-                    return resp
+                if denied is not None:
+                    return denied
                 # 用户已确认：降级放行
+                action = Action.AUTO
+                reason = f"User confirmed: {reason}"
+
+        # ------------------------------------------------------------------
+        # Layer 2.6: 证书能力交集（E6 遗留）—— 身份层，只收紧、不放宽
+        # ------------------------------------------------------------------
+        tightening = self._check_capabilities(request, tool_def, risk)
+        if tightening is not None and tightening.action == "deny":
+            logger.warning(
+                "gateway.capability_denied",
+                command=cmd_str,
+                agent=request.agent_id or "unknown",
+                source=tightening.source,
+                reason=tightening.reason,
+            )
+            resp = ExecuteResponse(
+                execution_id=execution_id,
+                status="denied",
+                error=f"Capability denied: {tightening.reason}",
+                exit_code=1,
+                risk=risk,
+                action=Action.DENY,
+                reason=tightening.reason,
+            )
+            self._record_audit("capability_denied", request, resp)
+            return resp
+
+        if tightening is not None and tightening.action == "confirm":
+            action = Action.CONFIRM
+            reason = f"capabilities: {tightening.reason}"
+            if self.interactive:
+                denied = await self._confirm_interactively(
+                    request=request,
+                    execution_id=execution_id,
+                    cmd_str=cmd_str,
+                    risk=risk,
+                    reason=reason,
+                )
+                if denied is not None:
+                    return denied
                 action = Action.AUTO
                 reason = f"User confirmed: {reason}"
 
@@ -1013,6 +1041,43 @@ class ToolGateway:
             result.risk = risk
         result.reason = result.reason or reason
         return result
+
+    def _check_capabilities(
+        self,
+        request: ExecuteRequest,
+        tool_def: Optional[Any],
+        risk: RiskLevel,
+    ) -> Optional["capability.Tightening"]:
+        """Layer 2.6：证书能力清单的运行期交集（见 ``capability.py``）。
+
+        能力清单只回答「这个身份允许动用哪些工具、风险上限多少」，且**只收紧**
+        内置策略：命中 deny 就拒绝，命中 confirm 就要求点头（非交互路径由 Layer 3
+        的 JIT 兜底）。没有证书 / 没有登记时返回 ``None``，即今天的默认行为。
+
+        读取失败按 confirm 处理（fail closed 但不清空自动化能力）：读不懂身份
+        不等于身份可以随便来。
+        """
+        tool = request.tool.value if hasattr(request.tool, "value") else str(request.tool)
+        tool_name = str(getattr(tool_def, "name", "") or "")
+        level = risk.value if hasattr(risk, "value") else str(risk)
+        try:
+            return capability.tighten(
+                request.agent_id or "unknown",
+                tool=tool,
+                risk=level,
+                tool_name=tool_name,
+            )
+        except Exception as exc:
+            logger.warning(
+                "gateway.capability_check_failed",
+                command=tool_name or tool,
+                error=str(exc),
+            )
+            return capability.Tightening(
+                capability.CONFIRM,
+                f"能力清单读取失败：{exc}",
+                source="capability-error",
+            )
 
     async def _check_security_rule(
         self,
@@ -1316,6 +1381,38 @@ class ToolGateway:
     # ------------------------------------------------------------------
     # 终端交互确认
     # ------------------------------------------------------------------
+
+    async def _confirm_interactively(
+        self,
+        *,
+        request: ExecuteRequest,
+        execution_id: str,
+        cmd_str: str,
+        risk: RiskLevel,
+        reason: str,
+    ) -> Optional[ExecuteResponse]:
+        """Ask the human once; return ``None`` when confirmed, else the denial response.
+
+        Every layer that can end in "要人点头"（PolicyEngine 的 confirm、SecurityRule、
+        证书能力交集、L4 威胁）都走这一个入口 —— 确认语义、``user_cancelled`` 审计与
+        拒绝响应只有一份，不会四处漂移。
+        """
+        confirmed = await self._prompt_confirm(
+            cmd_str, risk, reason, request.agent_id or "terminal"
+        )
+        if confirmed:
+            return None
+        resp = ExecuteResponse(
+            execution_id=execution_id,
+            status="denied",
+            error="User cancelled",
+            exit_code=1,
+            risk=risk,
+            action=Action.DENY,
+            reason="User declined confirmation prompt",
+        )
+        self._record_audit("user_cancelled", request, resp)
+        return resp
 
     async def _prompt_confirm(
         self,
