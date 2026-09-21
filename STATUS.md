@@ -1,13 +1,14 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理：删除 `PRD.md`、`ARCH.md` 去重后移入 `docs/`** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理：删除 `PRD.md`、`ARCH.md` 去重后移入 `docs/`** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（剧本只走 `security.monitor_result`）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
 > 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3/M4** 与**远端工具聚合**（`<server>__<tool>` 进 `ToolRegistry`），
 > E4 三个导入器已落地，W1 workflow 执行语义已闭环（真机 48/0）。
-> **P0 安全响应链接线已开工**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，剧本在真机上永远不会被自动触发）：
-> **步骤 1/3（载荷契约扁平化）、步骤 2/3（L4 改走 `SecMonitor.inspect()`）与其补丁（装配统一 + 处置映射 + 签名收敛）2026-09-21 完成**，只剩 步骤 3（定 `workflow.trigger` 归属）；
+> **P0 安全响应链接线已闭环**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，剧本在真机上永远不会被自动触发）：
+> 2026-09-21 四步走完 —— 步骤 1/3（载荷契约扁平化）、步骤 2/3（L4 改走 `SecMonitor.inspect()`）、
+> 步骤 2 补丁（装配统一 + 处置映射 + 签名收敛）、步骤 3/3（定 `workflow.trigger` 归属）；
 > 之后是 **E5 官方分发渠道**；P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
 > 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
 > E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
@@ -221,7 +222,7 @@ L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线
 > OpenCLI 桥接（已弃用）、CLI 流式输出（已实现）、`tmp/` 清理（已完成）、`src/trimum-mvp/`（已删除）、
 > 「296/297 pass 修 AuditEvent 导出」（已被本地 1156 passed 取代）。
 
-1. 🔴 **P0 安全响应链接线**（2026-09-20 审计新立）—— `tool_gateway.py:715` 的 L4 只拦不报：命中威胁不发 `security.monitor_result`、不调 `SecExecutor`，且生产端 payload（嵌套 `threat`）与 16 条内置剧本条件（扁平 `threat_name`）对不上 → 剧本永不自动触发。三条动作（统一契约 → L4 走 `_dispatch` → 定 `workflow.trigger` 归属）见 `TODO.md`「EventBus 通信缺口」
+1. ✅ **P0 安全响应链接线**（2026-09-20 审计新立，**2026-09-21 闭环**）—— L4 只拦不报 → 现在「扫描 → 广播（扁平载荷）→ SecExecutor（审计/通知/阻断）→ 网关处置（deny/kill/freeze/isolate → 拒绝，confirm → 确认）→ 剧本被 `security.monitor_result` 驱动」一条链全通，且**任何入口**的网关都过 L4。四个提交（统一契约 `087a476` → L4 走 `inspect()` `d5393a6` → 装配/处置/签名 `dbc411e` → 定 `workflow.trigger` 归属 `f6ecfe4`）见 `TODO.md`「EventBus 通信缺口」
 2. 🔴 **E5 官方分发渠道** —— `.trmpkg`（manifest + 逐文件 sha256 + 签名 + 证书链）→ 内置根验证 → `trm install <name>` / `--file <pkg>`；含 E6 遗留的证书 `capabilities` 运行期合并（设计见 `docs/ECOSYSTEM-STRATEGY.md` §7）
 3. 🟠 **总线硬化**（P0 的配套）—— `_safe_call` 别静默吞异常 + 兑现 `TRM-9005`；`EventIndex` 接进 `EventBus`；修 `LiveConsole.subscribe_events` 的订阅 / 比对不匹配；清死订阅与过期文档
 4. 🟠 **W1 遗留：`WorkflowListener` / TARL 三段式接线** —— `event.transform.completed` 无生产者、`TransformAgent` 无调用点、`WorkflowListener` 未实例化（要把 TransformAgent 接进 daemon + 决策 + 确认，比 P0 大）；另：运行记录只在内存、内置剧本只有落盘式开关
@@ -1482,3 +1483,49 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 
 - **执行后闸门**：真要 `FREEZE` / `KILL` 得等 spawn 后拿到子进程 PID 再扫一次；今天契约里 `pid=0` 的语义就是「没有可动手的进程」，`SecBlocker` 对 `pid<=0` 直接返回。
 - **检测与处置分离**（宽签名只上报、窄签名才拦）：今天用「收敛签名」替代 —— 签名宽就只会上报、窄就直接拦，先把误报压到零；真需要宽检测时再拆字段。
+---
+
+## 2026-09-21 P0 步骤 3/3：定 `workflow.trigger` 归属（剧本只走 `security.monitor_result`）
+
+> 提交：`f6ecfe4`（server 分支）。**P0 安全响应链至此闭环**（四个提交：`087a476` → `d5393a6` → `dbc411e` → `f6ecfe4`）。
+
+### 问题
+
+两套约定并存：剧本监听 `security.monitor_result`（L4 真发、扁平载荷），而 `SecExecutor` 又
+另发一条 `workflow.trigger`（键是 `workflow_name`，与 `WorkflowListener` 的 `cmd` / `tarl` /
+`decision` 不同，且当前无人消费）→ 将来只要有人写 `trigger.event_type: workflow.trigger` 的
+workflow，同一次威胁就会被两条链各跑一遍。
+
+### 裁决（写进代码 + 文档 + 测试）
+
+| 触发方式 | 事件 / 入口 | 生产者 | 消费者 |
+|---|---|---|---|
+| **自动（事实）** | `security.monitor_result` | L4 `SecMonitor._dispatch`（唯一） | 内置剧本 + W1 `WorkflowRuntime` |
+| 自动（定时） | `cron` | 定时器 | `threat-audit-integrity-check` |
+| 意图驱动 | `workflow.trigger` | `WorkflowListener`（TARL 三段式，仍未接线 → 今天无生产者） | 写了该 trigger 的 workflow（今天没有） |
+| 手动 | `runtime.trigger()` / `run_now()` / `trm workflow run <id>` | 人 | `WorkflowRuntime` |
+
+### 改动
+
+| 位置 | 改动 |
+|---|---|
+| `src/trimum_core/sec_executor.py` | 删掉 `workflow.trigger` 发布（含 import 与常量引用）；模块 docstring 新增「触发归属」；`SecurityRuntime` docstring 的事件清单校正为 `monitor_result` / `alert` / `blocked` |
+| `src/trimum_core/workflow_runtime.py` | 模块 docstring 补「触发归属」（谁写什么 trigger 就听什么，运行时不做裁判）；`register_builtin()` 注明触发器是 `security.monitor_result` |
+| `src/trimum_core/threat_workflows.py` | 模块 docstring 的旧口径（「通过 `workflow.trigger` 触发」）改为「监听 `security.monitor_result`」 |
+| `tests/test_gateway_layer4.py` | **+1 端到端**：L4 拦下命令的同时，总线上的 `monitor_result` 真把注册好的剧本跑起来（1 条运行记录 / `triggered_by=event` / 步骤经网关执行）；两处「发了 `workflow.trigger`」改为断言**不再发**（剧本名改从 `monitor_result` 载荷取） |
+| `tests/test_workflow_runtime.py` | **+1**：内置剧本的触发器只有 `security.monitor_result`(15) / `cron`(1)，**没有**任何剧本监听 `workflow.trigger` |
+| `docs/SECURITY-DEFENSE-PLAN.md` | §三 新增「触发归属」表；§4.3（SecNotif 不负责触发工作流）与 §五 口径修正 |
+| `docs/WORKFLOW-EXECUTION-PLAN.md` | 「`workflow.trigger` 只发不收」与 §6 遗留口径更新为「归属已定、今天无生产者」 |
+
+### 验证
+
+- `python -m pytest tests/test_workflow_runtime.py tests/test_gateway_layer4.py tests/test_sec_monitor.py tests/test_threat_signatures.py -q` → **111 passed**
+- 全量：`python -m pytest tests -q` → **1212 passed / 5 failed / 7 skipped**（5 项既有基线，无回归）
+- 关键断言（真链路）：`echo evil >> /etc/ld.so.preload` → L4 `status=denied` + `security.monitor_result`
+  → `WorkflowRuntime` 命中条件 → shell 步骤经 `ToolGateway` 执行 → `WorkflowRunRecord(status=completed)`
+
+### 仍留一个策略取舍（下一步决定）
+
+内置剧本 `config.enabled = False` 未动：剧本里有 `kill` / `firewall-cmd`，自动触发等于删掉确认环节。
+要不要给「只读自查」子集（`threat-cron-audit` / `threat-systemd-audit` / `threat-prelink-check` …）
+开自动触发，属于策略决定，记在 `TODO.md`。
