@@ -97,6 +97,7 @@ TRM-<Category><Number>
 | TRM-4008 | McpServerNotFound | MCP server not connected or not found |
 | TRM-4009 | PackageInvalid | `.trmpkg` 结构不合法（缺 manifest / 坏 tar / 未知类型 / 路径越界） |
 | TRM-4010 | PackageVerifyFailed | `.trmpkg` 校验失败（哈希不符 / 证书链不过 / 签名无效） |
+| TRM-4011 | PackageNotFound | 官方目录索引里没有这个名字（或索引指向的包不存在） |
 
 ### 5xxx — Workflow
 

@@ -150,7 +150,7 @@ def make_root(name: str = "trimum-root") -> tuple[dict, str]:
         "alg": ALG,
         "public_key": public_pem,
         "key_id": key_id(public_pem),
-        "created_at": _now(),
+        "created_at": now(),
     }
     return cert, private_pem
 
@@ -173,7 +173,7 @@ def make_signer_cert(
         "key_id": key_id(public_pem),
         "issued_by": root_cert.get("name", ""),
         "issuer_key_id": root_cert.get("key_id", ""),
-        "issued_at": _now(),
+        "issued_at": now(),
         "expires_at": expires_at,
         "capabilities": dict(capabilities or {}),
     }
@@ -181,7 +181,7 @@ def make_signer_cert(
     return cert, private_pem
 
 
-def _now() -> str:
+def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
@@ -261,7 +261,7 @@ def build_manifest(
         "entry": entry,
         "capabilities": dict(capabilities or {}),
         "files": files,
-        "created_at": _now(),
+        "created_at": now(),
     }
     if extra:
         manifest.update(extra)
@@ -501,93 +501,131 @@ def verify_package(
         result.errors.append(f"manifest 未登记的额外文件：{name}")
 
     # ② 证书链：根（内置信任锚）→ 签名者
-    chain = _parse_chain(blobs.get(CHAIN_NAME, b""), result)
-    builtin = _load_builtin_root(root_path, result)
-    signer = chain[0] if chain else {}
+    chain = _parse_chain(blobs.get(CHAIN_NAME, b""), result.errors)
+    signer, root_doc, chain_errors = verify_chain(chain, root_path=root_path)
+    result.errors.extend(chain_errors)
     result.signer = signer
-    root_doc = chain[-1] if chain else {}
-    result.root = root_doc or builtin
-
-    if builtin and root_doc and root_doc.get("key_id") != builtin.get("key_id"):
-        result.errors.append("证书链的根不是本机内置根")
-    if signer:
-        issuer = canonical_bytes(
-            {key: value for key, value in signer.items() if key != "issuer_signature"}
-        )
-        if not builtin:
-            result.errors.append("本机没有内置根证书，无法验证签发者")
-        elif not verify_bytes(
-            issuer, signer.get("issuer_signature", ""), builtin.get("public_key", "")
-        ):
-            result.errors.append("签名者证书不是内置根签发的")
-        expires = signer.get("expires_at") or ""
-        if expires and expires < _now():
-            result.errors.append(f"签名者证书已过期：{expires}")
+    result.root = root_doc
 
     # ③ 签名：签名者签 manifest 的规范字节
-    signature = _parse_signature(blobs.get(SIGNATURE_NAME, b""), result)
-    if signature:
-        if signature.get("key_id") and signer.get("key_id") != signature.get("key_id"):
-            result.errors.append("签名所用密钥与证书不一致")
-        if not signer:
-            result.errors.append("包里没有签名者证书")
-        elif not verify_bytes(
-            canonical_bytes(manifest),
-            signature.get("signature", ""),
-            signer.get("public_key", ""),
-        ):
-            result.errors.append("manifest 签名验证失败（内容被改过）")
+    signature = _parse_signature(blobs.get(SIGNATURE_NAME, b""), result.errors)
+    verify_document_signature(manifest, signature, signer, result.errors)
 
     result.ok = not result.errors
     return result
 
 
-def _parse_chain(raw: bytes, result: VerifyResult) -> list[dict]:
+def _parse_chain(raw: bytes, errors: list[str]) -> list[dict]:
     if not raw:
-        result.errors.append(f"包里没有 {CHAIN_NAME}")
+        errors.append(f"包里没有 {CHAIN_NAME}")
         return []
     try:
         docs = json.loads(raw.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
-        result.errors.append(f"{CHAIN_NAME} 无法解析")
+        errors.append(f"{CHAIN_NAME} 无法解析")
         return []
     if not isinstance(docs, list) or not docs:
-        result.errors.append(f"{CHAIN_NAME} 应为非空证书列表")
+        errors.append(f"{CHAIN_NAME} 应为非空证书列表")
         return []
     return [dict(doc) for doc in docs if isinstance(doc, dict)]
 
 
-def _parse_signature(raw: bytes, result: VerifyResult) -> dict:
+def _parse_signature(raw: bytes, errors: list[str]) -> dict:
     if not raw:
-        result.errors.append(f"包里没有 {SIGNATURE_NAME}")
+        errors.append(f"包里没有 {SIGNATURE_NAME}")
         return {}
     try:
         doc = json.loads(raw.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
-        result.errors.append(f"{SIGNATURE_NAME} 无法解析")
+        errors.append(f"{SIGNATURE_NAME} 无法解析")
         return {}
     if not isinstance(doc, dict):
-        result.errors.append(f"{SIGNATURE_NAME} 应为对象")
+        errors.append(f"{SIGNATURE_NAME} 应为对象")
         return {}
     if doc.get("alg") != ALG:
-        result.errors.append(f"不支持的签名算法：{doc.get('alg')!r}")
+        errors.append(f"不支持的签名算法：{doc.get('alg')!r}")
     return doc
 
 
-def _load_builtin_root(root_path: str | Path | None, result: VerifyResult) -> dict:
+def _load_builtin_root(root_path: str | Path | None, errors: list[str]) -> dict:
     path = Path(root_path) if root_path is not None else default_root_path()
     if not path.is_file():
-        result.errors.append(f"找不到内置根证书：{path}")
+        errors.append(f"找不到内置根证书：{path}")
         return {}
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        result.errors.append(f"内置根证书无法解析：{path}")
+        errors.append(f"内置根证书无法解析：{path}")
         return {}
     if doc.get("role") != "root" or not doc.get("public_key"):
-        result.errors.append(f"内置根证书缺字段（role/public_key）：{path}")
+        errors.append(f"内置根证书缺字段（role/public_key）：{path}")
         return {}
     return dict(doc)
+
+
+def verify_chain(
+    chain: list[dict],
+    *,
+    root_path: str | Path | None = None,
+) -> tuple[dict, dict, list[str]]:
+    """Verify ``signer ← built-in root`` and return ``(signer, root, errors)``.
+
+    The ``.trmpkg`` manifest and the official directory index share this conclusion:
+    the chain must reach *this machine's* built-in root, the signer certificate must
+    be issued by it, and it must not be expired.  Failures only ever land in
+    *errors* — "why is this untrustworthy" is more useful than an exception.
+    """
+    errors: list[str] = []
+    builtin = _load_builtin_root(root_path, errors)
+    signer = dict(chain[0]) if chain else {}
+    root_doc = dict(chain[-1]) if chain else {}
+
+    if builtin and root_doc and root_doc.get("key_id") != builtin.get("key_id"):
+        errors.append("证书链的根不是本机内置根")
+    if signer:
+        issuer = canonical_bytes(
+            {key: value for key, value in signer.items() if key != "issuer_signature"}
+        )
+        if not builtin:
+            errors.append("本机没有内置根证书，无法验证签发者")
+        elif not verify_bytes(
+            issuer, signer.get("issuer_signature", ""), builtin.get("public_key", "")
+        ):
+            errors.append("签名者证书不是内置根签发的")
+        expires = signer.get("expires_at") or ""
+        if expires and expires < now():
+            errors.append(f"签名者证书已过期：{expires}")
+    return signer, (root_doc or builtin), errors
+
+
+def verify_document_signature(
+    document: dict,
+    signature: dict,
+    signer: dict,
+    errors: list[str],
+    *,
+    label: str = "manifest",
+    container: str = "包",
+) -> None:
+    """Verify that *signer* signed ``canonical_bytes(document)``.
+
+    Signing a document's canonical bytes (sorted keys, compact separators, UTF-8)
+    is how both the package manifest and the directory index are covered — one
+    routine, so the two cannot drift apart.
+    """
+    if not signature:
+        return
+    if signature.get("key_id") and signer.get("key_id") != signature.get("key_id"):
+        errors.append("签名所用密钥与证书不一致")
+    if not signer:
+        errors.append(f"{container}里没有签名者证书")
+        return
+    if not verify_bytes(
+        canonical_bytes(document),
+        signature.get("signature", ""),
+        signer.get("public_key", ""),
+    ):
+        errors.append(f"{label} 签名验证失败（内容被改过）")
 
 
 def extract_package(
@@ -656,9 +694,12 @@ __all__ = [
     "make_root",
     "make_signer_cert",
     "new_keypair",
+    "now",
     "read_manifest",
     "sign_bytes",
     "trust_dirs",
     "verify_bytes",
+    "verify_chain",
+    "verify_document_signature",
     "verify_package",
 ]

@@ -79,8 +79,8 @@ class TestTRMErrorCode:
 
     def test_total_count(self):
         """Total number of defined error codes."""
-        assert len(TRMErrorCode) == 67, (
-            f"Expected 67 error codes, got {len(TRMErrorCode)}. "
+        assert len(TRMErrorCode) == 68, (
+            f"Expected 68 error codes, got {len(TRMErrorCode)}. "
             "Update this test if you added/removed codes."
         )
 

@@ -73,6 +73,7 @@ class TRMErrorCode(str, Enum):
     # 「生态件的到达方式」（agent / tool / workflow / skill）
     PACKAGE_INVALID = "TRM-4009"
     PACKAGE_VERIFY_FAILED = "TRM-4010"
+    PACKAGE_NOT_FOUND = "TRM-4011"
 
     # 5xxx — Workflow
     WORKFLOW_PARSE_ERROR = "TRM-5001"
@@ -279,6 +280,9 @@ class TrimumError(Exception):
             TRMErrorCode.MEMORY_NAMESPACE_NOT_FOUND: "Requested memory namespace does not exist",
             TRMErrorCode.FTS5_SEARCH_FAILED: "Full-text search query failed",
             TRMErrorCode.MEMORY_DB_CONNECTION_FAILED: "Failed to connect to memory database",
+            TRMErrorCode.PACKAGE_INVALID: "Package structure is invalid",
+            TRMErrorCode.PACKAGE_VERIFY_FAILED: "Package signature or content failed verification",
+            TRMErrorCode.PACKAGE_NOT_FOUND: "Package not found in the directory index",
             TRMErrorCode.HTTP_REQUEST_FAILED: "HTTP request returned non-2xx status",
             TRMErrorCode.HTTP_TIMEOUT: "HTTP request exceeded timeout",
             TRMErrorCode.DNS_RESOLUTION_FAILED: "Failed to resolve hostname",
