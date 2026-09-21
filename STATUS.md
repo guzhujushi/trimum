@@ -1,13 +1,13 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理：删除 `PRD.md`、`ARCH.md` 去重后移入 `docs/`** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`（拦截 + 响应 + 记录 + 通知）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理：删除 `PRD.md`、`ARCH.md` 去重后移入 `docs/`** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
 > 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3/M4** 与**远端工具聚合**（`<server>__<tool>` 进 `ToolRegistry`），
 > E4 三个导入器已落地，W1 workflow 执行语义已闭环（真机 48/0）。
 > **P0 安全响应链接线已开工**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，剧本在真机上永远不会被自动触发）：
-> **步骤 1/3（载荷契约扁平化）与 步骤 2/3（L4 改走 `SecMonitor.inspect()`）2026-09-21 完成**，只剩 步骤 3（定 `workflow.trigger` 归属）；
+> **步骤 1/3（载荷契约扁平化）、步骤 2/3（L4 改走 `SecMonitor.inspect()`）与其补丁（装配统一 + 处置映射 + 签名收敛）2026-09-21 完成**，只剩 步骤 3（定 `workflow.trigger` 归属）；
 > 之后是 **E5 官方分发渠道**；P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
 > 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
 > E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
@@ -1444,3 +1444,41 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 
 3. **定 `workflow.trigger` 归属** —— 现在 `sec_executor.py` 扁平发 `workflow_name` + `threat_name`，
    `workflow_listener` 未实例化；剧本要么听 `workflow.trigger`，要么直接听 `security.monitor_result`，**不要两套并存**。
+
+---
+
+## 2026-09-21 P0 步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛
+
+> 提交：`dbc411e`（server 分支）。
+> 来源：步骤 2 收尾时记下的两条缺口（「非 DENY 威胁只响应不拦」「只有 daemon 的网关有 L4」）
+> + 一件前置（L4 要常开，签名就不能误报）。**P0 步骤 2 至此真正闭环**，只剩步骤 3。
+
+### 问题 → 方案
+
+| # | 问题 | 根因 | 处置 |
+|---|---|---|---|
+| G1 | `trm ask` / `trm exec` / workflow 兜底网关没有 L4 | L4 是「谁记得注入 `sec_monitor` 谁才有」的可选依赖 | `SecurityRuntime`（`daemon()` / `local()`）一处装配；`ToolGateway` 默认自建 `local()`，`layer4=False` 才关 |
+| G2 | `KILL` / `FREEZE` / `ISOLATE` 类威胁只广播、不拦 | 网关只对 `defense == deny` 拒绝 | `layer4_gateway_action()`：deny/kill/freeze/isolate → `Action.DENY`；confirm → `Action.CONFIRM` |
+| G3 | 签名误报（`crontab -l`、`systemctl status`、裸 `.ko`、裸 `~/.ssh/`） | 模式只抓关键词，不分「动手 / 看看」 | 收敛为「动手才拦」；真阳/真阴表见 `tests/test_threat_signatures.py` |
+
+### 改动
+
+| 位置 | 改动 |
+|---|---|
+| `src/trimum_core/sec_executor.py` | 新增 `SecurityRuntime`（`daemon()` / `local()` / `attach()`）：L4 全链路只在这一处装配；`SecAudit(audit_path=None)` = 不落盘（裸 CLI 不碰 `~/.trimum`），默认路径仍是 `~/.trimum/audit/security.log` |
+| `src/trimum_core/sec_monitor.py` | `SecMonitor.executor` 允许 `None`（只广播、不产生副作用）；6 组签名收敛（见 G3） |
+| `src/trimum_core/tool_gateway.py` | 新增 `layer4: bool = True`：没被注入监控时自建 `SecurityRuntime.local()`；新增 `layer4_gateway_action()`；L4 命中块按映射处置（`confirm` 走 `_prompt_confirm`） |
+| `src/trimum_core/main.py` | `init_security()` 改用 `SecurityRuntime.daemon()` + `attach()`，不再手写属性注入 |
+| `tests/test_threat_signatures.py` | **新建（28 项）**：17 条真阳 + 11 条只读/自查命令必须零命中（内置剧本自己要跑的那几条也在表里） |
+| `tests/test_gateway_layer4.py` | +4（默认网关自带 L4 + 广播 / 不写家目录审计 / `layer4=False` 关闭 / workflow 兜底网关也带 L4）+3（KILL / FREEZE / ISOLATE 执行前拒绝）；必拦样例改成**写** `ld.so.preload`（`cat` 它不再算劫持） |
+| `docs/SECURITY-DEFENSE-PLAN.md` §三 | 新增「装配：L4 不是可选依赖」「网关处置：`defense` → 网关动作」「签名收敛：动手才拦，看看不算」三节 |
+
+### 验证
+
+- `python -m pytest tests/test_gateway_layer4.py tests/test_sec_monitor.py tests/test_threat_signatures.py -q` → **54 passed**
+- 全量：`python -m pytest tests -q` → **1210 passed / 5 failed / 7 skipped**（+34 为本轮新增；5 项与既有基线逐条一致，无回归）
+
+### 明确不做（取舍）
+
+- **执行后闸门**：真要 `FREEZE` / `KILL` 得等 spawn 后拿到子进程 PID 再扫一次；今天契约里 `pid=0` 的语义就是「没有可动手的进程」，`SecBlocker` 对 `pid<=0` 直接返回。
+- **检测与处置分离**（宽签名只上报、窄签名才拦）：今天用「收敛签名」替代 —— 签名宽就只会上报、窄就直接拦，先把误报压到零；真需要宽检测时再拆字段。
