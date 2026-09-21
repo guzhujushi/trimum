@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -71,6 +71,49 @@
 告警两种前缀 / 退订停订 / 无总线只告警）。全量 **1475 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线）。
 文档：`docs/ARCH.md` 新增「事件总线（`event_bus.py`，2026-09-21 硬化）」一节；`docs/ERROR-CODE-SPEC.md` 的
 `TRM-9005` 补接线说明。
+
+---
+
+## 2026-09-21 E7 规格与设计：自研编码智能体（草案，待裁决）
+
+> 立项依据：`TODO.md`「🌐 生态战略」E7 项；本轮**只写文档，不改代码**。产物：`docs/CODING-AGENT-PLAN.md`。
+> 同轮修正一处口径冲突：`docs/ECOSYSTEM-STRATEGY.md` §5 的 **E7** 原写作「身份与多用户」，
+> 那份内容已由 E5 第三片（能力清单运行期交集）+ E6（官方 Agent 证书）+ `docs/MULTI-USER-BOUNDARY.md` 落地，
+> 故 E7 让位给「自研编码智能体」（修订说明写进该文档）。
+
+### 结论：缺的不是引擎，是编码专用的三块拼图
+
+| 缺口 | 现状（查代码得到） | 要补 |
+|---|---|---|
+| 编辑原语 | `file.write` 只能整文件覆盖 / 追加（`mode=w` / `a`）；全库无 `difflib`、无补丁应用 | 锚点替换 + 统一差异应用 + 会话级快照与回滚 |
+| 验证闭环 | 没有「跑测试 / 构建 / 检查并解析结果」的一等抽象，循环只拿到原始标准输出 | 结构化「红 / 绿 + 失败清单」回灌循环 |
+| 技能与规则运行时 | `SKILL.md` 只被分发到别的宿主；`skill.yaml`（旧）与 Agent Skills（新）两套互不相干 | 命中才注入上下文 + 工具事件上的检查（钩子） |
+
+外加第四块：`agent_runtime` 的 spawn 仍是空壳、`task.assigned` 至今没有生产者 ——子 Agent 委派做实。
+
+### 参考对象 ECC 的事实（不是印象）
+
+快照 2026-09-20（262,999★，MIT）：仓库 5,026 条目、`SKILL.md` **903** 个、`rules/` 144 个文件、
+斜杠命令 94、宿主适配目录 `.claude-plugin` / `.codex` / `.opencode` / `.cursor` / `.kiro` / `.agents` 等、文档 2,141 个。
+**关键判断：ECC 没有自己的模型循环**（循环与工具执行由宿主提供），它卖的是内容分层 + 工具事件钩子 + 安装适配 + 学习记忆。
+抄：按需加载省上下文 / 工具事件上的检查 / 跨宿主记忆交接 / 内容与运行时分离；
+不抄：903 个技能的内容农场、Node 适配层、钩子以特权脚本裸跑（trimum 的等价物是总线订阅 + 经网关的动作）。
+
+### 红线（拟，写进后续代码与测试）
+
+一切经 `ToolGateway`（不新增旁路）／改动必须能回滚（无差异不算成功）／保护路径直接拒／
+不自动提交版本库／测试不过不许声称完成／子 Agent 取权限交集且受限预算／技能是数据不是代码／没有模型就说没有。
+
+### 五步分片（每片独立可验收）
+
+1. 编辑原语与会话留痕（`patch_ops.py`，含 `--dry-run` 差异预览与回滚）
+2. 验证闭环（`verifier.py`，含「被网关拒时结论必须是 unknown 而非 green」）
+3. 技能与规则运行时（`instruction_loader.py` + 总线式钩子，首批三条流程：测试驱动 / 代码审阅 / 排障）
+4. 子 Agent 委派做实（spawn + `task.assigned` + 权限交集 + 预算 + 审计）
+5. 命令行入口与真机验收（`trm code`，命令面 78 → 79；`scripts/accept_e7.py` 五组）
+
+**待裁决两条**（决定先做沙箱还是先做编辑原语）：① Landlock / Seccomp 是否提到编码智能体之前；
+② 首发是否允许自动改盘 + 自动跑测试（草案建议：默认出差异 + 跑只读验证，写盘要确认，`--yes` 才自动落盘）。
 
 ---
 
@@ -445,7 +488,7 @@ L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线
 7. 🟡 **引擎侧两个半成品** —— `src/agent-sdk` 端到端测试与打包验证（`tests/` 无覆盖）；Policy Engine 正则→LLM 混合（`LlmPolicyEngine` 骨架未接线）；`transform_agent` 的 confidence 三级分流
 8. 🟢 **SonarQube 重扫** / **daemon 部署形态二选一**（`trmd.service` root 或用户态路径）
 9. ⏸️ **未开工子系统**（别误判为 bug）—— eBPF 告警 `security.ebpf_alert`、性能熔断 `security.fuse_triggered`、审计断链检测 `security.audit_breach`（`SecAudit.verify_chain()` 已实现但无人调用）
-10. 🅿️ **E7 自研 coding Agent** —— 大工程，等前面收口（调研件见 `tmp/research/ecosystem/ecc-*`）
+10. 🅿️ **E7 自研编码智能体** —— 规格与设计已出（`docs/CODING-AGENT-PLAN.md`，2026-09-21），**待裁决两条**（沙箱是否提前 / 首发是否允许自动改盘 + 自动跑测试）后按五步分片落地；调研件见 `tmp/research/ecosystem/ecc-*`
 
 ---
 

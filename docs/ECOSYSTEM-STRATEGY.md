@@ -171,7 +171,12 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
 | **E4** ✅ | 通用 CLI 适配器 + workflow 目录（Warp 式）+ 导入器 + `trm skill import`（2026-09-20 完成） | `ecosystem.py` / `cli_adapter.py` / `workflow_catalog.py` / `skill_import.py`；三个导入器都是「dry-run 不落盘 / 第三方默认不启用（工具）/ 不覆盖已有 / 不执行导入物」；117 项新测试 |
 | **E5** | 官方分发渠道：官网目录 + 官方根证书 + `.trmpkg` 校验器 + `trm install` | 签名校验单测（内置根/坏签名/哈希不符）+ 离线安装 dry-run |
 | **E6** ✅ | 选装工具链模型 + 首次安装引导 `trm setup` + 宿主探测（2026-09-20 完成） | `hosts.py` / `setup_wizard.py` / `identity.py` / `config/setup-catalog.yaml`；47 项新测试；`trm commands --check` 50 条通过 |
-| **E7** | 身份与多用户：证书 = 身份 + 能力清单；每用户独立 keystore | 见 §7.1 / §7.2 |
+| **E7** | **自研编码智能体**（候选）：编辑原语 + 验证闭环 + 技能与规则运行时 + 子 Agent 委派 | 规格与设计见 `docs/CODING-AGENT-PLAN.md`（2026-09-21 草案，待裁决） |
+
+> **口径修订（2026-09-21）**：本表原把 **E7** 记作「身份与多用户：证书 = 身份 + 能力清单；每用户独立 keystore」，
+> 但那份内容已分别由 **E5 第三片**（证书能力清单的运行期交集）、**E6**（官方 Agent 证书 `cert_type=official`）
+> 与 `docs/MULTI-USER-BOUNDARY.md`（多用户边界调研 + 设计）落地，**不再单列阶段**；E7 让位给「自研编码智能体」。
+> §7.1 / §7.2 仍是身份与多用户的正式口径（只是不再挂在 E7 名下）。
 
 ---
 
