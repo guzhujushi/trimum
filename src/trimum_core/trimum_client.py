@@ -10,6 +10,8 @@ Usage:
 
 Environment:
     TRIMUM_SOCKET   Unix socket path (default: $XDG_RUNTIME_DIR/trimum.sock,
+                    else /run/trimum/trimum.sock —— 系统级 trmd.service 的
+                    RuntimeDirectory=trimum 建的（S1 加固后的默认位置）,
                     else /run/user/<uid>/trimum.sock, else ~/.local/share/...)
     TRIMUM_TCP      TCP port for fallback (default: none)
 """
@@ -25,17 +27,30 @@ from pathlib import Path
 from typing import Any
 
 
+#: 系统级 daemon 的 socket 位置（trmd.service 的 RuntimeDirectory=trimum）。
+SYSTEM_RUNTIME_SOCKET = Path("/run/trimum/trimum.sock")
+
+
 def socket_candidates() -> list[Path]:
     """按优先级列出候选 socket 路径。
 
-    顺序与 daemon 端 `trimum_core.config.default_socket_path()` 保持一致：
-    `XDG_RUNTIME_DIR` → `/run/user/<uid>` → 数据目录。
+    顺序与 daemon 端 `trimum_core.config.default_socket_path()` 保持一致
+    （daemon 侧那三个分支），**多一条系统级 daemon 的位置**：系统单元把
+    `XDG_RUNTIME_DIR` 指向 `/run/trimum`，所以它的 socket 不在用户的
+    `/run/user/<uid>` 里 —— 客户端必须也认这条，否则两端对不上。
+    顺序：`XDG_RUNTIME_DIR` → `/run/trimum` → `/run/user/<uid>` → 数据目录。
     """
     candidates: list[Path] = []
 
     xdg = os.environ.get("XDG_RUNTIME_DIR")
     if xdg:
         candidates.append(Path(xdg) / "trimum.sock")
+
+    # 系统级 daemon（trmd.service）的单元里有 RuntimeDirectory=trimum +
+    # XDG_RUNTIME_DIR=/run/trimum，socket 落在 /run/trimum/trimum.sock。
+    # 客户端的 XDG_RUNTIME_DIR 是登录会话的 /run/user/<uid>，两者不同名，
+    # 不把这条列进来就会永远对不上（daemon 绑了 A、客户端去连 B、静默降级成 HTTP）。
+    candidates.append(SYSTEM_RUNTIME_SOCKET)
 
     if hasattr(os, "getuid"):
         candidates.append(Path("/run") / "user" / str(os.getuid()) / "trimum.sock")

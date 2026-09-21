@@ -13,7 +13,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from trimum_core import config as config_module
 from trimum_core.config import DEFAULT_CONFIG, Config, default_socket_path
-from trimum_core.trimum_client import discover_socket
+from trimum_core.trimum_client import (
+    SYSTEM_RUNTIME_SOCKET,
+    discover_socket,
+    socket_candidates,
+)
 
 
 class TestDefaultSocketPath:
@@ -75,3 +79,61 @@ class TestClientServerAgreement:
     def test_trimum_socket_env_wins(self, monkeypatch):
         monkeypatch.setenv("TRIMUM_SOCKET", "/tmp/custom.sock")
         assert discover_socket() == "/tmp/custom.sock"
+
+
+class TestSystemRuntimeDirSocket:
+    """系统级 daemon 的 socket 在 `/run/trimum`（S1 加固：单元里 RuntimeDirectory=trimum
+    + XDG_RUNTIME_DIR=/run/trimum），与登录会话的 `/run/user/<uid>` 不同名 ——
+    客户端不认识这条就会永远走 HTTP 回退（真机实测：`trm status` 显示 source=http）。"""
+
+    def test_system_runtime_socket_is_a_candidate(self, monkeypatch):
+        monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/9999")
+
+        candidates = socket_candidates()
+
+        assert SYSTEM_RUNTIME_SOCKET == Path("/run/trimum/trimum.sock")
+        # XDG 那条最优先（会话内的实例），系统 daemon 那条紧跟其后：
+        # 会话内有 socket 就先用手上的，没有才去认系统 daemon。
+        assert candidates[0] == Path("/run/user/9999/trimum.sock")
+        assert candidates[1] == SYSTEM_RUNTIME_SOCKET
+        # /run/user/* 的任何一条都不许排在它前面（Windows 上没有 getuid 那条）
+        assert all(
+            idx > 1
+            for idx, path in enumerate(candidates)
+            if str(path).startswith("/run/user/")
+        )
+
+    def test_discover_prefers_existing_system_socket(self, monkeypatch, tmp_path):
+        """`/run/trimum/trimum.sock` 存在时应当被选中（用 monkeypatch 伪造存在性，
+        不去碰真机的 /run）。"""
+        monkeypatch.delenv("TRIMUM_SOCKET", raising=False)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+        real_exists = Path.exists
+
+        def fake_exists(self):
+            if self == SYSTEM_RUNTIME_SOCKET:
+                return True
+            return real_exists(self)
+
+        monkeypatch.setattr(Path, "exists", fake_exists)
+
+        assert Path(discover_socket()) == SYSTEM_RUNTIME_SOCKET
+
+    def test_session_socket_still_wins_when_present(self, monkeypatch, tmp_path):
+        """会话 socket 存在时优先级更高（系统 daemon 只是兜底，不抢会话内实例）。"""
+        monkeypatch.delenv("TRIMUM_SOCKET", raising=False)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        session_socket = tmp_path / "trimum.sock"
+        session_socket.write_text("", encoding="utf-8")
+
+        real_exists = Path.exists
+
+        def fake_exists(self):
+            if self == SYSTEM_RUNTIME_SOCKET:
+                return True
+            return real_exists(self)
+
+        monkeypatch.setattr(Path, "exists", fake_exists)
+
+        assert Path(discover_socket()) == session_socket
