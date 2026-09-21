@@ -28,8 +28,19 @@ def _agent_count(config) -> int | None:
     return None
 
 
-def _find_daemon_pid(config) -> int | None:
-    """Return the daemon PID from pid files or the configured listen port."""
+def _find_daemon_pid(config, health: dict | None = None) -> int | None:
+    """Return the daemon PID from its own report, pid files, or the listen port.
+
+    `health.pid` 排最前：后面那条 psutil 扫 `127.0.0.1:<port>` 监听者的路子在
+    TCP 面关掉之后就没有对象可扫了（没人监听那个端口）。
+    """
+    reported = (health or {}).get("pid") if isinstance(health, dict) else None
+    if reported:
+        try:
+            return int(reported)
+        except (TypeError, ValueError):
+            pass
+
     pid = read_pid_file(config)
     if pid is not None:
         return pid
@@ -109,7 +120,8 @@ def get_status_data(config=None) -> dict:
         config = Config()
 
     daemon = get_daemon_status(config)
-    pid = _find_daemon_pid(config)
+    health = daemon.get("health") or {}
+    pid = _find_daemon_pid(config, health)
     process = _process_info(pid) if daemon["running"] or pid else None
     system = _system_snapshot()
 
@@ -120,6 +132,9 @@ def get_status_data(config=None) -> dict:
         "host": config.host,
         "port": config.port,
         "socket": config.socket_path,
+        # daemon 自报的两个事实：TCP 面还开不开、IPC socket 起没起来
+        "http": health.get("http"),
+        "ipc": health.get("ipc"),
         "pid": pid,
         "process": process,
         "system": system,
@@ -142,6 +157,10 @@ def handler(args: argparse.Namespace) -> int:
             if d.get("version"):
                 print(f"version: {d['version']}")
             print(f"endpoint: {d['host']}:{d['port']} (socket={d['socket']})")
+            if d.get("http") is not None:
+                print(f"http: {'enabled' if d['http'] else 'disabled'}")
+            if d.get("ipc") is not None:
+                print(f"ipc socket: {'ok' if d['ipc'] else 'UNAVAILABLE'}")
             if d.get("pid"):
                 print(f"pid: {d['pid']}")
             process = d.get("process") or {}

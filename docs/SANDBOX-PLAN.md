@@ -426,7 +426,7 @@ sudo bash /tmp/check_sandbox_caps_root.sh             # 系统级能力核对（
 测试：`tests/test_socket_path_consistency.py` **11 → 20 项**（新增：env 契约、两端候选表逐条一致、stale 文件被跳过、
 bind 失败不再静默、缺父目录自动创建）。本地 `18 passed / 2 skipped`（两项为 Windows 无 `AF_UNIX` 的 skip）。
 
-#### 9.3.5 剩余待办：把 TCP 收掉（裁决 1 的落地顺序）
+#### 9.3.5 把 TCP 收掉：四条前置（**2026-09-21 第四轮已全部落地**，见 §9.3.7）
 
 `core.host` 不再监听 TCP **之前**，必须先补齐 socket 这一侧的覆盖面，否则 CLI 会瘸：
 
@@ -435,6 +435,10 @@ bind 失败不再静默、缺父目录自动创建）。本地 `18 passed / 2 sk
 3. **加开关 `core.http_enabled`**（默认先 `true`）：切 `false` 时 uvicorn 不监听，preflight 也只查 socket。
 4. **socket bind 失败在「无 HTTP」时升级为致命**：否则关掉 TCP 又没有 socket = daemon 什么都没提供，却仍然报 `active`。
 5. `trm agent` 已经 RPC 优先（`agent.py::_remote_agent_call`），不用改；`/api/events/stream`（SSE）没有 CLI 消费者。
+
+上面 1～4 已在同日第四轮全部落地（改法与测试见 §9.3.7）。**开关默认仍是 `true`**：让 daemon 真的停止监听 TCP
+这一步要等 S1 上机验收过 —— 顺序是「`trm status` 看到 `ipc socket: ok`」→「用 `Environment=TRIMUM_HTTP=0`
+试跑一轮 CLI」→「都正常再把 `/etc/trimum/config.yaml` 的 `http_enabled` 改成 false」。
 
 
 #### 9.3.6 事故：装 HEAD 的 `api_server.py` 把 daemon 打成崩溃循环（2026-09-21 21:09）
@@ -470,6 +474,43 @@ ModuleNotFoundError: No module named 'trimum_core.workflow_runtime'
 先验 `import trimum_core.main`、再重启 trmd、最后以 `guzhujushi` 身份跑 `trm status` 收尾核对。
 **正确顺序**：先回滚 src（hotfix restore），再跑新版 sync。
 
+#### 9.3.7 TCP 收口：四条前置落地 + 新开关 `core.http_enabled`（2026-09-21 第四轮）
+
+用户口径：*「成功，写TCP吧」*（S1 恢复脚本跑通之后）。四条（§9.3.5）全部落地，**只在代码侧** ——
+`http_enabled` 默认 `true`，生产单元一个字节没动。
+
+| # | 改法 | 文件 |
+|---|---|---|
+| 1 | `health` 由 daemon **自报** `pid` / `uptime` / `http` / `ipc`，HTTP 与 IPC **共用一份** `_health_payload()`；`trm status` 先认 `health.pid`，再退 pid 文件，最后才是 psutil 扫监听端口 | `api_server.py`、`cli/commands/status.py` |
+| 2 | 新增 RPC `security.tokens` / `security.learning` / `security.learn`；实现抽成模块级 `_jit_tokens()` / `_learning_status()` / `_run_learning()`，**HTTP 与 IPC 共用同一份**；`trm security tokens / learning / learn` 改 **RPC 优先、HTTP 兜底** | `api_server.py`、`cli/commands/security.py` |
+| 3 | 新开关 `core.http_enabled`（默认 `true`）+ `TRIMUM_HTTP` 环境变量覆盖（`0`/`false`/`no`/`off` 关，其余一律当开）。关掉时 **不启 uvicorn**，由 `main._serve_without_http()` 自己驱 `app.router.lifespan_context(app)` —— 与 uvicorn 内部走的是**同一段 lifespan**；端口预检也只在开 HTTP 时跑 | `config.py`、`main.py` |
+| 4 | 关掉 HTTP 时 socket bind 失败 → `IpcUnavailableError` 从 startup handler 抛出 → `trmd` 以退出码 `3` 中止（沿用 `abort_startup` 口径）。**开着 HTTP 时仍只记 `error`**：那时用户还有路走，不该拦启动 | `ipc_handler.py`、`api_server.py`、`main.py` |
+
+顺带一条：`IpcHandler.listening`（本进程是否真在 listen）成了 `health.ipc` 的来源 ——
+「socket 到底起没起来」从此是 `trm status` 上的一行，不用再翻日志对时间线。
+
+测试 `tests/test_ipc_only_mode.py` **14 项**：开关的默认 / 配置 / env / 垃圾值四条；`health` 两份口径逐字段一致；
+`security.*` 三个 RPC 的行为（令牌只露前 8 位、按 agent 过滤、learning 的 summary+profiles）；
+`main._serve_without_http` 真的把 lifespan 拉起来又干净收摊；「HTTP 开 → socket 失败仍启动」与
+「HTTP 关 → socket 失败必失败」两条对照。另改 `test_api_server_startup.py::TestHealthVersion`（health 不再只有 version）
+与 `test_cli_commands.py`（RPC 优先 + pid 来自 health）。
+
+**真机切换顺序（等 S1 过了再走，别提前）**：
+
+```bash
+# ① socket 侧先确认好了没有
+trm status                       # 期望 "ipc socket: ok"
+
+# ② 用环境变量只关这一个进程的 HTTP（删掉即回滚，不动 config.yaml）
+#    由 harden 脚本的 drop-in 写 [Service] Environment=TRIMUM_HTTP=0，然后：
+sudo systemctl restart trmd
+trm status                       # 期望 http: disabled 且 ipc socket: ok
+trm agent list; trm security tokens; trm security learning; trm security learn
+```
+
+③ 上面四条 CLI 全绿之后，才把 `/etc/trimum/config.yaml` 的 `http_enabled` 设成 `false`（
+`scripts/install.sh` 生成的模板已带这一行，默认 `true`）。**这一轮没做，等 S1 验收。**
+
 ### 9.4 材料与缺口
 
 | 材料 | 位置 |
@@ -495,3 +536,5 @@ ModuleNotFoundError: No module named 'trimum_core.workflow_runtime'
 >   恢复用 `scripts/trmd_hotfix_restore.sh`。
 > 下一步（顺序不能反）：① `sudo bash /tmp/trmd_hotfix_restore.sh` ② `sudo bash /tmp/sync_opt_socket_patch.sh`
 > ③ `sudo bash /tmp/harden_trmd_unit.sh --apply`；过了再按 §9.3.5 收掉 TCP。裁决记录见 §9.1 / §9.2。
+> **第四轮（同日）：§9.3.5 的四条前置已在代码侧落地**（`core.http_enabled` 默认仍 `true`，生产单元未切）——
+> 改法、测试与真机切换顺序见 §9.3.7。

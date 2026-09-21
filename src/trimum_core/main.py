@@ -10,7 +10,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
+import signal
 import socket
 import sys
 
@@ -59,6 +61,39 @@ def abort_startup(reason: str, hint: str) -> None:
     sys.exit(EXIT_STARTUP_PRECONDITION)
 
 
+async def _serve_without_http(app, config) -> None:
+    """只提供 IPC socket 的 daemon（`core.http_enabled=false`）。
+
+    uvicorn 必须有监听端口才肯起来，所以这条路上由我们自己驱 lifespan：
+    `app.router.lifespan_context(app)` 正是 uvicorn 内部走的那一段（跑
+    on_startup / on_shutdown handler），不是另起一套启动逻辑。
+    """
+    from .logger import get_logger
+
+    logger = get_logger("main")
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    handled = 0
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+            handled += 1
+        except (NotImplementedError, AttributeError, ValueError):
+            # Windows 没有 loop 级信号处理；该模式只在 Linux 上用
+            break
+
+    async with app.router.lifespan_context(app):
+        logger.info(
+            "trimum_core_started",
+            mode="ipc-only",
+            socket=config.socket_path,
+        )
+        if handled == 0:
+            logger.warning("signal_handlers_unavailable", detail="只能靠 SIGKILL 停")
+        await stop.wait()
+
+
 def run() -> None:
     """CLI entry point for trimum Core daemon."""
     parser = argparse.ArgumentParser(
@@ -98,7 +133,7 @@ def run() -> None:
     from pathlib import Path
 
     from .config import Config
-    from .ipc_handler import socket_is_live
+    from .ipc_handler import IpcUnavailableError, socket_is_live
 
     config = Config()
     if args.config:
@@ -109,13 +144,15 @@ def run() -> None:
         config._raw["core"]["port"] = args.port
 
     # ── 启动前预检：被占就立刻退出（碰 socket 之前） ──────────────
-    port_error = check_tcp_port(config.host, config.port)
-    if port_error:
-        abort_startup(
-            f"TCP {config.host}:{config.port} 已被占用（{port_error}）",
-            "已有 trmd 在跑？先 `trm status` 确认；要停旧实例用"
-            " `pkill -f trimum_core.main`，或换端口 `trmd --port 8322`",
-        )
+    # HTTP 面关掉时不查端口：查了也没用，还会因为「别的进程占着 8321」白拦一刀。
+    if config.http_enabled:
+        port_error = check_tcp_port(config.host, config.port)
+        if port_error:
+            abort_startup(
+                f"TCP {config.host}:{config.port} 已被占用（{port_error}）",
+                "已有 trmd 在跑？先 `trm status` 确认；要停旧实例用"
+                " `pkill -f trimum_core.main`，或换端口 `trmd --port 8322`",
+            )
     if socket_is_live(config.socket_path):
         abort_startup(
             f"IPC socket {config.socket_path} 已被其它进程监听",
@@ -154,10 +191,25 @@ def run() -> None:
         sec_monitor = await init_security(state.tool_gateway, state.event_bus)
         state.sec_monitor = sec_monitor
         logger.info("security_components_ready", monitor=type(sec_monitor).__name__)
-        logger.info("starting_http_server", host=config.host, port=config.port)
-        return app, config
+        return app, logger
 
-    app, config = asyncio.run(_init())
+    app, logger = asyncio.run(_init())
+
+    if not config.http_enabled:
+        logger.info("starting_ipc_only_daemon", socket=config.socket_path)
+        try:
+            asyncio.run(_serve_without_http(app, config))
+        except IpcUnavailableError as exc:
+            abort_startup(
+                f"IPC socket 起不来（{exc}），而 core.http_enabled=false"
+                " —— 这个 daemon 没有任何入口可服务",
+                "检查 core.socket_path 的父目录是否存在且可写（系统单元用 "
+                "/run/trimum/trimum.sock + RuntimeDirectory=trimum）；"
+                "临时 `TRIMUM_HTTP=1 trmd` 可先把 HTTP 面打开",
+            )
+        return
+
+    logger.info("starting_http_server", host=config.host, port=config.port)
 
     # 使用 uvicorn.run() 替代手动 Server.serve()
     # uvicorn 0.52.4 中 Server.startup() 在手动调用 config.load()

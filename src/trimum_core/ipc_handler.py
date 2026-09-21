@@ -47,6 +47,16 @@ from .models import (
 
 logger = get_logger("ipc_handler")
 
+
+class IpcUnavailableError(RuntimeError):
+    """IPC 通道起不来、而进程又没有别的入口时抛出（HTTP 被关掉那一种）。
+
+    `ipc_handler` 自己只记错误、不抛：daemon 还开着 HTTP 时，用户仍然有路可走。
+    「core.http_enabled=false 且 socket 没起来」才是致命的 —— 那时进程对 systemd
+    报 active、实际什么都不提供，只能当场启动失败。
+    """
+
+
 # ── JSON-RPC Error Codes ────────────────────────────────────────
 
 PARSE_ERROR = -32700
@@ -158,6 +168,15 @@ class IpcHandler:
         self.socket_start_error: str | None = None
         self._server: stdlib_socket.socket | None = None
         self._tcp_server: stdlib_socket.socket | None = None
+
+    @property
+    def listening(self) -> bool:
+        """本进程是否真的在 listen Unix socket（Windows 上恒 False）。
+
+        「文件存在」不算：SIGKILL 会留下 stale 文件。这一位由 `health` 报给
+        `trm status`，好让人一眼看出 IPC 通道在不在。
+        """
+        return self._server is not None
 
     # ── Lifecycle ──────────────────────────────────────────────
 

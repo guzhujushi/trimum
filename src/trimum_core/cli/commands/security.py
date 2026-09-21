@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from .._utils import emit, fail, get_daemon_status, http_json
+from .._utils import emit, fail, get_daemon_status, http_json, rpc_call
 
 
 def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
@@ -98,20 +98,31 @@ def _tokens_data() -> dict:
     from trimum_core.config import Config
 
     config = Config()
+
+    # RPC 优先：TCP 面一旦关掉（裁决见 docs/SANDBOX-PLAN.md §9.3.5），
+    # 下面那条 HTTP 路会整条消失 —— 这三个子命令以前只有 HTTP 一条腿。
+    result = rpc_call(config, "security.tokens")
+    if isinstance(result, dict):
+        return {"tokens": result.get("tokens", [])}
+
     status = get_daemon_status(config)
     if status["running"]:
         payload = http_json(config, "GET", "/api/security/tokens")
         if isinstance(payload, dict):
             return {"tokens": payload.get("data", [])}
 
-    gateway_data = getattr(config, "_jit_tokens", None)
-    return {"tokens": gateway_data or []}
+    return {"tokens": []}
 
 
 def _learning_data() -> dict:
     from trimum_core.config import Config
 
     config = Config()
+
+    result = rpc_call(config, "security.learning")
+    if isinstance(result, dict) and result:
+        return result
+
     status = get_daemon_status(config)
     if status["running"]:
         payload = http_json(config, "GET", "/api/security/learning")
@@ -124,11 +135,20 @@ def _learn_data(inject: bool) -> dict:
     from trimum_core.config import Config
 
     config = Config()
+
+    result = rpc_call(config, "security.learn", {"inject": bool(inject)}, timeout=10.0)
+    if isinstance(result, dict) and result:
+        return result
+
     status = get_daemon_status(config)
     if not status["running"]:
         raise RuntimeError("daemon is not running — learning needs live behavior data")
     payload = http_json(
-        config, "POST", "/api/security/learn", json_data={"inject": bool(inject)}
+        config,
+        "POST",
+        "/api/security/learn",
+        json_data={"inject": bool(inject)},
+        timeout=10.0,
     )
     if not payload:
         raise RuntimeError("daemon did not return a learning result")

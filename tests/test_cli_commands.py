@@ -33,7 +33,7 @@ class TestStatusCommand:
                 "health": {"version": "0.5.0"},
             },
         )
-        monkeypatch.setattr(status_mod, "_find_daemon_pid", lambda config: 4242)
+        monkeypatch.setattr(status_mod, "_find_daemon_pid", lambda *a, **k: 4242)
         monkeypatch.setattr(
             status_mod,
             "_process_info",
@@ -72,7 +72,7 @@ class TestStatusCommand:
             "get_daemon_status",
             lambda config: {"running": False, "source": None, "health": None},
         )
-        monkeypatch.setattr(status_mod, "_find_daemon_pid", lambda config: None)
+        monkeypatch.setattr(status_mod, "_find_daemon_pid", lambda *a, **k: None)
         monkeypatch.setattr(status_mod, "_system_snapshot", lambda: {"error": "no psutil"})
 
         data = status_mod.get_status_data(FakeConfig())
@@ -80,6 +80,36 @@ class TestStatusCommand:
         assert data["running"] is False
         assert data["pid"] is None
         assert data["agents"] is None
+
+    def test_pid_http_ipc_come_from_daemon_health(self, monkeypatch):
+        """TCP 面关掉后没人监听 8321，pid 只能由 daemon 在 health 里自报。
+
+        `_find_daemon_pid` 后面那条 psutil 扫监听者的路子在那种情况下必然空手。
+        """
+        monkeypatch.setattr(
+            status_mod,
+            "get_daemon_status",
+            lambda config: {
+                "running": True,
+                "source": "rpc",
+                "health": {
+                    "version": "0.5.0",
+                    "pid": 777,
+                    "http": False,
+                    "ipc": True,
+                },
+            },
+        )
+        monkeypatch.setattr(status_mod, "read_pid_file", lambda config: None)
+        monkeypatch.setattr(status_mod, "_process_info", lambda pid: {"pid": pid})
+        monkeypatch.setattr(status_mod, "_system_snapshot", lambda: {})
+        monkeypatch.setattr(status_mod, "_agent_count", lambda config: 2)
+
+        data = status_mod.get_status_data(FakeConfig())
+
+        assert data["pid"] == 777
+        assert data["http"] is False
+        assert data["ipc"] is True
 
 
 class TestHealthCommand:
@@ -140,6 +170,7 @@ class TestSecurityLearningCommand:
             "get_daemon_status",
             lambda config: {"running": False, "source": None, "health": None},
         )
+        monkeypatch.setattr(security_mod, "rpc_call", lambda *a, **k: None)
 
         assert main(["--json", "security", "learning"]) == 0
         payload = json.loads(capsys.readouterr().out)
@@ -160,6 +191,7 @@ class TestSecurityLearningCommand:
             lambda config: {"running": True, "source": "http", "health": None},
         )
         monkeypatch.setattr(security_mod, "http_json", fake_http_json)
+        monkeypatch.setattr(security_mod, "rpc_call", lambda *a, **k: None)
 
         assert main(["--json", "security", "learn", "--inject"]) == 0
         out = json.loads(capsys.readouterr().out)
@@ -175,7 +207,53 @@ class TestSecurityLearningCommand:
             "get_daemon_status",
             lambda config: {"running": False, "source": None, "health": None},
         )
+        monkeypatch.setattr(security_mod, "rpc_call", lambda *a, **k: None)
 
         assert main(["--json", "security", "learn"]) == 1
         captured = capsys.readouterr()
         assert "daemon is not running" in captured.err
+
+    def test_tokens_and_learning_prefer_rpc(self, monkeypatch, capsys):
+        """socket 通了就不该再碰 HTTP —— TCP 面关掉之后这条命令全靠它。"""
+        from trimum_core.cli.commands import security as security_mod
+
+        calls = []
+
+        def fake_rpc(config, method, params=None, timeout=2.0):
+            calls.append((method, params))
+            if method == "security.tokens":
+                return {"tokens": [{"agent_id": "a1"}]}
+            return {"summary": {"profiles_count": 1}, "profiles": {}}
+
+        def explode(*args, **kwargs):
+            raise AssertionError("RPC 通了就不该再走 HTTP")
+
+        monkeypatch.setattr(security_mod, "rpc_call", fake_rpc)
+        monkeypatch.setattr(security_mod, "http_json", explode)
+
+        assert main(["--json", "security", "tokens"]) == 0
+        assert json.loads(capsys.readouterr().out)["tokens"] == [{"agent_id": "a1"}]
+
+        assert main(["--json", "security", "learning"]) == 0
+        assert json.loads(capsys.readouterr().out)["summary"] == {"profiles_count": 1}
+
+        assert [method for method, _ in calls] == ["security.tokens", "security.learning"]
+
+    def test_learn_sends_inject_over_rpc(self, monkeypatch, capsys):
+        from trimum_core.cli.commands import security as security_mod
+
+        seen = {}
+
+        def fake_rpc(config, method, params=None, timeout=2.0):
+            if method == "security.learn":
+                seen["method"] = method
+                seen["params"] = params
+                return {"mode": "auto", "summary": {}, "injected": 3}
+            return None
+
+        monkeypatch.setattr(security_mod, "rpc_call", fake_rpc)
+
+        assert main(["--json", "security", "learn", "--inject"]) == 0
+
+        assert json.loads(capsys.readouterr().out)["injected"] == 3
+        assert seen == {"method": "security.learn", "params": {"inject": True}}

@@ -206,6 +206,9 @@ core:
   port: 8321
   socket_path: "/run/trimum/trimum.sock"
   workers: 1
+  # HTTP（TCP）面开关：false 时只留 IPC socket。关之前先确认
+  # `trm status` 里 "ipc socket: ok"（docs/SANDBOX-PLAN.md §9.3.5）。
+  http_enabled: true
 
 logging:
   level: info

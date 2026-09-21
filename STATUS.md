@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地，`docs/SANDBOX-PLAN.md` §9.3.7）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -48,8 +48,30 @@ journal 显示 20:50:01 起、20:50:02 停，只隔 1 秒。
 `XDG_RUNTIME_DIR` 劫持 + 就绪门 + 失败留证 + 默认 `@debug` / 默认不加只读）。
 测试：`tests/test_socket_path_consistency.py` **11 → 20**（本地 18 passed / 2 skipped）。
 
-**未做**：TCP 收口（裁决 1）要先补 RPC 面（`health` 带 pid、`security.tokens/learning/learn`），顺序见 §9.3.5；
-生产单元仍未加固；**未安装任何包**。
+**未做**（当轮口径；同日第四轮已补上，见下节）：TCP 收口（裁决 1）要先补 RPC 面（`health` 带 pid、
+`security.tokens/learning/learn`），顺序见 §9.3.5；生产单元仍未加固；**未安装任何包**。
+
+## 2026-09-21 TCP 收口：先把 socket 侧的腿补齐（✅ 代码已改；生产单元仍未切）
+
+> 用户口径：*「成功，写TCP吧」*（S1 恢复脚本跑通之后）。落地顺序取自 `docs/SANDBOX-PLAN.md` §9.3.5，
+> 改法 / 测试 / 真机切换顺序见 §9.3.7。
+
+**四步全部落地。**这四条都是「关 TCP 之前必须先有」的东西，少一条就等于关掉的是 daemon 而不是 TCP：
+
+| # | 改动 | 文件 |
+|---|---|---|
+| 1 | `health` 由 daemon **自报** `pid` / `uptime` / `http` / `ipc`（HTTP 与 IPC 共用一份 `_health_payload()`）；`trm status` 先认 `health.pid`，再退 pid 文件，最后才是 psutil 扫监听端口 | `api_server.py` / `cli/commands/status.py` |
+| 2 | 新增 RPC `security.tokens` / `security.learning` / `security.learn`；实现抽成模块级 `_jit_tokens()` / `_learning_status()` / `_run_learning()`，**HTTP 与 IPC 共用**；`trm security tokens / learning / learn` 改 **RPC 优先、HTTP 兜底** | `api_server.py` / `cli/commands/security.py` |
+| 3 | 新开关 `core.http_enabled`（默认 `true`）+ `TRIMUM_HTTP` 覆盖（`0`/`false`/`no`/`off` 关，其余一律当开）。关掉时 **不启 uvicorn**，由 `main._serve_without_http()` 自己驱 `app.router.lifespan_context(app)`（与 uvicorn 内部**同一段 lifespan**）；端口预检也只在开 HTTP 时跑 | `config.py` / `main.py` |
+| 4 | 关掉 HTTP 时 socket bind 失败 → `IpcUnavailableError` 从 startup 抛出 → `trmd` 以 `exit 3` 中止；**开着 HTTP 时仍只记 `error`**（那时用户还有路走，不该拦启动） | `ipc_handler.py` / `api_server.py` / `main.py` |
+
+顺带：`IpcHandler.listening` 成了 `health.ipc` 的来源 ——「socket 到底起没起来」从此是 `trm status` 上的一行。
+
+**测试**：新增 `tests/test_ipc_only_mode.py` **14 项**；`test_api_server_startup.py::TestHealthVersion`（health 不再只有
+version）与 `test_cli_commands.py`（RPC 优先 + pid 来自 health）同步改。全量 **1519 passed / 2 failed / 10 skipped**
+（2 项 = 既有宿主基线：PATH 缺 `python.exe`、LLM 断网；与开工前逐条同名同数）。
+
+**未做**：真机切换（`http_enabled` 默认仍 `true`，生产单元没动）；部署树整体同步；S2～S5。**未安装任何包。**
 
 ## 2026-09-21 编码智能体调研：ECC 适合吗？（✅ 已完成，**只调研不改代码**）
 

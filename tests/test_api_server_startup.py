@@ -149,15 +149,19 @@ class TestHealthVersion:
         # HTTP 路径（不进入 lifespan，就不需要跑整个 startup）
         response = TestClient(app).get("/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "ok", "version": trimum_core.__version__}
+        body = response.json()
+        assert body["status"] == "ok"
+        assert body["version"] == trimum_core.__version__
         assert app.version == trimum_core.__version__
 
-        # IPC 路径
+        # IPC 路径：与 HTTP 逐字段一致（pid / uptime / http / ipc 一起比；
+        # uptime 会在两次调用之间走一点点，单独比）
         ipc = IpcHandler(socket_path=str(tmp_path / "trimum.sock"))
         _register_ipc_routes(ipc, state)
         handler = ipc.router.get("health")
         assert handler is not None
-        assert asyncio.run(handler({})) == {
-            "status": "ok",
-            "version": trimum_core.__version__,
+        rpc_body = asyncio.run(handler({}))
+        assert rpc_body.keys() == body.keys()
+        assert {k: v for k, v in rpc_body.items() if k != "uptime"} == {
+            k: v for k, v in body.items() if k != "uptime"
         }

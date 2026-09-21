@@ -32,6 +32,11 @@ SOCKET_ENV = "TRIMUM_SOCKET"
 #: 系统级 daemon 的 socket 位置（unit 里 `RuntimeDirectory=trimum`）。
 SYSTEM_RUNTIME_SOCKET = Path("/run/trimum/trimum.sock")
 
+#: 关掉 HTTP（TCP）面的环境变量。systemd 单元里加一行
+#: `Environment=TRIMUM_HTTP=0` 就能只留 IPC socket，不用改 /etc 下的 config.yaml，
+#: 回滚也只是删掉那一行 —— 「一关就可能瘸」的开关必须能一键退。
+HTTP_ENV = "TRIMUM_HTTP"
+
 
 def socket_is_live(path: str | os.PathLike[str]) -> bool:
     """`path` 上是否真有进程在 listen。
@@ -146,6 +151,9 @@ DEFAULT_CONFIG = {
         "port": 8321,
         "socket_path": str(DEFAULT_SOCKET_PATH),
         "workers": 1,
+        # HTTP（TCP 127.0.0.1:8321）面开关。默认先 True：socket 这一侧的覆盖面
+        # 补齐之前就关掉它，CLI 会瘸（见 docs/SANDBOX-PLAN.md §9.3.5）。
+        "http_enabled": True,
     },
     "logging": {
         "level": "INFO",
@@ -215,6 +223,18 @@ class Config:
     @property
     def socket_path(self) -> str:
         return self._raw["core"]["socket_path"]
+
+    @property
+    def http_enabled(self) -> bool:
+        """HTTP（TCP）面是否对外监听。
+
+        只认「明确写成 0/false/no/off」的值，其余一律当开：这个开关关掉就少
+        一条通道，宁可显式关，也不要因为一个写错的字符串把 daemon 的唯一入口憋没。
+        """
+        env = os.environ.get(HTTP_ENV)
+        if env is not None and env.strip():
+            return env.strip().lower() not in {"0", "false", "no", "off"}
+        return bool(self._raw["core"].get("http_enabled", True))
 
     @property
     def log_level(self) -> str:

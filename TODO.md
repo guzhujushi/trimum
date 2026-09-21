@@ -1,19 +1,22 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **E5 第三片步骤 3：多用户边界（调研 + 设计，`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略（取证类武装 / 处置类不武装 / 自动触发不派子 Agent）** → **穿插项步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **穿插项步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）**）
-> 测试基线：本地 **1489 passed / 5 failed / 8 skipped**（2026-09-21 穿插项步骤 C 之后；步骤 B 之后 1475，C 加 14）；步骤 3 之后是 **1326**（只加文档）；5 项失败 = 既有基线：Windows 沙箱写 `~/.trimum` 被拒 + PATH 缺 `python.exe` + LLM 断网）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326** → 步骤 A 1365 → 步骤 B 1475 → **步骤 C 1489** → E7 设计轮 1489（只加文档）；基线由 8 项降到 5 项是 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）带来的 —— 那 3 项（`test_depends_on` 1 + `test_integration` 2）长期失败的原因就是「往真实 `~/.trimum` 写被沙箱拒绝」；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
+> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **E5 第三片步骤 3：多用户边界（调研 + 设计，`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略（取证类武装 / 处置类不武装 / 自动触发不派子 Agent）** → **穿插项步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **穿插项步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地，`docs/SANDBOX-PLAN.md` §9.3.7）**）
+> 测试基线：本地 **1519 passed / 2 failed / 10 skipped**（2026-09-21 沙箱前置片 TCP 收口之后；socket 收口轮 1502 → TCP 收口轮 1519；穿插项步骤 C 之后 1489 → 步骤 B 1475）；步骤 3 之后是 **1326**（只加文档）；2 项失败 = 既有宿主基线：PATH 缺 `python.exe`（`test_depends_on::test_existing_dep_returns_empty`）+ LLM 断网（`test_llm_integration`）；原先那批「沙箱写 `~/.trimum` 被拒」已由 `tests/conftest.py` 把 `TRIMUM_HOME` 指到临时目录消掉）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326** → 步骤 A 1365 → 步骤 B 1475 → **步骤 C 1489** → E7 设计轮 1489（只加文档）→ socket 收口轮 1502 → **TCP 收口轮 1519**；基线里的「写真实 `~/.trimum` 被拒」那几项已由 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）消掉，剩下的 2 项（PATH 缺 `python.exe`、LLM 断网）是纯宿主状态基线与本仓库改动无关；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
 > 当前分支：`server`（= `origin/server` = `adb0ce3`，工作区干净）；日常只推 `server`，`main` / `ubuntu` / `arch-linux` 只在里程碑收尾时同步。
 
 ---
 
-## 📦 交接（2026-09-21，第三轮：S1 试装复盘 + **socket 收口**）
+## 📦 交接（2026-09-21，第三轮：S1 试装复盘 + **socket 收口** → 第四轮：**TCP 收口（代码侧）**）
 
 ### 一句话现状
 
 **P0 安全响应链、E5 分发渠道、穿插三项都已收口**；沙箱是 E7 的前置片，**六条裁决 + 本轮三条新裁决全部已定**。
 S1 试装过两次，**两次都被冒烟抢跑误判回滚**（真因是断言跑在 daemon 就绪之前，不是加固有问题），复盘见
 `docs/SANDBOX-PLAN.md` §9.3.3；socket 层已按「先看看」的结论改完代码与脚本（§9.3.4），**生产单元仍是零加固原样**。
-下一步：`sudo bash /tmp/sync_opt_socket_patch.sh` → `sudo bash /tmp/harden_trmd_unit.sh --apply`，过了再按 §9.3.5 收掉 TCP。
+下一步：`sudo bash /tmp/sync_opt_socket_patch.sh` → `sudo bash /tmp/harden_trmd_unit.sh --apply`。
+**§9.3.5 的 TCP 收口四步已在同日第四轮落地**（代码侧，`docs/SANDBOX-PLAN.md` §9.3.7）：`health` 自报 pid/uptime/http/ipc、
+新增 `security.tokens/learning/learn` 三个 RPC、`core.http_enabled`（+ `TRIMUM_HTTP`，默认 `true`）、无 HTTP 时 socket 失败
+升级为致命。**真机切换仍等 S1 验收过**（见下「S1 过了再收 TCP」）。
 
 ### 本次（2026-09-21）完成
 
@@ -26,7 +29,8 @@ S1 试装过两次，**两次都被冒烟抢跑误判回滚**（真因是断言�
 | `69f56b5` / `adb0ce3` | 两次提交号回填（步骤 C、E7） |
 | `3d7e63b` | fix(core)：客户端候选表补 `/run/trimum/trimum.sock`（S1 让 IPC socket 真的被用上）+ 3 项测试 |
 | `ee69508` | docs+scripts：沙箱前置片（`docs/SANDBOX-PLAN.md` 十节 + 5 个脚本 + 六条裁决落档） |
-| 本轮 | **socket 收口**：路径契约收敛到 `TRIMUM_SOCKET`、客户端按「能连通」挑、bind 失败不再静默、`await ipc.start()`、S1 脚本改版（默认 `@debug` / 不加只读 / 就绪门 / 失败留证）+ 测试 11 → 20 |
+| 本轮① | **socket 收口**：路径契约收敛到 `TRIMUM_SOCKET`、客户端按「能连通」挑、bind 失败不再静默、`await ipc.start()`、S1 脚本改版（默认 `@debug` / 不加只读 / 就绪门 / 失败留证）+ 测试 11 → 20 |
+| 本轮② | **TCP 收口**（§9.3.7）：`health` 自报 `pid`/`uptime`/`http`/`ipc` + `trm status` 认它 → 新增 `security.tokens/learning/learn` 三个 RPC（`trm security *` 改 RPC 优先）→ `core.http_enabled`（默认 `true`；关掉时不启 uvicorn，改由 `_serve_without_http()` 驱同一段 lifespan）→ 无 HTTP 时 socket 失败升级为 `exit 3`；新增 `tests/test_ipc_only_mode.py` **14 项** |
 
 细节：`STATUS.md`「2026-09-21 穿插项步骤 C」「2026-09-21 E7 规格与设计」「2026-09-21 沙箱前置片」「2026-09-21 S1：daemon 系统级加固」四节；
 下方「🔧 穿插项实施计划」与「🌐 生态战略」E7 项。
@@ -53,7 +57,10 @@ sudo bash /tmp/check_sandbox_caps_root.sh      #    系统级能力核对（顺�
 ```
 
 **之后**：S2 施加点收口（新增 `sandbox_exec`，6 个 spawn 点全改走它，Landlock + fail-closed）→ S3 seccomp 三档 → S4 子 Agent systemd transient → S5 可选档（helper / Docker / bwrap profile）。
-**S1 过了再收 TCP**（`docs/SANDBOX-PLAN.md` §9.3.5 的四步：`health` 带 pid → 补 `security.*` 三个 RPC → `core.http_enabled=false` → socket 失败升级为致命）。
+**S1 过了再收 TCP**：四步（`docs/SANDBOX-PLAN.md` §9.3.5）的**代码侧已在第四轮落地**（§9.3.7）；
+真机只差「开开关」：`trm status` 看到 `ipc socket: ok` → drop-in 写 `Environment=TRIMUM_HTTP=0` 重启试跑一轮
+（`trm status` / `trm agent list` / `trm security tokens|learning|learn`）→ 全绿再把 `config.yaml` 的
+`http_enabled` 设成 `false`。
 
 **本轮三条裁决（全部已定）**：① HTTP **只留 unix socket**；② `@debug` **放行**（`bpf` 仍挡）；③ `ReadOnlyPaths=/opt/trimum` **不保留**。
 
@@ -63,8 +70,8 @@ sudo bash /tmp/check_sandbox_caps_root.sh      #    系统级能力核对（顺�
 ### 开工须知（省得踩坑）
 
 - **先读**：`STATUS.md`（进度与决策）、本节、`docs/` 里对应专题文档 + `docs/ARCH.md`；**不读文档直接动手 = 违规**。
-- **测试**：`python -m pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider`；基线 **1489 passed / 5 failed / 8 skipped**，
-  5 项失败是既有宿主基线（沙箱写真实用户目录 ×4 + 断网 ×1），**不算回归**。
+- **测试**：`python -m pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider`；基线 **1519 passed / 2 failed / 10 skipped**，
+  2 项失败是既有宿主基线（PATH 缺 `python.exe` + LLM 断网），**不算回归**。
 - **分支**：日常只提交、只推送 `server`；另外三个分支只在里程碑收尾时逐提交同步。
 - **写文件**：用 node 的 `fs.writeFileSync(path, text, {encoding:"utf8"})`（UTF-8 + LF）。
   **别用 PowerShell here-string 写含中文的内容**（会按 GBK 写坏）；本环境 `apply_patch` 不可用；

@@ -37,7 +37,7 @@ from .context_manager import ContextManager
 from .agent_manager import AgentManager
 from .config import Config, ensure_dirs
 from .logger import setup_logging, get_logger
-from .ipc_handler import IpcHandler
+from .ipc_handler import IpcHandler, IpcUnavailableError
 from .workflow_event_driver import WorkflowEventDriver
 from .workflow_runtime import WorkflowRuntime
 
@@ -266,13 +266,82 @@ def _core_version() -> str:
         return "unknown"
 
 
+#: daemon 进程的启动时刻。`health` 自报 uptime 用。
+_STARTED_AT = time.time()
+
+
+def _health_payload(config: Config, state: AppState | None = None) -> dict:
+    """`health` 的唯一口径（HTTP `/health` 与 IPC `health` 共用一份）。
+
+    必须把 `pid` / `uptime` 带上：`trm status` 原先靠 psutil 扫
+    `127.0.0.1:8321` 的监听者拿 pid（`cli/commands/status.py::_find_daemon_pid`），
+    TCP 面一关就扫不到了，只能由 daemon 自报。`ipc` / `http` 同理：这两个字段
+    直接回答「socket 到底起没起来」「TCP 面还开不开」。
+    """
+    payload: dict[str, Any] = {
+        "status": "ok",
+        "version": _core_version(),
+        "pid": os.getpid(),
+        "uptime": round(time.time() - _STARTED_AT, 1),
+        "socket": config.socket_path,
+        "http": bool(config.http_enabled),
+    }
+    ipc = state.ipc if state is not None else None
+    if ipc is not None:
+        payload["ipc"] = ipc.listening
+    return payload
+
+
+def _jit_tokens(state: AppState, agent_id: str = "") -> list[dict]:
+    """有效的 JIT 令牌（可选按 agent 过滤）；令牌本体只露前 8 位。"""
+    tokens = getattr(state.tool_gateway, "_jit_tokens", {})
+    result: list[dict] = []
+    now = time.time()
+    for token in tokens.values():
+        if token.expires_at > 0 and now > token.expires_at:
+            continue
+        if agent_id and token.agent_id != agent_id:
+            continue
+        entry = token.model_dump()
+        entry["token"] = token.token[:8] + "..."
+        result.append(entry)
+    return result
+
+
+def _learning_status(state: AppState) -> dict:
+    """学习状态：全局摘要 + 各 Agent 画像。"""
+    engine = state.learning_engine
+    profiles = {
+        agent_id: {
+            "total_actions": profile.total_actions,
+            "deny_count": profile.deny_count,
+            "action_types": len(profile.action_counts),
+            "learned_rules": len(profile.learned_rules),
+            "learning_mode": profile.learning_mode,
+        }
+        for agent_id, profile in engine.get_profiles().items()
+    }
+    return {"summary": engine.get_summary(), "profiles": profiles}
+
+
+def _run_learning(state: AppState, inject: bool = False) -> dict:
+    """立即跑一次策略学习；inject=True 时把学到的规则注入当前 PolicyEngine。"""
+    summary = state.learning_engine.analyze()
+    injected = state.learning_engine.inject_to_policy(state.policy) if inject else 0
+    return {
+        "mode": state.learning_engine.get_mode(),
+        "summary": summary,
+        "injected": injected,
+    }
+
+
 def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
     """Register all JSON-RPC methods for the IPC handler."""
     router = ipc.router
 
     @router.register("health")
     async def rpc_health(params: dict) -> dict:
-        return {"status": "ok", "version": _core_version()}
+        return _health_payload(state.config, state)
 
     @router.register("execute")
     async def rpc_execute(params: dict) -> dict:
@@ -358,6 +427,24 @@ def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
             return {"success": False, "server": name, "error": str(exc)}
         return {"success": True, "server": name}
 
+    # ── 安全面（JIT 令牌 / 策略学习）───────────────────────────
+    # `trm security tokens|learning|learn` 原先只走 HTTP，是 TCP 面关掉之后
+    # 唯一会直接坏掉的命令面；这三个 RPC 把它们的腿补上。同一份实现
+    # （_jit_tokens / _learning_status / _run_learning）HTTP 与 IPC 共用。
+
+    @router.register("security.tokens")
+    async def rpc_security_tokens(params: dict) -> dict:
+        return {"tokens": _jit_tokens(state, str(params.get("agent_id", "")))}
+
+    @router.register("security.learning")
+    async def rpc_security_learning(params: dict) -> dict:
+        del params
+        return _learning_status(state)
+
+    @router.register("security.learn")
+    async def rpc_security_learn(params: dict) -> dict:
+        return _run_learning(state, bool(params.get("inject")))
+
 
 def create_app(config: Config) -> FastAPI:
     """Create and configure the FastAPI application."""
@@ -376,8 +463,8 @@ def create_app(config: Config) -> FastAPI:
 
     @app.get("/health")
     async def health():
-        """Health check endpoint."""
-        return {"status": "ok", "version": _core_version()}
+        """Health check endpoint（与 IPC `health` 同一份口径）。"""
+        return _health_payload(config, state)
 
     @app.post("/api/execute", response_model=ExecuteResponse)
     async def execute(request: ExecuteRequest):
@@ -525,6 +612,12 @@ def create_app(config: Config) -> FastAPI:
                 error=ipc.socket_start_error,
                 detail="IPC 通道不可用，客户端只剩 HTTP 可走（同机谁都能连）",
             )
+            if not config.http_enabled:
+                # 两条路都断了：HTTP 被关、socket 又没起来。这个 daemon 什么都不
+                # 提供，却会被 systemd 记成 active —— 必须当场起不来，不能装活着。
+                raise IpcUnavailableError(
+                    f"socket={config.socket_path} error={ipc.socket_start_error}"
+                )
 
         # Start WorkflowEventDriver (bridge between Engine and Agent)
         state.driver = WorkflowEventDriver(
@@ -632,55 +725,25 @@ def create_app(config: Config) -> FastAPI:
             inject: true 时把学到的规则注入当前 PolicyEngine
         """
         payload = req or {}
-        summary = state.learning_engine.analyze()
-        injected = 0
-        if payload.get("inject"):
-            injected = state.learning_engine.inject_to_policy(state.policy)
         return {
             "success": True,
-            "data": {
-                "mode": state.learning_engine.get_mode(),
-                "summary": summary,
-                "injected": injected,
-            },
+            "data": _run_learning(state, bool(payload.get("inject"))),
             "message": "learning analysis complete",
         }
 
     @app.get("/api/security/learning")
     async def security_learning():
         """查看学习状态：全局摘要 + 各 Agent 画像。"""
-        engine = state.learning_engine
-        profiles = {
-            agent_id: {
-                "total_actions": profile.total_actions,
-                "deny_count": profile.deny_count,
-                "action_types": len(profile.action_counts),
-                "learned_rules": len(profile.learned_rules),
-                "learning_mode": profile.learning_mode,
-            }
-            for agent_id, profile in engine.get_profiles().items()
-        }
         return {
             "success": True,
-            "data": {"summary": engine.get_summary(), "profiles": profiles},
+            "data": _learning_status(state),
             "message": "ok",
         }
 
     @app.get("/api/security/tokens")
     async def security_tokens(agent_id: str = ""):
         """列出有效的 JIT 令牌（可选按 agent 过滤）。"""
-        tokens = getattr(state.tool_gateway, "_jit_tokens", {})
-        result = []
-        now = time.time()
-        for tok_str, tok in tokens.items():
-            if tok.expires_at > 0 and now > tok.expires_at:
-                continue
-            if agent_id and tok.agent_id != agent_id:
-                continue
-            d = tok.model_dump()
-            d["token"] = tok.token[:8] + "..."
-            result.append(d)
-        return {"success": True, "data": result}
+        return {"success": True, "data": _jit_tokens(state, agent_id)}
 
 
     @app.get("/api/workflows")
