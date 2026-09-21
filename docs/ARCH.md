@@ -488,12 +488,51 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 | 事件广播、退出码收窄 | 一次事件会触发**所有**命中的 workflow（运行时按 workflow 各自判定，不做独占）。但 `trm workflow run <id> --event ...` 的退出码只认 `<id>` 自己的运行，其余进 `other_triggered`；点名的那份没被命中而别的被命中 → 退出码 1 并回报实际触发到的 id |
 | 散文式步骤会明确失败 | 内置剧本里「比对上次 hash 基线」这类步骤编译成 `trm-agent`，没有 driver / 没装 Agent 脚本时节点 FAILED 并说明原因，**不假装成功** |
 
-## 官方分发渠道与身份证书（规划，E5）
+## 官方分发渠道（E5，2026-09-21 已实现）
 
-> 设计与信任模型见 `docs/ECOSYSTEM-STRATEGY.md` §7（内置官方根证书 / `.trmpkg` 校验链 / 安装 ≠ 授权）、
-> §7.1（来源 + 身份 + 能力三层职责，证书只在运行时收紧策略）、§7.2（多用户前瞻）。
-> 现状：`agent_cert.py` 已有 official / self_signed / none 三档信任雏形，官方 Agent 证书由 `trm setup` 幂等签发；
-> 官网渠道本身未开工。本节原为 2026-09-20 的规划快照，按单一事实源原则并入上述文档，此处只留指针。
+> 信任模型与落地口径见 `docs/ECOSYSTEM-STRATEGY.md` §7（内置根 / `.trmpkg` 校验链 / 安装 ≠ 授权）、
+> §7.1（来源 + 身份 + 能力三层职责）、§7.2（多用户前瞻）、§7.4（包格式）、§7.5（本片）。
+
+### 模块
+
+| 模块 | 职责 |
+|---|---|
+| `src/trimum_core/trmpkg.py` | 包格式（`manifest.json5` + 逐文件 sha256 + `SIGNATURE` + `chain.json`）、打包、校验、安全解包；`verify_chain()` 与 `verify_document_signature()` 是「什么算可信」的唯一实现 |
+| `src/trimum_core/pkg_index.py` | 官方目录索引（`trmindex/1`，容器 `{document, signature, chain}`）：回答「去哪拿这个包」，索引本身也必须签名 |
+| `src/trimum_core/pkg_install.py` | 校验 → 按类型落地（`agents/` / `tools/` / `workflows/` / `skills/`）→ 登记 `~/.trimum/config/installed.json5` |
+| `src/trimum_core/capability.py` | 能力清单的运行期交集（E6 遗留）：多来源取最严，只收紧、不放宽 |
+| `src/trimum_core/cli/commands/pkg.py` | `trm pkg {verify,info,create,extract,root-init,signer-init}` |
+| `src/trimum_core/cli/commands/install.py` | `trm install [name]` / `--file` / `--list` / `--index` / `--allow-untrusted`（无参数仍是原向导） |
+| `config/trust/trimum-root.crt` | 内置官方根（只有公钥；私钥留在发布方 `~/.trimum/trust/`，仓库外） |
+
+### 关键设计
+
+- **信任链**：内置根 → 签名者证书（`issued_by` + `issuer_signature`）→ 签名 manifest 的**规范字节**
+  （`sort_keys` + 紧凑分隔符 + UTF-8）→ manifest 的逐文件 sha256 覆盖整个载荷。改一个字节都验不过，
+  且校验只依赖包内签名与内置根，不依赖 TLS。
+- **索引也是签名文档**：签名覆盖 `document`，`chain` 与包共用 `verify_chain()` —— 索引与包不可能对
+  「什么算可信」产生第二种解释；索引条目的 `sha256` 是索引对包的承诺，下载后先比哈希再进校验。
+- **安装三动作**：校验 → 落地 → 登记（trust / 签名者与根指纹 / 包哈希 / 来源 / requires / 能力块）。
+- **两档 trust**：`official`（链追到内置根）与 `untrusted`（显式 `--allow-untrusted`）。
+- **安装 ≠ 授权**：登记只回答「从哪来」；能不能执行仍由 ToolGateway 分层决定，`capability.py` 只收紧。
+- **requires**：安装时按 PATH 探测，缺依赖只警告不拒装（与 `AgentRegistry.check_dependencies` 同一口径）。
+- **发布方工具**：`root-init` / `signer-init` 拒绝把私钥写进 git 工作树（除非 `--insecure-key-output`），
+  落盘 0600；换根 = 旧包全部作废（见 `config/trust/README.md`）。
+- **运行期 Layer 2.6**：`ToolGateway` 在 L2.5 之后、L4 之前做能力交集 —— deny → `capability_denied`
+  审计并拒绝；confirm → 升级为 `Action.CONFIRM`（interactive 弹窗，非交互交给后续层）。
+  风险取管线判定的 risk（PolicyEngine / LLM 策略），不是执行后的观测值。
+
+### 红线（写进代码与测试）
+
+- `--allow-untrusted` 只放宽「来源」：包内绝对路径 / `..` / 符号链接 / 硬链接 / 设备文件一律照挡。
+- 私钥永不进仓库：CLI 守卫 + `.gitignore` 的 `*.key` / `*.pem` 双保险。
+- 校验不通过就不落地：先校验后解包，不留「先解开再判断」的中间态。
+- 能力清单读不懂（缺字段 / `max_risk` 非法）→ confirm，而不是当作无限制。
+
+### 测试
+
+`tests/test_trmpkg.py`（16）、`tests/test_cli_pkg.py`（25）、`tests/test_pkg_install.py`（28）、
+`tests/test_capability.py`（20）。
 
 ## 范围边界与验收（生态轮）
 
@@ -505,12 +544,13 @@ Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
 - 不安装 / 不内嵌 CLI-Anything（需 Node，调研已否决）；第三方 harness 只作**可选导入源**。
 - **不自建包仓库**：`trm env install` 只调机器上的系统包管理器（pacman / apt / dnf / zypper / apk / brew / winget / scoop）。
 - MCP 按阶段推进：M0/M1/M2（stdio + 注册 + 审计）、M3（策展导入器）、M4/M4.5（传输与生命周期 + 远端工具聚合）已交付。
-- 官方分发渠道（E5：官网 + 官方根证书 + `.trmpkg` 校验器）只出设计，不写实现。
+- 官方分发渠道（E5）只做**分发面**：包格式 + 校验器 + 内置根 + 目录索引 + `trm install`；
+  不新增能力来源（四层仍是唯一来源），不自建包仓库，不托管官网服务端。
 
 **验收标准**
 
 - 文档中每一项勾选状态都能对应到代码实现，或明确标注为缺口。
 - 调研结论可复现：`docs/CLI-ANYTHING-RESEARCH.md` 每条结论都附证据（registry / README / 本机检查）。
-- 生态四层每项交付都能用一条命令复现：`trm commands --json`、`trm env inventory --json`、`trm setup --dry-run --json`。
+- 生态四层每项交付都能用一条命令复现：`trm commands --json`、`trm env inventory --json`、`trm setup --dry-run --json`、`trm pkg verify <pkg>`、`trm install --list --json`。
 - 安装类命令的安全红线可验证：`--dry-run` 不执行、非交互无 `--yes` 必 abort、已装幂等退出 0（`tests/test_env_toolchain.py`）。
 - 既有测试基线不回归（本地基线失败项均为宿主环境问题：Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网）。

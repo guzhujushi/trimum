@@ -99,6 +99,11 @@ def _human_record(data: dict) -> None:
     if data.get("cert"):
         print(f"  certificate: {data['cert']}")
     print("  install != authorize: the runtime still applies policy to every call")
+    if data.get("missing_requires"):
+        print(
+            f"  [!] missing external dependencies: {', '.join(data['missing_requires'])} "
+            "(install them when convenient; nothing has to be reinstalled)"
+        )
     if data.get("warning"):
         print(f"[!] {data['warning']}")
 

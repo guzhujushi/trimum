@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from shutil import which
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 from urllib.request import url2pathname
@@ -296,6 +297,10 @@ def install_package(
     trust = TRUST_OFFICIAL if result.ok else TRUST_UNTRUSTED
     capabilities = dict(result.capabilities()) if result.ok else dict(UNTRUSTED_CAPABILITIES)
     signer_name = str(result.signer.get("name", ""))
+    # requires 只做 PATH 探测：缺依赖是「装好了但现在还用不了」，不是「包有问题」——
+    # 拒绝安装会逼用户在包和环境之间来回，与 agent_registry.check_dependencies 同一口径。
+    requires = dict(result.manifest.get("requires") or {})
+    missing_requires = sorted(dep for dep in requires if which(dep) is None)
 
     record: dict[str, Any] = {
         "name": name,
@@ -314,8 +319,11 @@ def install_package(
         "path": str(dest),
         "entry": str(result.manifest.get("entry", "")),
         "capabilities": capabilities,
+        "requires": requires,
+        "missing_requires": missing_requires,
         "errors": list(result.errors),
     }
+
     if kind == "agent":
         record["cert"] = _write_agent_cert(
             dest,

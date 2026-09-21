@@ -196,9 +196,9 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
 1. **信任根内置**：trimum 随包内置官方根证书（`config/trust/trimum-root.crt`，公钥固定），
    官网产物由该根签发的证书签名 —— 等价于浏览器根证书 / 发行版软件源签名模型，用户天然信任、无需弹窗选择。
 2. **包格式**：`.trmpkg` = `tar.gz` + `manifest.json5`（`name` / `type` / `version` / `requires` / `entry` / 文件 sha256）
-   + `SIGNATURE` + `chain.pem`。
-3. **校验顺序**：解包 → 逐文件 sha256 → 用**内置根**验证证书链 → 验证签名 → 检查 `requires` 前置依赖；
-   任何一步失败即拒绝安装。
+   + `SIGNATURE` + `chain.json`（落地口径见 §7.4）。
+3. **校验顺序**：解包安全 → 逐文件 sha256 → 用**内置根**验证证书链 → 验证签名 → 再检查 `requires`
+   前置依赖；前四步任何一步失败即拒绝安装，`requires` 缺项只警告（安装 ≠ 可用，见 §7.5）。
 4. **安装 ≠ 授权**：官方包安装后按 `trust: official` 注册，运行时照走 ToolGateway 分层与审计。
    官方身份只回答「来源可不可信」，不回答「这条命令允不允许执行」。
 5. **离线可校验**：只依赖内置根证书与包内签名，不依赖 TLS 信任链（防中间人、防官网被篡改）。
@@ -208,6 +208,8 @@ Workflow/TARL 引擎；`~/.trimum/skills/` 目录；子 Agent 真实 spawn + cgr
    运行期强制 confirm。
 
 > 定位：该渠道是四层生态的**分发面**，不新增能力来源，只决定「生态件如何可信地到达本机」。
+> 状态（2026-09-21）：上面 1-7 条**已全部实现**，落地口径见 §7.4（包格式）与 §7.5（CLI / 内置根 /
+> 安装接线 / 能力交集）；官网服务端与目录托管仍未开工。
 
 ### 7.1 证书不只是「来源证明」，还是「身份 + 能力授权」
 
@@ -296,6 +298,62 @@ chain.json          # [签名者证书, 根证书]（JSON 证书）
 `trm install <name>` / `--file <pkg>` 接线、`--allow-untrusted` 降级路径（装成 `trust: untrusted`
 + 运行期强制 confirm）、证书 `capabilities` 与 `security_rule.py` 的**运行期交集**。
 最后一项是 E6 遗留，与本节同源，建议与 `trm install` 一起做。
+
+---
+
+### 7.5 E5 第二片落地口径（2026-09-21：CLI + 内置根 + 安装接线 + 能力交集）
+
+上一片的四个缺口全部落地。**信任锚已经真的存在**：`config/trust/trimum-root.crt`
+（Ed25519，key_id `sha256:65da4663…`，2026-09-21 生成）在仓库里，私钥只在发布方本机
+`~/.trimum/trust/trimum-root.key`；发布方签名者证书 `trimum-release` 由它签发。
+实测：用该签名者打的包，`trm pkg verify <pkg>` **不带任何参数**即通过。
+
+**CLI 命令面（发布方 3 条 + 使用者 3 条）**
+
+| 命令 | 谁用 | 做什么 |
+|---|---|---|
+| `trm pkg root-init [--out DIR]` | 发布方（一次） | 造根：`trimum-root.crt`（可提交）+ `trimum-root.key`（**不可提交**） |
+| `trm pkg signer-init --name N [--tools] [--max-risk]` | 发布方 | 由根签发签名者证书；能力清单写在这里 |
+| `trm pkg create <dir> -o x.trmpkg --type …` | 发布方 | 打包并签名（拒绝无签打包，也拒绝「签名者与根不匹配」） |
+| `trm pkg verify <pkg>` | 使用者 | 对着内置根校验；失败逐条列原因，退出码 1 |
+| `trm pkg info / extract` | 使用者 | 只看 manifest / 先校验再解包（目标非空要 `--force`） |
+| `trm install <name>` / `--file <pkg>` / `--list` | 使用者 | 走官方目录或本地包安装，并登记 |
+
+**私钥红线（新增，写进代码与测试）**：`root-init` / `signer-init` **拒绝**把私钥写进 git 工作树
+（`--out ./config/trust` 这种手滑会直接报错），只有显式 `--insecure-key-output` 才放行；
+落盘权限 0600。`.gitignore` 的 `*.key` / `*.pem` 是第二道保险。换根 = 旧包全部作废，
+指纹要同步进 `config/trust/README.md`。
+
+**目录索引（新格式 `trmindex/1`）**：索引回答「去哪拿这个包」，所以它**也必须签名** ——
+容器是 `{document, signature, chain}`，签名覆盖 `document` 的规范字节，证书链与包**共用**
+`trmpkg.verify_chain()`。索引条目的 `sha256` 是索引对包的承诺：下载后先比哈希，不一致直接拒，
+不进解包流程。索引可以放本地目录 / `file://` / http(s)（`--index` 或 `TRIMUM_PKG_INDEX`），
+所以**离线也能跑通整条安装链**（测试就是这么建的）。
+
+**安装三动作**：校验 → 落地（按 `type` 进 `agents/` / `tools/` / `workflows/` / `skills/`）→
+登记 `~/.trimum/config/installed.json5`（trust / 签名者与根指纹 / 包哈希 / 来源 / requires /
+能力块）。agent 包额外写 `agents/<name>/cert.json`：官方 → `cert_type: official`
+（`check_agent_trust` 判 TRUSTED，不弹确认）；降级 → `cert_type: none` + `scope: untrusted`
+（判 CONFIRM）。
+
+**`--allow-untrusted` 的确切边界**（只放宽一处，其余照旧）：
+
+| 维度 | 默认 | `--allow-untrusted` |
+|---|---|---|
+| 包的证书链 | 必须追到内置根 | 放宽：装成 `trust: untrusted` |
+| 目录索引的签名 | 必须验过 | 放宽（索引也不设防） |
+| 包内路径（`..` / 绝对路径 / 链接 / 设备文件） | 挡 | **照挡** |
+| 运行期 | 走策略 | **额外强制逐条 confirm** |
+
+**能力交集（E6 遗留，同片完成）**：`src/trimum_core/capability.py` + 网关 **Layer 2.6**
+（L2.5 之后、L4 之前）。三个来源取交集、只收紧：agent 证书能力块 / 用户身份证书能力块 /
+包登记（`untrusted` 条目强制确认）。工具不在白名单 → deny；风险超 `max_risk` → confirm；
+证书过期 → deny；能力块读不懂 → confirm。**风险取管线判定的 risk**（PolicyEngine / LLM 策略），
+不是执行后的观测值 —— 也就是说 `max_risk` 挡的是「策略认为有多危险」，不是「实际有多危险」。
+
+**已知缺口（下一片）**：`trm install --remove`（卸载与注销）/ 官网服务端与目录托管 /
+多用户边界（§7.2）/ 包的 `requires` 只探测不解决（缺依赖仅警告）/
+`--show` 只读 install 子集的剧本自动触发（与 E5 无关的穿插项）。
 
 ## 8. 原始件（`tmp/research/ecosystem/`，已 gitignore）
 

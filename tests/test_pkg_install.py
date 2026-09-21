@@ -214,6 +214,55 @@ class TestInstallFromFile:
         assert "not both" in capsys.readouterr().err
 
 
+class TestRequires:
+    def test_external_dependencies_are_probed_against_path(self, home, tmp_path, keys, capsys):
+        payload = make_payload(tmp_path / "src" / "needs-dep")
+        manifest = trmpkg.build_manifest(
+            payload,
+            name="needs-dep",
+            type="agent",
+            version="1.0.0",
+            entry="main.py",
+            requires={"definitely-not-a-real-binary-xyz": ">=1.0"},
+        )
+        package = tmp_path / "needs-dep.trmpkg"
+        trmpkg.create_package(
+            payload,
+            package,
+            signer_private_pem=keys["signer_key"],
+            signer_cert=keys["signer_doc"],
+            chain=[keys["signer_doc"], keys["root_doc"]],
+            manifest=manifest,
+        )
+        capsys.readouterr()
+
+        code = main(["--json", "install", "--file", str(package)])
+        record = json.loads(capsys.readouterr().out)
+
+        assert code == 0  # 缺依赖只警告：装不装得到是环境的事，不是包的问题
+        assert record["requires"] == {"definitely-not-a-real-binary-xyz": ">=1.0"}
+        assert record["missing_requires"] == ["definitely-not-a-real-binary-xyz"]
+
+    def test_missing_dependencies_are_printed_for_humans(self, home, tmp_path, keys, capsys):
+        payload = make_payload(tmp_path / "src" / "needs-dep")
+        manifest = trmpkg.build_manifest(
+            payload, name="needs-dep", type="agent", version="1.0.0",
+            entry="main.py", requires={"definitely-not-a-real-binary-xyz": ""},
+        )
+        package = tmp_path / "needs-dep.trmpkg"
+        trmpkg.create_package(
+            payload, package,
+            signer_private_pem=keys["signer_key"],
+            signer_cert=keys["signer_doc"],
+            chain=[keys["signer_doc"], keys["root_doc"]],
+            manifest=manifest,
+        )
+        capsys.readouterr()
+
+        assert main(["install", "--file", str(package)]) == 0
+        assert "missing external dependencies" in capsys.readouterr().out
+
+
 class TestUntrustedPath:
     def test_foreign_package_is_refused_by_default(self, home, foreign_package, capsys):
         assert main(["install", "--file", str(foreign_package)]) == 1
