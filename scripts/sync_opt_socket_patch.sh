@@ -22,11 +22,16 @@ HOME_SRC=/home/guzhujushi/trimum/src
 BACKUP_ROOT=/var/backups/trimum
 VENV_PY=/opt/trimum/venv/bin/python
 
+# 只装「socket 路径契约」真正需要、且在**当前部署树里能 import** 的文件。
+# 故意不含 api_server.py：仓库 HEAD 那份的模块级 import 里有 `from .workflow_runtime
+# import WorkflowRuntime`，而部署树里没有 workflow_runtime.py（部署树比仓库旧一大截）
+# —— 2026-09-21 21:09 就是它把 daemon 打成崩溃循环（NRestarts 一路涨）的。
+# 代价只有一条：`await ipc.start()`（bind 失败立刻致命）这次装不上；bind 失败已由
+# ipc_handler 记 error + 打 stderr，仍然看得见。等部署树整体同步到 HEAD 再补。
 FILES=(
   trimum_core/config.py
   trimum_core/trimum_client.py
   trimum_core/ipc_handler.py
-  trimum_core/api_server.py
   trimum_core/cli/_utils.py
 )
 
@@ -75,7 +80,6 @@ need = {
     "trimum_core/config.py": ["SOCKET_ENV", "def socket_candidates", "def discover_socket"],
     "trimum_core/trimum_client.py": ["_is_live", "SOCKET_ENV"],
     "trimum_core/ipc_handler.py": ["socket_start_error", "makedirs"],
-    "trimum_core/api_server.py": ["await ipc.start()"],
     "trimum_core/cli/_utils.py": ["discover_socket"],
 }
 bad = 0
@@ -96,6 +100,34 @@ for rel, tokens in need.items():
 sys.exit(bad)
 PY
 if [ "$?" -ne 0 ]; then echo "自检不过，不装。" >&2; exit 1; fi
+
+# ── 导入预演：先在临时副本上试，import 不通就绝不碰生产 ──────────
+# 这一条就是 2026-09-21 21:09 那次事故缺的护栏：光看「语法对 + 有改动点」不够，
+# 还得证明「打上去之后整棵树真的能 import」。
+STAGE="${TRIMUM_SOCKET_PATCH_STAGE:-/tmp/.socket-patch-rehearsal}"
+echo "== 导入预演（$STAGE）"
+rm -rf "$STAGE"; mkdir -p "$STAGE"
+cp -a "$APP_SRC/." "$STAGE/"
+for rel in "${FILES[@]}"; do install -D -m 0644 "$SRC_DIR/$rel" "$STAGE/$rel"; done
+if PYTHONPATH="$STAGE" "$VENV_PY" - "$STAGE" <<'PY'
+import sys
+import trimum_core
+stage = sys.argv[1]
+if not trimum_core.__file__.startswith(stage):
+    # PYTHONPATH 没赢过 editable install 的 .pth，预演就是假的 —— 宁可报错也别装作通过
+    print("  预演目录没生效：trimum_core 来自", trimum_core.__file__)
+    sys.exit(2)
+import trimum_core.main  # noqa: F401  daemon 的入口，能 import 才谈得上能启动
+import trimum_core.cli._utils  # noqa: F401  CLI 侧
+print("  [PASS] 预演通过：trimum_core.main / cli._utils 在打过补丁的副本上都能 import")
+print("         （trimum_core 来自 %s）" % trimum_core.__file__)
+PY
+then
+  : # 细节已由上面的 python 打印
+else
+  echo "  [FAIL] 预演失败 —— 生产一个字都没动，先把上面的报错修掉" >&2
+  exit 1
+fi
 
 # ── 备份 + 安装 ─────────────────────────────────────────────────
 TS=$(date +%Y%m%d-%H%M%S)
@@ -124,6 +156,7 @@ cp -a "$SRC_DIR" "$BK/source" 2>/dev/null || true
 if [ "$DRY" -eq 0 ] && [ -x "$VENV_PY" ]; then
   echo "== 部署后自检（$VENV_PY）"
   "$VENV_PY" - <<'PY'
+import trimum_core.main  # noqa: F401  整棵树能不能起来（刚吃过一次亏）
 from trimum_core.config import SOCKET_ENV, SYSTEM_RUNTIME_SOCKET, discover_socket, socket_candidates
 from trimum_core.trimum_client import socket_candidates as client_candidates
 

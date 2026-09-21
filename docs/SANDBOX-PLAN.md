@@ -437,6 +437,41 @@ bind 失败不再静默、缺父目录自动创建）。本地 `18 passed / 2 sk
 5. `trm agent` 已经 RPC 优先（`agent.py::_remote_agent_call`），不用改；`/api/events/stream`（SSE）没有 CLI 消费者。
 
 
+#### 9.3.6 事故：装 HEAD 的 `api_server.py` 把 daemon 打成崩溃循环（2026-09-21 21:09）
+
+**现象**：`harden_trmd_unit.sh --apply` 冒烟判 FAIL 并自动回滚 **单元**（这一半是对的），但 daemon 仍然
+`activating (auto-restart)`，`NRestarts` 一路涨到 29 —— journal 里是：
+
+```
+File "/opt/trimum/src/trimum_core/api_server.py", line 42, in <module>
+    from .workflow_runtime import WorkflowRuntime
+ModuleNotFoundError: No module named 'trimum_core.workflow_runtime'
+```
+
+**真因**：`sync_opt_socket_patch.sh`（本轮新写）把仓库 **HEAD 的 `api_server.py`** 直接覆盖进 `/opt/trimum/src`。
+那份文件的模块级 import 引用了 `workflow_runtime`，而**部署树里没有这个模块**（部署树比仓库旧一大截：
+`/opt/trimum/src/trimum_core/workflow_runtime.py` 不存在，开发树里却是 9/20 22:48 的 33 KB）。daemon 一启动就
+`ModuleNotFoundError`，`Restart=always` 每 5s 重启一次。**回滚只撤单元、不撤 `src`**，所以它一直循环。
+
+**两条教训，都已落成护栏**：
+
+1. **只装「在当前部署树里能 import」的文件**。`sync_opt_socket_patch.sh` 的文件集从 5 个收到 4 个
+   （去掉 `api_server.py`）。代价只有一条：`await ipc.start()`（bind 失败立刻致命）暂时装不上；bind 失败
+   现在由 `ipc_handler` 记 `error` + 打 stderr，仍然看得见。等部署树整体同步到 HEAD 再补回去。
+2. **装之前先做「导入预演」**：把整棵 `$APP_SRC` 复制到 `/tmp/.socket-patch-rehearsal`，覆盖待装文件，
+   用 `PYTHONPATH=$STAGE /opt/trimum/venv/bin/python -c "import trimum_core.main"` 验证（并断言
+   `trimum_core.__file__` 真的来自预演目录，否则预演是假的）；不通就**一个字都不碰生产**。
+   装完再用真树 import 一次复核。
+
+**顺带确认的好消息**：事故那一刻 `main.py` 已经成功 import 了 `config` / `ipc_handler`（崩在 `api_server`
+那一行），说明本轮 `config.py` / `ipc_handler.py` 的改动与部署树兼容。
+
+**紧急恢复**：`scripts/trmd_hotfix_restore.sh`（需 sudo）—— 从最近一次 `socket-patch-*` 备份还原 `src`、
+先验 `import trimum_core.main`、再重启 trmd、最后以 `guzhujushi` 身份跑 `trm status` 收尾核对。
+**正确顺序**：先回滚 src（hotfix restore），再跑新版 sync。
+
+### 9.4 材料与缺口
+
 | 材料 | 位置 |
 |---|---|
 | 沙箱机制一手材料（143 份） | `tmp/research/sandbox/sources/`（每条对应来源 URL，见草稿 §6 来源清单） |
@@ -452,8 +487,11 @@ bind 失败不再静默、缺父目录自动创建）。本地 `18 passed / 2 sk
 ---
 
 > 本轮（2026-09-21 第二轮）在**代码侧**动了 socket 层：路径契约收敛到 `TRIMUM_SOCKET`、客户端按「能连通」挑、
-> bind 失败不再静默、`await ipc.start()`（见 §9.3.4）。**仍未安装任何包、未改动运行中的单元**；
-> 两次 `--apply` 试装都因冒烟抢跑被自动回滚（复盘与修法见 §9.3.3），`harden_trmd_unit.sh` 已随之改版。
-> 下一步：`sudo bash /tmp/sync_opt_socket_patch.sh`（先让部署树用上新代码）→ `sudo bash /tmp/harden_trmd_unit.sh --apply`
-> （默认放行 `@debug`、不加只读、冒烟先等就绪），过了再按 §9.3.5 收掉 TCP。
-> 裁决记录见 §9.1 / §9.2。
+> bind 失败不再静默（见 §9.3.4）。**仍未安装任何包、未改动运行中的单元**。
+> - 两次 `--apply`（20:40 / 20:50）被冒烟抢跑误判回滚 → 已加就绪门（§9.3.3）；
+> - 第三次 `--apply`（21:09）是**真事故**：同步脚本把 HEAD 的 `api_server.py` 装进旧部署树 →
+>   `ModuleNotFoundError: trimum_core.workflow_runtime` → daemon 崩溃循环（`NRestarts=29`）；
+>   冒烟正确判 FAIL 并回滚了单元，但**回滚不撤 `src`**（§9.3.6）。文件集已收到 4 个 + 补上导入预演护栏；
+>   恢复用 `scripts/trmd_hotfix_restore.sh`。
+> 下一步（顺序不能反）：① `sudo bash /tmp/trmd_hotfix_restore.sh` ② `sudo bash /tmp/sync_opt_socket_patch.sh`
+> ③ `sudo bash /tmp/harden_trmd_unit.sh --apply`；过了再按 §9.3.5 收掉 TCP。裁决记录见 §9.1 / §9.2。

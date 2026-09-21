@@ -44,7 +44,8 @@ S1 试装过两次，**两次都被冒烟抢跑误判回滚**（真因是断言�
 **你要跑的（两条，按顺序；apply 失败会自动回滚）**：
 
 ```bash
-sudo bash /tmp/sync_opt_socket_patch.sh        # ① 把 socket 补丁装进 /opt/trimum/src（逐文件备份 + 可回滚）
+sudo bash /tmp/trmd_hotfix_restore.sh          # ⓪ 【先跑这个】把 src 从 socket-patch 备份还原（daemon 正在崩溃循环）
+sudo bash /tmp/sync_opt_socket_patch.sh        # ① 把 socket 补丁装进 /opt/trimum/src（含导入预演 + 逐文件备份）
 sudo bash /tmp/harden_trmd_unit.sh             # ② 先看现状与将写入的 drop-in
 sudo bash /tmp/harden_trmd_unit.sh --apply     #    安装 + 重启 + 冒烟（失败自动回滚，证据留在备份目录）
 sudo bash /tmp/harden_trmd_unit.sh --verify    #    事后复查

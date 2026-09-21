@@ -18,6 +18,14 @@
 
 ## 2026-09-21 S1 试装复盘 + socket 收口（✅ 代码与脚本已改；生产单元仍原样）
 
+**⚠️ 21:09 事故（同日第三轮）**：`sync_opt_socket_patch.sh` 把仓库 **HEAD 的 `api_server.py`** 装进了
+`/opt/trimum/src`，而部署树比仓库旧一大截 —— 没有 `workflow_runtime.py`，于是 daemon 一启动就
+`ModuleNotFoundError: No module named 'trimum_core.workflow_runtime'`，systemd 每 5s 重启一次（`NRestarts=29`）。
+冒烟**正确**判 FAIL 并自动回滚了单元，但**回滚只撤单元、不撤 `src`**，所以循环不止。
+两条护栏已落地：① 同步文件集 5 → **4**（去掉 `api_server.py`，代价只有 `await ipc.start()` 这条加固，等整树同步到 HEAD 再补）；
+② 装之前先做**导入预演**（`PYTHONPATH=/tmp/.socket-patch-rehearsal` 里 `import trimum_core.main`，并断言 `trimum_core.__file__` 真来自预演目录），不通就一个字都不碰生产。
+恢复：`scripts/trmd_hotfix_restore.sh`。详见 `docs/SANDBOX-PLAN.md` §9.3.6。
+
 > 用户口径：*「刚刚回滚了，IPC socket 不存在，之前用 Socket 跑的时候一直出 bug 才暂时用 http 代替，现在改成 Socket 吧，你先看看吧」*
 > —— 「先看看」的结论与落地都在 `docs/SANDBOX-PLAN.md` §9.3。
 
