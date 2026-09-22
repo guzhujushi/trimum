@@ -2570,3 +2570,31 @@ trm memory export | trm memory import   # 管道
 
 - **PowerShell 内联远程命令一律别用**（`$( )`、`\"`、`| head` 会被 PowerShell 吃掉/报错，本轮连踩三次）⇒ 一律「本地写 `.sh` → `scp /tmp/` → `tr -d '\r' < /tmp/x.sh | bash`」。
 - 拉起的后台进程要 `setsid nohup ... < /dev/null &`，否则会随 SSH 会话一起死。
+
+## 2026-09-23 凌晨·平台定位裁决 + 三台盘点（✅ 完成）
+
+### 裁决：GPU 开发留本机，真机不再承接训练类负载
+
+- 本机：**NVIDIA GeForce RTX 5060 Laptop GPU / 8151 MiB / 驱动 592.01**
+- 真机（天逸510S）：**只有 Intel UHD630 核显，无 CUDA**
+⇒ 原计划「把开发整体搬到真机」在 **GPU 这一块作废**：PyTorch / CUDA / 训练一律留 Windows 侧；
+真机定位收窄为「7x24 常驻服务 + 无 GPU 的日常开发（CLI / 后端 / 沙箱 / 隧道）」。
+
+### 三台现状（2026-09-23 实测）
+
+| | 本机（Windows） | 真机（天逸510S） | 阿里云 `8.145.36.108` |
+|---|---|---|---|
+| 角色 | 主力开发机（含 GPU） | 常驻开发 / 服务 | 公网入口 |
+| 关键 | RTX 5060 8G；UniClash 只绑 `127.0.0.1:7993`（已用 portproxy 只对 Tailscale 放开） | `multi-user.target` 无桌面；codex 双 provider；VS Code 扩展已装；隧道 `tianyi` | 2 vCPU / **1.6Gi 内存仅剩 580Mi** / 20G 盘 58% / 已开机 33 天 |
+| 服务 | 标准 Windows + UniClash（+ `:53` DNS 劫持）+ steam；另有 `:8080`(python) 与 `:57322`(node `D:\New Folder\node.exe`) **身份待确认** | sshd / tailscaled / getty@tty1；avahi / cups / cups-browsed / sysstat（**待停**） | nginx（5 站点：`code.` / `myblog` / `oc-guzhujushi` / `pan.` / `trm.`）/ frps(7000,7500,8322) / gitea / alist / myblog / caddy / tailscale / fail2ban / 阿里云备份 / **一个 VS Code tunnel** |
+
+### 迁移候选（已进 `TODO.md` 第 9 节）
+
+gitea、alist 可考虑挪真机（阿里云内存太紧）；myblog / frps / nginx / caddy 建议留云端；
+阿里云那个 VS Code tunnel 与真机 `tianyi` 重复，可评估关掉。
+
+### 顺带发现（已进 TODO）
+
+- 阿里云 `frps.toml` 的 `auth.token = trimum2026` 偏弱 ⇒ 建议轮换。
+- 本机 `:8080`（python，绑在 Tailscale IP）与 `:57322`（node）身份不明，非管理员拿不到命令行 ⇒ 待本人确认。
+- 真机可用 Clash/Mihomo 客户端（复用现有订阅）**取代** `with-proxy` 那条经笔记本的迂回路径。

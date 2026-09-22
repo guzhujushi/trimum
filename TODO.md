@@ -82,6 +82,20 @@ P0 安全响应链 / E5 分发渠道 / 穿插三项已收口；沙箱 **S1**（�
 - `trm codex-proxy`：qwen 撞 429 自动降 `ds`（方案 B2，见 `docs/CODEX-MODEL-POLICY.md` §4）【DS】
 - 真机 sudo NOPASSWD 白名单（本机 `.env` 现明文存着真机 sudo 口令，见「安全收尾」）【本人】
 
+### 9. 开发环境分工与迁移（2026-09-23 盘点）
+- **裁决：GPU / CUDA 开发留在本机**（本机 = RTX 5060 Laptop 8GiB / 驱动 592.01；真机只有 Intel UHD630 核显、**无 CUDA**）⇒ PyTorch / 训练类一律不进真机；真机定位收窄为「7x24 常驻服务 + 无 GPU 的日常开发（CLI / 后端 / 沙箱 / 隧道）」。【已裁】
+- 阿里云（`8.145.36.108`，乌兰察布，2 vCPU / **1.6Gi 内存仅剩 580Mi** / 20G 盘用 58% / 已开机 33 天）迁移候选，待拍板：
+  | 服务 | 现在 | 建议 | 理由 |
+  |---|---|---|---|
+  | gitea（4.3M 数据） | 阿里云 `:3000` | **可挪真机** | 不在 nginx 站点里（无公开域名）⇒ 走 Tailscale 即可；挪走能救云端内存 |
+  | alist（5.0M 数据） | 阿里云 `:5244`，`pan.guzhujushi.cn` | 可挪真机（需 frp 反代回云端） | 个人文件列表，但域名要走 frp 回源 |
+  | myblog（FastAPI/uvicorn） | 阿里云 `myblog` 站点 | **留云端** | 公开站点，家里网络抖动即掉线 |
+  | frps / nginx / caddy | 阿里云 | **必须留** | 公网入口 + 证书终结（frps 7000/7500/8322） |
+  | 阿里云的 VS Code tunnel | `code.guzhujushi.cn` | 待确认，可能可关 | 与真机 `tianyi` 隧道重复；关掉省 1.6Gi 机器的内存 |
+- 【本人】阿里云 `frps.toml` 的 `auth.token = trimum2026` **太弱** ⇒ 轮换。
+- 【本人】本机两个监听进程待确认（非管理员拿不到命令行）：`100.124.243.30:8080`（python 3.14，绑在 Tailscale IP 上）、`0.0.0.0:57322`（node，`D:\New Folder\node.exe`）—— 是什么服务、要不要挪真机？
+- 【DS】真机装 Clash/Mihomo 客户端（复用现有订阅）**替代** `~/bin/with-proxy` 这条「经 Windows 笔记本」的迂回路径（Tailscale DERP 中继，慢 4–10 倍、且依赖笔记本开机）。
+
 ## 红线（写进代码与测试）
 
 - 卸载只删**登记过**的路径，且必须落在 `TYPE_ROOTS` 期望目录下；越界即拒。
