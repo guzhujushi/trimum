@@ -1047,7 +1047,7 @@ shell 真的过网关（`args==["echo hi"]` + `raw_command`）/ 被拒上报 / *
 
 ### CLI 进阶
 - [x] `trm ask` 墨迹/屏幕截图输入支持（`--image` 多模态，6 条测试） 【Qwen】（2026-09-22）
-- [ ] `trm memory import` / `export`（记忆迁移） 【Qwen】
+- [x] `trm memory import` / `export`（记忆迁移，JSON v1，4 条测试） 【Qwen】（2026-09-22）
 - [ ] CLI 别名自定义（`.trimumrc` 配置文件） 【Qwen】
 - [ ] 自动补全脚本（bash/zsh/fish） 【Qwen】
 

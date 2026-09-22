@@ -1,10 +1,13 @@
-"""`trm memory` command group — list/get/set/search/stats."""
+﻿"""`trm memory` command group — list/get/set/search/stats."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .._utils import emit, fail, run_async
@@ -38,12 +41,20 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     stats_parser = nested.add_parser("stats", help="memory statistics")
     stats_parser.set_defaults(handler=handler)
 
+    export_parser = nested.add_parser("export", help="export all memory to JSON")
+    export_parser.add_argument("--file", "-o", metavar="PATH", help="output file (default: stdout)")
+    export_parser.set_defaults(handler=handler)
+
+    import_parser = nested.add_parser("import", help="import memory from JSON")
+    import_parser.add_argument("--file", "-i", metavar="PATH", help="input file (default: stdin)")
+    import_parser.set_defaults(handler=handler)
+
     parser.set_defaults(handler=_show_help)
 
 
 def _show_help(args: argparse.Namespace) -> int:
     del args
-    print("usage: trm memory {list,get,set,search,stats} ...")
+    print("usage: trm memory {list,get,set,search,stats,export,import} ...")
     return 0
 
 
@@ -152,6 +163,68 @@ async def _memory_data(args: argparse.Namespace) -> dict:
             global_entries = await context.list_global()
             stats["global_entries"] = len(global_entries)
             return {"command": "stats", "stats": stats}
+
+        if command == "export":
+            global_entries = await context.list_global()
+            agent_entries: dict[str, dict] = {}
+            agents_dir = Path(db_dir) / "agents"
+            if agents_dir.exists():
+                for agent_dir in sorted(agents_dir.iterdir()):
+                    if not agent_dir.is_dir():
+                        continue
+                    agent_id = agent_dir.name
+                    try:
+                        await context.initialize(agent_id)
+                        entries = await context.list_namespace(agent_id, "agent_memory")
+                        if entries:
+                            agent_entries[agent_id] = entries
+                    except Exception:
+                        continue
+            categories = await classifier.list_categories()
+            export_data = {
+                "version": 1,
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "global_entries": global_entries,
+                "agent_entries": agent_entries,
+                "categories": categories,
+            }
+            out_path = getattr(args, "file", None)
+            if out_path:
+                with open(out_path, "w", encoding="utf-8") as fh:
+                    json.dump(export_data, fh, ensure_ascii=False, indent=2)
+                return {"command": "export", "status": "ok", "file": out_path,
+                        "global_entries": len(global_entries),
+                        "agent_entries": sum(len(v) for v in agent_entries.values())}
+            return {"command": "export", "status": "ok", "data": export_data}
+
+        if command == "import":
+            in_path = getattr(args, "file", None)
+            if in_path:
+                with open(in_path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+            else:
+                data = json.load(sys.stdin)
+            if not isinstance(data, dict) or data.get("version") != 1:
+                return {"command": "import", "error": "unsupported export format (expected version 1)"}
+            imported = {"global": 0, "agent_entries": 0, "categories": 0}
+            for key, value in (data.get("global_entries") or {}).items():
+                await context.set_global(key, value)
+                imported["global"] += 1
+            for agent_id, entries in (data.get("agent_entries") or {}).items():
+                await context.initialize(agent_id)
+                for key, value in entries.items():
+                    await context.set(agent_id, key, value, namespace="agent_memory")
+                    imported["agent_entries"] += 1
+            for cat in (data.get("categories") or []):
+                domain = cat.get("domain", "general")
+                category = cat.get("category", "general")
+                description = cat.get("description", "")
+                try:
+                    await classifier.add_category(domain, category, description)
+                    imported["categories"] += 1
+                except Exception:
+                    pass
+            return {"command": "import", "status": "ok", "imported": imported}
 
         return {"command": command, "error": "unknown memory subcommand"}
     finally:
