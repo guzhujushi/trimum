@@ -2598,3 +2598,40 @@ gitea、alist 可考虑挪真机（阿里云内存太紧）；myblog / frps / ng
 - 阿里云 `frps.toml` 的 `auth.token` 偏弱，且**本轮误把该值明文写进 `TODO.md`/`STATUS.md` 并推到公开仓库**，已在新提交里抹掉字面值 ⇒ **按已泄露处理，尽快轮换**（需同步真机的 frpc 配置）。教训：写文档时任何真实密钥只能写「位置 + 形状」，绝不写值。
 - 本机 `:8080`（python，绑在 Tailscale IP）与 `:57322`（node）身份不明，非管理员拿不到命令行 ⇒ 待本人确认。
 - 真机可用 Clash/Mihomo 客户端（复用现有订阅）**取代** `with-proxy` 那条经笔记本的迂回路径。
+
+## 2026-09-23 凌晨·真机 VS Code 扩展 + 备用网络通道 + 省电脚本实测（✅ 完成）
+
+### 真机 VS Code 扩展（装在 `~/.vscode-server/extensions`，全为 `-linux-x64` 匹配版本）
+
+用服务器自带的 `~/.vscode-server/cli/servers/Stable-7debcd0e…/server/bin/code-server --install-extension` 装：
+
+| 扩展 | 版本 | 用途 |
+|---|---|---|
+| `openai.chatgpt` | 26.908.40401 | **Codex 扩展** |
+| `ms-python.python` | 2026.4.0 | Python |
+| `ms-python.vscode-pylance` | 2026.3.1 | 语言服务 |
+| `ms-python.debugpy` / `ms-python.vscode-python-envs` | — | 随 python 扩展自动装 |
+| `charliermarsh.ruff` | 2026.82.0 | lint / format |
+| `tamasfe.even-better-toml` | 0.21.2 | `pyproject.toml` |
+| `redhat.vscode-yaml` | 1.24.0 | `workflow.yaml` / 配置 |
+
+原有保留：`github.vscode-pull-request-github`、`ms-ceintl.vscode-language-pack-zh-hans`。**重连 `vscode.dev/tunnel/tianyi` 后重载窗口生效。**
+
+### 备用网络通道：Tailscale → Windows(UniClash)（已打通并实测）
+
+- Windows 侧用 `netsh interface portproxy` 把 `100.124.243.30:7993`（**只绑 Tailscale IP**）转到 `127.0.0.1:7993`，**没有**去开 UniClash 的 Allow LAN ⇒ 不暴露到局域网。
+- 真机侧新增 `~/bin/with-proxy <命令>`：按需走代理，**代理不可达自动降级直连**；三条冒烟全过。
+- 实测：经代理 github 200 / 3.3–6.0s、npm 200 / 2.6s；直连 200 / 0.74s 与 0.27s；`api.github.com` 经代理 **403**（出口节点限制）。
+- 结论：走的是 **DERP 中继（hkg），RTT 150–250ms，慢 4~10 倍** ⇒ 只当应急，不做全局代理。细节与撤销命令见 `docs/OPERATIONS.md`。
+
+### 省电脚本实测（`scripts/ubuntu_slim_desktop.sh --apply` 跑过 3 次）
+
+- ✅ 已生效：`default=multi-user.target`、`graphical/display-manager/gdm3` 全 inactive、`fwupd` + `fwupd-refresh.timer` 停、**`sleep`/`suspend`/`hibernate`/`hybrid-sleep` 全部 masked**。
+- ❌ 未生效：`avahi-daemon` / `cups` / `cups-browsed` / `sysstat` 仍 active+enabled —— 三次都断在 `fwupd` 之后，疑中途报错/被中断，待带 sudo 手动复核。
+- 内存：`used 714Mi`（瘦身前 966Mi）。本地屏幕：重启后 `getty@tty1` = active，黑屏问题闭环。
+
+### 屏幕关屏的两条路（真机实测）
+
+- `setterm --blank 1 --powerdown 1`（在 tty1 本地终端跑，**非交互 SSH 会话里要带 `TERM=linux`** 且重定向到 `> /dev/tty1`）⇒ 1 分钟无键盘输入自动黑屏，任意键唤醒。**未持久化**。
+- 最省事：直接按显示器电源键（主机照常跑）。
+- 不可用：`/sys/class/drm/card1-DP-1/dpms` 是 `-r--r--r--` 只读，写 `Off` 报 Permission denied。

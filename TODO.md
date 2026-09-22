@@ -76,8 +76,8 @@ P0 安全响应链 / E5 分发渠道 / 穿插三项已收口；沙箱 **S1**（�
   `sudo loginctl enable-linger guzhujushi`（用户级 systemd 服务没 linger 起不来）；且**开机时 gnome-keyring 是锁的**（token 存在 keyring 里），光装 `code tunnel service install` 重启后仍要人工授权 ⇒ 二选一：
   ① **空口令默认 keyring**：把 `login.keyring` 备份后重建（不落盘口令，任何会话都能读 token）；
   ② **0600 口令文件 + 开机解锁的 user service**：保留现有 keyring，但机器上要存登录口令。【本人决策】
-- 省电脚本**剩余步骤**（mask 睡眠 target + 停 avahi/cups/cups-browsed/sysstat）：要从 **SSH** 重跑 `sudo bash /tmp/ubuntu_slim_desktop.sh --apply`（在桌面终端里跑会被 `disable --now gdm3` 连带杀掉，只剩半吊子状态；脚本头部已写红线）【本人】
-- 真机本地屏幕黑屏 ⇒ 脚本已补 `systemctl start getty@tty1`（`gdm` 与 `getty@tty1` 互斥，见 `STATUS.md` 同日日志），重跑即恢复文字登录提示【本人】
+- 省电脚本**还剩 4 个服务没停**（`avahi-daemon` / `cups` / `cups-browsed` / `sysstat` 仍 active+enabled）；已生效的：`multi-user.target`、`gdm3` 停、`fwupd`+`fwupd-refresh.timer` 停、**睡眠/挂起/休眠 target 全部 masked**。连续 3 次都断在 `fwupd` 之后，需带 sudo 手动跑一次并抓报错。【本人】
+- 真机本地屏幕**自动黑屏未持久化**：目前靠手敲 `setterm --blank 1 --powerdown 1` 或按显示器电源键；要开机自动生效需写进开机流程（或 GRUB `consoleblank=300`）。走 sysfs 的 DPMS 关屏在本机**不可用**（`/sys/class/drm/card1-DP-1/dpms` 只读）。【DS】
 - 备用通路：code-server + frp + Nginx 反代 `vs.guzhujushi.cn`（基础设施已备好；**tunnel 这条路用不到域名**）【DS】
 - `trm codex-proxy`：qwen 撞 429 自动降 `ds`（方案 B2，见 `docs/CODEX-MODEL-POLICY.md` §4）【DS】
 - 真机 sudo NOPASSWD 白名单（本机 `.env` 现明文存着真机 sudo 口令，见「安全收尾」）【本人】
