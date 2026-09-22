@@ -381,3 +381,71 @@ journalctl -u trmd -n 30 --no-pager               # 日志在这里，不在 /tm
 | MCP 定义 | `~/.trimum/mcp/<name>.json5`（`TRIMUM_MCP_DIR` 可换目录） |
 | MCP 子进程日志 | `<logging.file 同目录>/mcp-<name>.log` |
 | MCP 验收脚本 | `scripts/accept_m4.py`（隔离 daemon，16 项断言） |
+
+## 真机纳管与跨平台工作方式速查（2026-09-22）
+
+> 真机 = 天逸510S（i3-10100 4C8T / 7.4GiB / 机械系统盘 ST1000DM003 / UHD630 / Ubuntu 24.04.1），
+> SSH `guzhujushi@100.115.86.48`（免密，Tailscale）。目标：7x24 常开当开发主机，**无桌面**，手机也能连。
+
+### 真机关键路径
+
+| 路径 | 说明 |
+|---|---|
+| `~/trimum` | 开发树（git，HEAD 跟 `server`；2026-09-22 由旧版目录重建，旧目录备份在 `~/trimum.bak-202609222325`） |
+| `/opt/trimum` | 部署树（需要 sudo） |
+| `~/.local/bin/code` | VS Code CLI（隧道用） |
+| `~/.codex/{config,ds.config,qwen.config}.toml` + `~/.codex/env` | codex 双 provider（0600；`env` 里注 `DEEPSEEK_API_KEY` / `JIAOWOISAN_API_KEY`） |
+| `~/bin/codex-run` | `codex-run ds|qwen [args...]`，已带 nvm PATH + 注入 env |
+| `~/bin/codex-smoke` | 双 provider 只读冒烟（各回一句 `OK`） |
+
+### 从 Windows 推脚本到真机（**别用 stdin 重定向**）
+
+PowerShell **不支持** `<`：`ssh host "bash -s" < file` 会报 `The '<' operator is reserved for future use`。固定姿势：
+
+```powershell
+scp tmp/x.sh guzhujushi@100.115.86.48:/tmp/
+ssh -o BatchMode=yes guzhujushi@100.115.86.48 "tr -d '\r' < /tmp/x.sh > /tmp/x2.sh; bash /tmp/x2.sh 2>&1"
+```
+
+- 本地写脚本用 **Node REPL `fs.writeFileSync(path, text, {encoding:"utf8"})`**（含中文时必须；PowerShell here-string 会按 GBK 写坏）。
+- 远端先 `tr -d '\r'` 再跑：CRLF 会报 `$'\r': 未找到命令`。
+- 本地语法自检：`& "C:\Program Files\Git\bin\bash.exe" -n scripts/x.sh`（PATH 上那个 `bash` 是别的包装器，别用）。
+- 命令里**避免出现单独的 `<`**；嵌套引号别用 `\"` 转义（PowerShell 不认），要嵌套就写成远端脚本文件。
+
+### 在真机跑 codex（两个 provider）
+
+```bash
+~/bin/codex-run ds   "..."     # deepseek-flash / deepseek-v4-pro（判断力活）
+~/bin/codex-run qwen "..."     # 交我算 qwen3.8-27b（免费但 10 次/分，小任务）
+~/bin/codex-smoke              # 冒烟
+```
+
+- **`codex exec` 必须 `</dev/null`**：它的 stdin 若是不关闭的管道（SSH 管道就是），进程会 `S (sleeping)` 干等 EOF，**连 API socket 都不建**（实测卡 7 分钟）。统一写成
+  `timeout 240 codex -p ds exec --skip-git-repo-check -s read-only "<prompt>" </dev/null`。
+- 非交互 shell 里 `codex` 不在 PATH（nvm 未 source）⇒ 走 `~/bin/codex-run`，不要直接 `codex`。
+- 首次跑会警告 `Model metadata for ... not found`，可忽略（自定义 provider 没带 metadata）。
+
+### VS Code 隧道（`vscode.dev` 那条路）
+
+```bash
+nohup ~/.local/bin/code tunnel --accept-server-license-terms --name tianyi >> ~/.code-tunnel-logs/login.log 2>&1 &
+tail -n 6 ~/.code-tunnel-logs/login.log     # 取设备码
+```
+
+- 首次要**人工**去 `https://github.com/login/device` 输设备码（约 15 分钟有效，过期就重启隧道换码）。
+- 授权后手机浏览器开 `https://vscode.dev/tunnel/tianyi`；要 7x24 再 `code tunnel service install`（用户级 systemd）。
+- **这条路用不到域名 / frp / Nginx**；`vs.guzhujushi.cn` 是**备用通路**（code-server + frp + Nginx 反代）才用的。
+
+### 省电 / 无桌面收敛（`scripts/ubuntu_slim_desktop.sh`）
+
+```bash
+bash /tmp/ubuntu_slim_desktop.sh              # dry-run（默认）
+sudo bash /tmp/ubuntu_slim_desktop.sh --apply # 改 multi-user.target + 停 gdm3/fwupd/avahi/cups/cups-browsed/bluetooth/sysstat + mask 睡眠 target
+sudo bash /tmp/ubuntu_slim_desktop.sh --rollback
+```
+
+- **绝不 purge 包**：实测 `network-manager` 是 `ubuntu-desktop-minimal` 的反向依赖，purge GNOME 会连带拆网络 ⇒ 直接失联。只改 target / 只停服务。
+- 脚本自带前置硬检查：`sshd` 不是 active+enabled 就拒绝执行（防把自己关在门外）。
+- 收益：内存约省 0.9GiB（gdm3 + gnome-shell + fwupd 等），idle 30W→20~25W。
+- **不动** `no_turbo` / governor：压频率会让编译变慢，得不偿失。
+- `sudo` 需要密码 ⇒ **交给本人跑**，agent 不代跑。

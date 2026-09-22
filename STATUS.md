@@ -2502,3 +2502,31 @@ trm memory export | trm memory import   # 管道
 
 - **写含中文的文件走 Node REPL 的 `fs.writeFileSync`**（UTF-8 + LF，实测 round-trip 一致、`cr=0`）；PowerShell here-string 会按 GBK 写坏。
 - **Git Bash 可用**：`& "C:\Program Files\Git\bin\bash.exe" -lc "<脚本>"`（PATH 上的 `bash` 是别的包装器，别用）；中文内联、here-doc 均无损，行尾保持 LF。**别**把 bash 传成工具自己的 shell 参数 —— 那样 bash 会把 stdin 当脚本读，here-doc 会把后续内容吃掉（实测：文件建成 0 字节 + 卡住）。
+
+## 2026-09-22 Ubuntu 真机纳管：VS Code 隧道 + 双 provider codex + 省电脚本（⏳ 部分完成）
+
+> 目标：把开发整体搬到真机（天逸510S / i3-10100 / 7.4GiB / 机械系统盘 / Ubuntu 24.04.1），做到「随时可访问（含手机）+ 省电常驻」。
+> 本轮把 **agent 能做的都做了**；剩下两条卡在【本人】：设备码授权、sudo 口令。
+
+### 已完成（真机实测）
+
+| # | 事项 | 结果 |
+|---|---|---|
+| 1 | VS Code CLI → `~/.local/bin/code` | 1.138.0，commit `7debcd0e…`，与真机既有 VS Code Server **同一 commit**（避免版本错配） |
+| 2 | `~/trimum` 重建为 git 树 | 备份 `~/trimum.bak-202609222325`（21M）→ `git init` + 用 `.env` 的 `GITHUB_TOKEN` 一次性 fetch + `checkout -f -B server FETCH_HEAD` → HEAD `424dc0a` 与本地/origin 一致；remote 已还原为**无 token** 的 https URL |
+| 3 | 真机装 Codex CLI + 双 provider | `npm i -g @openai/codex`（**0.155.1**）→ `~/.codex/{config,ds.config,qwen.config}.toml`（0600）、`~/.codex/env`（0600，注 `DEEPSEEK_API_KEY` / `JIAOWOISAN_API_KEY`）、`~/bin/codex-run ds|qwen` |
+| 4 | 双 provider 冒烟 | **ds ✅ / qwen ✅**（各 ~9k tokens，输出 `OK`）；`~/bin/codex-smoke` 可复跑 |
+| 5 | 省电脚本 | `scripts/ubuntu_slim_desktop.sh`（默认 dry-run / `--apply` / `--rollback` / `--verify`）已 scp 到真机 `/tmp/`，**等本人 sudo 跑** |
+
+### 本轮两个坑（已定位并规避，写进 `docs/OPERATIONS.md`）
+
+- **`codex exec` 会继承 stdin 并等 EOF**：经 SSH 管道跑时 stdin 是不关闭的 pipe，进程 `S (sleeping)`、连 socket 都没建（实测卡 7 分钟）。**必须 `</dev/null`**（再套 `timeout 240` 兜底）。
+- **PowerShell 不支持 `<` 重定向**：`ssh host "bash -s" < file` 报 `The '<' operator is reserved for future use`。改走 **`scp` 到 `/tmp/` + 远端 `tr -d '\r' < /tmp/x.sh | bash`**（顺带解决 CRLF）。
+- 反向依赖实测红线：真机 `apt-get -s purge ubuntu-desktop gnome-shell gdm3` 干跑结果自相矛盾（报 0 删除），而 `network-manager` 是 `ubuntu-desktop-minimal` 的反向依赖 ⇒ **purge GNOME 会连带拆网络、直接失联**。结论：**只改 target / 只停服务，绝不卸包**。
+
+### 未完成（卡在本人 / 待决策）
+
+- **隧道授权**：`code tunnel --name tianyi` 已在真机后台跑，停在 `https://github.com/login/device` 设备码那一步（23:37 重启后码 = `4C50-0764`）。授权前 `vscode.dev/tunnel/tianyi` 不可用。
+- **常驻化**：授权后需 `code tunnel service install`（用户级 systemd）才算 7x24。
+- **图形栈收敛**：改 `multi-user.target` + 停 `gdm3` + mask 睡眠 target + 停 fwupd/avahi/cups/cups-browsed/bluetooth/sysstat。收益：内存约省 0.9GiB、idle 30W→20~25W（**不动 `no_turbo`/governor**，编译变慢得不偿失）。
+- **真机 `~/trimum` 残留 30 个未跟踪文件**（旧版 `PRD.md` / `ARCH.md` / `docs/*` 旧文档 / `tests_backup_20260919/` / `memory/` / `backup_*.py`），备份已在，等本人点头再清。

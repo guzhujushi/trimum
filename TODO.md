@@ -3,7 +3,7 @@
 > 最后更新：2026-09-22
 > **本文件只留「未闭环」的待办 + 红线 + 模型分工。** 已完成的历史进度（P0 / E1–E7 / M0–M4.5 / W1 / 沙箱 S1–S3 / 穿插项 A–C 等）一律在 `STATUS.md`（追加式日志，见其「## 日志」），本文件不再重复叙述。
 > 测试基线：本地 **1664 passed / 6 failed / 23 skipped**（09-22 `trm memory import/export` 之后，6 条失败 = 既有宿主基线）；真机 Ubuntu 开发树 1098/11/2；S3 合成树 1645/16/4（16 条均宿主/合成树产物，非 S3）。
-> 分支：`server`，**已与 `origin/server` 同步**（最近业务提交 `01819e9` = `ask --image` + `memory import/export`，2026-09-22 22:11 推；本轮文档提交紧随其后）。日常只推 `server`，`main` / `ubuntu` / `arch-linux` 里程碑收尾时同步；推送前开代理 `127.0.0.1:7993`。
+> 分支：`server`，**已与 `origin/server` 同步**（最近业务提交 `01819e9` = `ask --image` + `memory import/export`，2026-09-22 22:11 推；本轮文档提交紧随其后），其后为 2026-09-22 真机纳管相关提交（见 `STATUS.md` 同日日志）。日常只推 `server`，`main` / `ubuntu` / `arch-linux` 里程碑收尾时同步；推送前开代理 `127.0.0.1:7993`。
 > 标签：`【Qwen】` 交我算（免费，单次小任务）/ `【DS】` deepseek-flash（复杂件）/ `【本人】` 需 sudo 或产品决策，agent 跑不了。**跑法与 Qwen 提示词见文末两节。**
 
 ## 一句话现状
@@ -70,6 +70,14 @@ P0 安全响应链 / E5 分发渠道 / 穿插三项已收口；沙箱 **S1**（�
 - 本仓库 `.git/config` 的 origin URL 里是**明文 GitHub token** ⇒ 建议轮换 + 改用 credential helper（AGENTS.md 的 `GITHUB_TOKEN` 用法不受影响）【本人】
 - 本机 `.env` 里存了真机 sudo 口令（`USER_PASSWORD`）⇒ 建议给这台机配一条 NOPASSWD 白名单【本人】
 - `~/.trimum/.env` 是只含 `OPENAI_*` 的老 stub（加载器已修成「按 key 叠加 + 仓库 `.env` 权威」）⇒ 建议删掉，免得再被误选【本人】
+
+### 8. Ubuntu 真机常驻（2026-09-22 新增；背景见 `STATUS.md` 同日日志）
+- 隧道设备码授权 → 再 `code tunnel service install` 常驻（授权前 `vscode.dev/tunnel/tianyi` 不可用）【本人】
+- 真机跑省电脚本：先 `bash /tmp/ubuntu_slim_desktop.sh --verify` 体检，再 `sudo bash /tmp/ubuntu_slim_desktop.sh --apply`（回滚 `--rollback`）【本人】
+- 真机 `~/trimum` 清 30 个未跟踪旧文件（备份 `~/trimum.bak-202609222325` 已在，先征得同意）【本人】
+- 备用通路：code-server + frp + Nginx 反代 `vs.guzhujushi.cn`（基础设施已备好；**tunnel 这条路用不到域名**）【DS】
+- `trm codex-proxy`：qwen 撞 429 自动降 `ds`（方案 B2，见 `docs/CODEX-MODEL-POLICY.md` §4）【DS】
+- 真机 sudo NOPASSWD 白名单（本机 `.env` 现明文存着真机 sudo 口令，见「安全收尾」）【本人】
 
 ## 红线（写进代码与测试）
 
