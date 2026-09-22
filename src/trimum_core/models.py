@@ -441,6 +441,9 @@ class ExecuteRequest(BaseModel):
     # off | unsupported | readonly | workspace-write | strict
     # | <mode>:failed（施加失败、命令没跑）| <mode>:degraded（关了 fail-closed、降级跑）
     sandbox: str = ""
+    # seccomp 档位的**实际**状态（S3，词表与 sandbox 同构）：
+    # off | unsupported | l1 | strict | <profile>:failed | <profile>:degraded
+    seccomp: str = ""
 
 
 class ExecuteResponse(BaseModel):
@@ -457,6 +460,8 @@ class ExecuteResponse(BaseModel):
     # 内核层（Layer K）沙箱的**实际**状态（sandbox_exec 回写）：
     # 空 = 本次没有派生进程（内核层不适用，比如 file_* 工具）
     sandbox: str = ""
+    # seccomp 档位的实际状态（S3；空 = 同上）
+    seccomp: str = ""
 
 
 class AgentStatus(str, Enum):
@@ -660,6 +665,8 @@ class AuditEvent(BaseModel):
     source_type: str = ""
     # 内核层（Layer K）沙箱状态（sandbox_exec 回写；见 ExecuteRequest.sandbox）
     sandbox: str = ""
+    # seccomp 档位状态（S3；见 ExecuteRequest.seccomp）
+    seccomp: str = ""
     # JIT 授权相关
     jit_token: str = ""
     jit_expires_at: float = 0.0

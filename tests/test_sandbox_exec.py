@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -421,6 +422,50 @@ class TestLandlockReal:
 # ══════════════════════════════════════════════════════════════════════
 # 收口与审计接线
 # ══════════════════════════════════════════════════════════════════════
+
+
+class TestLandlockTargets:
+    """真机教训（2026-09-22）：Landlock 只认目录与普通文件，权限还要按类型给。
+
+    实测：目录 OK；普通文件 / 字符设备 **EINVAL(22)**（那是「给文件申请了目录级权限」）；
+    管道 / socket **EBADFD(77)**。S2 的真机用例第一次跑就撞上 —— 每一次派生都 fail-closed。
+    """
+
+    def test_collect_drops_non_file_targets(self, monkeypatch, tmp_path):
+        keep = tmp_path / "ws"
+        keep.mkdir()
+        pipe = tmp_path / "fifo"
+        pipe.write_text("x", encoding="utf-8")
+
+        real_stat = os.stat
+
+        def fake_stat(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            if str(path) == str(pipe):
+                # 假装它是管道（真机上 /dev/stderr 就是这个下场）
+                return os.stat_result((stat.S_IFIFO | 0o600,) + tuple(info)[1:])
+            return info
+
+        monkeypatch.setattr(sandbox_exec.os, "stat", fake_stat)
+        kept = sandbox_exec._collect(
+            [str(keep), str(pipe), str(tmp_path / "not-there")], kind="write", seen=set()
+        )
+        assert kept == [str(keep)]
+
+    def test_regular_file_roots_get_file_rights(self, supported, paths, tmp_path):
+        ws = paths.ws
+        target = tmp_path / "single.txt"
+        target.write_text("x", encoding="utf-8")
+
+        plan = sandbox_exec.plan_for(_req(cwd=str(ws)), extra_write=[str(target)])
+        rule = dict(plan.rules)[str(target)]
+        assert rule & sandbox_exec._A_READ_DIR == 0, "文件根不能要目录级权限（内核判 EINVAL）"
+        assert rule & sandbox_exec._A_MAKE_REG == 0
+        assert rule & sandbox_exec._A_WRITE_FILE
+
+        read_plan = sandbox_exec.plan_for(_req(cwd=str(ws)), extra_read=[str(target)])
+        read_rule = dict(read_plan.rules)[str(target)]
+        assert read_rule == sandbox_exec._file_read_rights(read_plan.abi)
 
 
 class TestNoBypass:

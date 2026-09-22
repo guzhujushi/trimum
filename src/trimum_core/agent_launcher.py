@@ -97,6 +97,8 @@ class LaunchResult:
     log_path: Optional[Path] = None
     # 内核层（Layer K）沙箱的实际状态（见 sandbox_exec.SandboxPlan.state）
     sandbox: Optional[str] = None
+    # seccomp 档位的实际状态（S3；见 seccomp_exec.SeccompPlan.state）
+    seccomp: Optional[str] = None
 
 
 async def launch_agent(
@@ -151,13 +153,13 @@ async def launch_agent(
                     "agent_launcher.sandbox_denied",
                     agent_type=agent_type,
                     error=str(exc),
-                    sandbox=plan.state,
+                    sandbox=plan.state, seccomp=plan.seccomp_state,
                 )
                 return LaunchResult(
                     error=f"sandbox denied: {exc}",
                     script=script,
                     log_path=log_path,
-                    sandbox=plan.state,
+                    sandbox=plan.state, seccomp=plan.seccomp_state,
                 )
     except Exception as e:
         log.warning("agent_launcher.spawn_failed", agent_type=agent_type, error=str(e))
@@ -181,7 +183,7 @@ async def launch_agent(
             error=f"agent exited immediately (code={process.returncode}){detail}",
             script=script,
             log_path=log_path,
-            sandbox=plan.state,
+            sandbox=plan.state, seccomp=plan.seccomp_state,
         )
 
     log.info(
@@ -191,14 +193,14 @@ async def launch_agent(
         pid=process.pid,
         script=str(script),
         log_path=str(log_path),
-        sandbox=plan.state,
+        sandbox=plan.state, seccomp=plan.seccomp_state,
     )
     return LaunchResult(
         process=process,
         pid=process.pid,
         script=script,
         log_path=log_path,
-        sandbox=plan.state,
+        sandbox=plan.state, seccomp=plan.seccomp_state,
     )
 
 

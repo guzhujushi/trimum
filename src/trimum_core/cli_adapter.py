@@ -594,7 +594,7 @@ async def generic_executor(
             cwd=cwd,
         )
     except sandbox_exec.SandboxError as exc:
-        return {**_err(f"[SANDBOX] {exc}", exit_code=126), "sandbox": plan.state}
+        return {**_err(f"[SANDBOX] {exc}", exit_code=126), "sandbox": plan.state, "seccomp": plan.seccomp_state}
     except OSError as exc:
         return _err(f"cannot start {binary}: {exc}")
 
@@ -616,8 +616,9 @@ async def generic_executor(
             "error": err or f"{binary} exited with {exit_code}",
             "exit_code": exit_code,
             "sandbox": plan.state,
+            "seccomp": plan.seccomp_state,
         }
-    return {**_ok(output=out, data={"stderr": err, "exit_code": exit_code}), "sandbox": plan.state}
+    return {**_ok(output=out, data={"stderr": err, "exit_code": exit_code}), "sandbox": plan.state, "seccomp": plan.seccomp_state}
 
 
 __all__ = [

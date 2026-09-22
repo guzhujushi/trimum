@@ -34,12 +34,14 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import os
+import stat as stat_module
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
+from . import seccomp_exec
 from .logger import get_logger
 from .paths import trimum_home
 
@@ -63,6 +65,8 @@ _MODE_RANK = {MODE_OFF: 3, MODE_WORKSPACE: 2, MODE_STRICT: 1, MODE_READONLY: 0}
 
 #: 运行时开关（systemd drop-in 一行生效，删掉即回滚，与 TRIMUM_HTTP 同一口径）。
 ENV_MODE = "TRIMUM_SANDBOX"
+#: seccomp 档位开关（S3；与 TRIMUM_SANDBOX 同一套口径：drop-in 一行生效）
+ENV_SECCOMP = seccomp_exec.ENV_PROFILE
 ENV_FAIL_CLOSED = "TRIMUM_SANDBOX_FAIL_CLOSED"
 
 STATE_OFF = "off"
@@ -83,6 +87,8 @@ _SYS_RESTRICT_SELF = 446
 _PR_SET_NO_NEW_PRIVS = 38
 
 _RULE_PATH_BENEATH = 1
+#: landlock_add_rule 在「目标不是普通文件/目录」时给的 errno（真机实测：/dev/stdout 当管道时）
+_EBADFD = 77
 _CREATE_RULESET_VERSION = 1
 
 _A_EXECUTE = 1 << 0
@@ -159,6 +165,13 @@ def _read_rights(abi: int) -> int:
     return _A_EXECUTE | _A_READ_FILE | _A_READ_DIR
 
 
+def _file_read_rights(abi: int) -> int:
+    # 普通文件当**读**根：READ_DIR 是目录级权限，给文件会被内核判 EINVAL(22)
+    # （真机实测：/etc/hostname 拿 _read_rights 加规则直接失败）
+    _ = abi
+    return _A_EXECUTE | _A_READ_FILE
+
+
 def _write_rights(abi: int) -> int:
     mask = _read_rights(abi) | _A_WRITE_FILE | _A_REMOVE_DIR | _A_REMOVE_FILE
     mask |= (
@@ -229,6 +242,7 @@ class SandboxCapability:
 
 _capability: Optional[SandboxCapability] = None
 _unsupported_warned = False
+_seccomp_unsupported_warned = False
 
 
 def probe(refresh: bool = False) -> SandboxCapability:
@@ -288,10 +302,12 @@ def _read_config() -> dict[str, Any]:
 
 def reset_cache() -> None:
     """丢掉进程内缓存（能力探测 + 配置 + 一次性告警）。用例之间必须隔离。"""
-    global _CONFIG, _capability, _unsupported_warned
+    global _CONFIG, _capability, _unsupported_warned, _seccomp_unsupported_warned
     _CONFIG = None
     _capability = None
     _unsupported_warned = False
+    _seccomp_unsupported_warned = False
+    seccomp_exec.reset_cache()
 
 
 def _resolve_fail_closed(cfg: dict[str, Any]) -> bool:
@@ -321,6 +337,20 @@ def _warn_unsupported_once(mode: str, reason: str) -> None:
         mode=mode,
         reason=reason,
         detail="内核层未施加：命令照跑，但审计里如实记 unsupported（不是放行）",
+    )
+
+
+def _warn_seccomp_unsupported_once(profile: str, reason: str) -> None:
+    """seccomp 侧同款：「本机不支持」只喊一次（它是环境属性，不是每次派生都要喊的事）。"""
+    global _seccomp_unsupported_warned
+    if _seccomp_unsupported_warned:
+        return
+    _seccomp_unsupported_warned = True
+    logger.warning(
+        "sandbox.seccomp_unsupported",
+        profile=profile,
+        reason=reason,
+        detail="seccomp 未施加：命令照跑，但审计里如实记 unsupported（不是放行）",
     )
 
 
@@ -362,13 +392,26 @@ class SandboxPlan:
     write_roots: list[str] = field(default_factory=list)
     rules: list[tuple[str, int]] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
+    #: 只读的说明性记录（不算 blocker）：比如 manifest 把档位收紧了、包声明被忽略
+    notes: list[str] = field(default_factory=list)
     state: str = ""
     target: Any = None
+    #: seccomp 档案（Layer K 的另一半，S3）。None = 还没算；它与 Landlock **各记各的状态**
+    seccomp: Optional["seccomp_exec.SeccompPlan"] = None
 
     @property
     def enforcing(self) -> bool:
         """该不该真的施加（关掉 / 平台不支持 / 有 blocker 时都不施）。"""
         return self.supported and self.mode != MODE_OFF and not self.blockers
+
+    @property
+    def seccomp_state(self) -> str:
+        """seccomp 的独立状态（词表与 ``state`` 同构）。"""
+        return self.seccomp.state if self.seccomp is not None else ""
+
+    @property
+    def seccomp_enforcing(self) -> bool:
+        return self.seccomp is not None and self.seccomp.enforcing
 
     def summary(self) -> str:
         if self.state == STATE_OFF:
@@ -377,7 +420,8 @@ class SandboxPlan:
             return f"unsupported ({self.reason})"
         return (
             f"{self.mode} abi={self.abi} fail_closed={str(self.fail_closed).lower()} "
-            f"read={len(self.read_roots)} write={len(self.write_roots)}"
+            f"read={len(self.read_roots)} write={len(self.write_roots)} "
+            f"seccomp={self.seccomp_state or 'n/a'}"
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -391,6 +435,8 @@ class SandboxPlan:
             "read_roots": list(self.read_roots),
             "write_roots": list(self.write_roots),
             "blockers": list(self.blockers),
+            "notes": list(self.notes),
+            "seccomp": self.seccomp.as_dict() if self.seccomp is not None else None,
         }
 
 
@@ -403,17 +449,24 @@ def _field(obj: Any, name: str, default: Any = None) -> Any:
 
 
 def _sync(plan: SandboxPlan) -> None:
-    """把 ``plan.state`` 写回绑定的目标（``ExecuteRequest.sandbox`` / 同名字典键）。"""
+    """把两个状态写回绑定的目标（``ExecuteRequest.sandbox`` / ``.seccomp`` / 同名字典键）。
+
+    Landlock 与 seccomp **各写各的字段**（S3）：只有一条状态是说不清"少了哪一半"的。
+    """
     target = plan.target
     if target is None:
         return
-    try:
-        if isinstance(target, dict):
-            target["sandbox"] = plan.state
-        else:
-            setattr(target, "sandbox", plan.state)
-    except Exception:  # noqa: BLE001 - 回写失败不该影响是否施加
-        logger.debug("sandbox.state_writeback_failed", state=plan.state)
+    pairs = [("sandbox", plan.state)]
+    if plan.seccomp is not None:
+        pairs.append(("seccomp", plan.seccomp.state))
+    for name, value in pairs:
+        try:
+            if isinstance(target, dict):
+                target[name] = value
+            else:
+                setattr(target, name, value)
+        except Exception:  # noqa: BLE001 - 回写失败不该影响是否施加
+            logger.debug("sandbox.state_writeback_failed", field=name, state=value)
 
 
 def _declared(manifest: Any) -> dict[str, Any]:
@@ -458,8 +511,33 @@ def _is_workspace(path: str) -> bool:
     return True
 
 
+def _landlockable(path: str) -> bool:
+    """这条路径能不能当 Landlock 的 path_beneath 规则目标。
+
+    真机实测（2026-09-22，kernel 6.8 / ABI 4）逐类试过：
+
+    * 目录（/tmp、/dev/pts、/dev/fd 这类 symlink 到目录）—— **OK**；
+    * 普通文件（/etc/hostname）—— **EINVAL(22)**：那是「给文件申请了目录级权限」；
+    * 字符设备（/dev/null、/dev/tty、/dev/random）—— **EINVAL(22)**，同上；
+    * 管道 / socket（/dev/stderr → /proc/self/fd/2）—— **EBADFD(77)**。
+
+    所以只放**目录与普通文件**进来（普通文件另按类型给权限，见 _file_read_rights /
+    _file_write_rights），字符设备 / socket / 管道一律跳过：Landlock 本来只管辖普通
+    文件与目录的访问，跳过它们**不少隔离**，却能装上 ——
+    不跳的话每一次派生都会 fail-closed（S2 的真机用例第一次跑就撞上了这个）。
+    """
+    try:
+        info = os.stat(path)
+    except OSError:
+        return False
+    return stat_module.S_ISDIR(info.st_mode) or stat_module.S_ISREG(info.st_mode)
+
+
 def _collect(candidates: Iterable[str], *, kind: str, seen: set[str]) -> list[str]:
-    """过滤掉不存在的路径（**不** fail-closed：默认档案里的路径允许缺席）。"""
+    """过滤掉不存在的路径（**不** fail-closed：默认档案里的路径允许缺席）。
+
+    另外丢掉 Landlock 不认的目标（见 _landlockable）—— 那是「装不上」的真因。
+    """
     out: list[str] = []
     for raw in candidates:
         if not raw:
@@ -469,6 +547,9 @@ def _collect(candidates: Iterable[str], *, kind: str, seen: set[str]) -> list[st
             continue
         if not os.path.exists(path):
             logger.debug("sandbox.root_missing", path=path, kind=kind)
+            continue
+        if not _landlockable(path):
+            logger.debug("sandbox.root_not_landlockable", path=path, kind=kind)
             continue
         seen.add(path)
         out.append(path)
@@ -493,11 +574,71 @@ def _socket_dirs() -> list[str]:
     return dirs
 
 
+def _build_seccomp(
+    plan: SandboxPlan,
+    *,
+    explicit: Optional[str],
+    declared: dict[str, Any],
+    manifest: Any,
+    cfg: dict[str, Any],
+    allow: Iterable[str] = (),
+    block: Iterable[str] = (),
+) -> "seccomp_exec.SeccompPlan":
+    """合成 seccomp 档案（S3）：参数 > 环境变量 > security.yaml > 内置默认档 ``l1``。
+
+    只收紧不放宽的三条（与 Landlock 侧同源）：
+    * ``agent.json5`` 的 ``seccomp_profile`` 只能**更严**（rank 比较）；
+    * 包的 ``seccomp_block`` / ``extra_block`` **可以加**（只会更严）；
+    * 包的 ``seccomp_allow`` / ``extra_syscalls`` **一律忽略 + 告警** —— 那是放宽，
+      包不许给自己开 syscall（与 S2 里 manifest 的 ``write`` 同一口径）。
+    """
+    env = os.environ.get(seccomp_exec.ENV_PROFILE)
+    base = explicit or env or cfg.get("seccomp") or seccomp_exec.DEFAULT_PROFILE
+    base = str(base).strip() or seccomp_exec.DEFAULT_PROFILE
+
+    declared_profile = declared.get("seccomp_profile") or declared.get("seccomp")
+    if isinstance(declared_profile, str) and declared_profile.strip():
+        want = seccomp_exec.normalize_profile(declared_profile)
+        cur = seccomp_exec.normalize_profile(base)
+        if want is not None and cur is not None:
+            if seccomp_exec.PROFILE_RANK[want] < seccomp_exec.PROFILE_RANK[cur]:
+                base = want
+                plan.notes.append(f"manifest 把 seccomp 收紧到 {want}")
+
+    declared_allow = seccomp_exec.as_names(declared.get("seccomp_allow") or declared.get("extra_syscalls"))
+    if declared_allow:
+        logger.warning(
+            "sandbox.manifest_seccomp_allow_ignored",
+            agent=_field(manifest, "name", "?"),
+            syscalls=declared_allow,
+            detail="包不许给自己加 syscall（放宽只能由运维在 security.yaml 里做）",
+        )
+
+    cfg_allow = seccomp_exec.as_names(cfg.get("seccomp_allow")) + seccomp_exec.as_names(allow)
+    cfg_block = (
+        seccomp_exec.as_names(cfg.get("seccomp_block"))
+        + seccomp_exec.as_names(block)
+        + seccomp_exec.as_names(declared.get("seccomp_block"))
+        + seccomp_exec.as_names(declared.get("extra_block"))
+    )
+
+    return seccomp_exec.build_plan(
+        base,
+        allow=cfg_allow,
+        block=cfg_block,
+        fail_closed=plan.fail_closed,
+        target=plan.target,
+    )
+
+
 def plan_for(
     request: Any = None,
     *,
     cwd: str | os.PathLike[str] | None = None,
     mode: Optional[str] = None,
+    seccomp_profile: Optional[str] = None,
+    seccomp_allow: Iterable[str] = (),
+    seccomp_block: Iterable[str] = (),
     extra_read: Iterable[str] = (),
     extra_write: Iterable[str] = (),
     base: str | os.PathLike[str] | None = None,
@@ -540,6 +681,13 @@ def plan_for(
         return plan
 
     if resolved == MODE_OFF:
+        # 一键退是**整层**的开关：Landlock 关了，seccomp 也关（不然「退」只退了一半）。
+        plan.seccomp = _build_seccomp(
+            plan, explicit=seccomp_profile, declared=declared, manifest=manifest, cfg=cfg
+        )
+        plan.seccomp.profile = seccomp_exec.PROFILE_OFF
+        plan.seccomp.state = seccomp_exec.STATE_OFF
+        plan.seccomp.rules = []
         plan.state = STATE_OFF
         _sync(plan)
         return plan
@@ -547,6 +695,12 @@ def plan_for(
     if not capability.supported:
         # 平台 / 内核不支持：**不解析档案、不假装** —— 如实报 unsupported。
         # 默认路径集是 Linux 形状的，在别的平台上算出来只会是一堆不存在的路径。
+        plan.seccomp = _build_seccomp(
+            plan, explicit=seccomp_profile, declared=declared, manifest=manifest, cfg=cfg,
+            allow=seccomp_allow, block=seccomp_block,
+        )
+        if plan.seccomp.state == seccomp_exec.STATE_UNSUPPORTED:
+            _warn_seccomp_unsupported_once(plan.seccomp.profile, plan.seccomp.reason)
         plan.state = STATE_UNSUPPORTED
         _warn_unsupported_once(resolved, capability.reason)
         _sync(plan)
@@ -592,17 +746,20 @@ def plan_for(
     else:
         read_candidates = ["/", workspace, data_root, trimum_data_dir, *declared_read, *cfg_read]
 
-    write_candidates = [
-        *_ALWAYS_WRITE,
-        *_socket_dirs(),
-        workspace,
-        data_root,
-        trimum_data_dir,
-    ]
-    if not readonly:
-        # readonly 档故意连临时面都不放开：审阅 / 探索类任务不该有落盘面
-        write_candidates.extend(_TMP_ROOTS)
-        write_candidates.extend(cfg_write)
+    if readonly:
+        # readonly 档：工作区**只读**（它已经进了读根，绝不能同时又进写根），连临时面都不放开 ——
+        # 审阅 / 探索类任务不该有落盘面。S2 最初漏了「工作区」这一条，真机实测能写工作区。
+        write_candidates = [*_ALWAYS_WRITE, *_socket_dirs(), data_root, trimum_data_dir]
+    else:
+        write_candidates = [
+            *_ALWAYS_WRITE,
+            *_socket_dirs(),
+            workspace,
+            data_root,
+            trimum_data_dir,
+            *_TMP_ROOTS,
+            *cfg_write,
+        ]
 
     read_seen: set[str] = set()
     plan.read_roots = _collect(read_candidates, kind="read", seen=read_seen)
@@ -612,8 +769,17 @@ def plan_for(
     plan.read_roots = [path for path in plan.read_roots if path not in write_seen]
     plan.rules = _build_rules(plan)
 
+    plan.seccomp = _build_seccomp(
+        plan, explicit=seccomp_profile, declared=declared, manifest=manifest, cfg=cfg,
+        allow=seccomp_allow, block=seccomp_block,
+    )
+
     if not plan.read_roots:
         plan.blockers.append("没有任何可用的只读根（连 / 都不可访问？）")
+    # 档位写错（比如 seccomp: banana）算档案不可用：fail-closed 会拒绝派生
+    plan.blockers.extend(
+        note for note in plan.seccomp.notes if note.startswith("未知的 seccomp 档位")
+    )
 
     plan.state = resolved + SUFFIX_FAILED if plan.blockers else resolved
     _sync(plan)
@@ -623,7 +789,12 @@ def plan_for(
 def _build_rules(plan: SandboxPlan) -> list[tuple[str, int]]:
     rules: dict[str, int] = {}
     for path in plan.read_roots:
-        rules[path] = _read_rights(plan.abi)
+        rights = (
+            _read_rights(plan.abi)
+            if os.path.isdir(path)
+            else _file_read_rights(plan.abi)
+        )
+        rules[path] = rights
     for path in plan.write_roots:
         rights = (
             _write_rights(plan.abi)
@@ -633,11 +804,6 @@ def _build_rules(plan: SandboxPlan) -> list[tuple[str, int]]:
         rules[path] = rights
     # 父目录先加、子目录后加：语义上不要求顺序，排序只为日志好读
     return sorted(rules.items(), key=lambda item: (item[0].count("/"), item[0]))
-
-
-# ══════════════════════════════════════════════════════════════════════
-# 施加（**只在子进程 / `python -m` 里调用**）
-# ══════════════════════════════════════════════════════════════════════
 
 
 def apply_current(plan: SandboxPlan) -> None:
@@ -692,10 +858,20 @@ def apply_current(plan: SandboxPlan) -> None:
                 )
                 if rc != 0:
                     err = ctypes.get_errno()
-                    raise SandboxError(
-                        f"landlock_add_rule 失败 {path}：errno={err} ({os.strerror(err)})",
-                        plan=plan,
-                    )
+                    if err == _EBADFD:
+                        # 目标在**子进程里**已经不是文件对象了：典型是 /dev/stdout ——
+                        # 父进程 stat 到的是普通文件（pytest 抓取），子进程的 fd 却是管道。
+                        # Landlock 只管辖普通文件与目录，这类目标它**本来就管不着**，
+                        # 跳过不少隔离，却能装上（不跳的话每一次派生都 fail-closed）。
+                        logger.warning(
+                            "sandbox.rule_skipped_not_a_file", path=path,
+                            detail="landlock_add_rule EBADFD：目标不是普通文件/目录（设备面或管道），Landlock 不管辖",
+                        )
+                    else:
+                        raise SandboxError(
+                            f"landlock_add_rule 失败 {path}：errno={err} ({os.strerror(err)})",
+                            plan=plan,
+                        )
             finally:
                 os.close(path_fd)
 
@@ -717,12 +893,35 @@ def apply_current(plan: SandboxPlan) -> None:
             pass
 
 
+def apply_plan(plan: SandboxPlan) -> None:
+    """在**当前进程**里把 Layer K 的两半一起施上（preexec 钩子与 ``python -m`` 共用）。
+
+    顺序是刻意的：**Landlock 先、seccomp 后**。Landlock 自己要 prctl/open/close，
+    seccomp 的过滤器装完就再也撤不下来，所以把它放在最后一步。
+    """
+    apply_current(plan)
+    if plan.seccomp_enforcing:
+        seccomp_exec.apply_current(plan.seccomp)
+
+
+def _mark(plan: SandboxPlan, suffix: str = "") -> None:
+    """统一改状态：Landlock 与 seccomp **各记各的**（共用一个 fail-closed 开关）。
+
+    ``suffix`` 取 ``SUFFIX_FAILED`` / ``SUFFIX_DEGRADED``。seccomp 关掉或不支持时不动它
+    —— 那两种情况下"没施上"不是失败。
+    """
+    plan.state = plan.mode + suffix if suffix else plan.mode
+    seccomp = plan.seccomp
+    if seccomp is not None and seccomp.enforcing:
+        seccomp.state = seccomp.profile + suffix if suffix else seccomp.profile
+
+
 def _make_hook(plan: SandboxPlan):
-    """构造 preexec 钩子：只在**子进程**里跑，只做 syscall。"""
+    """构造 preexec 钩子：只在**子进程**里跑，只做 syscall（Landlock → seccomp）。"""
 
     def _hook() -> None:  # pragma: no cover - 子进程里跑，父进程测不到
         try:
-            apply_current(plan)
+            apply_plan(plan)
         except BaseException as exc:
             # 子进程里没有别的地方能报：留一行给日志/agent 日志文件
             try:
@@ -780,11 +979,11 @@ async def _spawn(plan: SandboxPlan, *, shell: bool, args: Sequence[Any], kwargs:
 
     if plan.blockers:
         if plan.fail_closed:
-            plan.state = plan.mode + SUFFIX_FAILED
+            _mark(plan, SUFFIX_FAILED)
             _sync(plan)
             logger.error("sandbox.plan_blocked", mode=plan.mode, blockers=plan.blockers)
             raise SandboxError(f"沙箱档案不可用：{plan.blockers[0]}", plan=plan)
-        plan.state = plan.mode + SUFFIX_DEGRADED
+        _mark(plan, SUFFIX_DEGRADED)
         _sync(plan)
         logger.error(
             "sandbox.plan_blocked_degraded",
@@ -800,7 +999,7 @@ async def _spawn(plan: SandboxPlan, *, shell: bool, args: Sequence[Any], kwargs:
     except subprocess.SubprocessError as exc:
         # 只可能来自 preexec 钩子（命令根本没 exec）；FileNotFoundError 之类照旧向上抛
         if plan.fail_closed:
-            plan.state = plan.mode + SUFFIX_FAILED
+            _mark(plan, SUFFIX_FAILED)
             _sync(plan)
             logger.error(
                 "sandbox.apply_failed", mode=plan.mode, error=str(exc), rules=plan.rules
@@ -808,7 +1007,7 @@ async def _spawn(plan: SandboxPlan, *, shell: bool, args: Sequence[Any], kwargs:
             raise SandboxError(
                 f"沙箱施加失败（{plan.mode}）：命令未执行（{exc}）", plan=plan
             ) from exc
-        plan.state = plan.mode + SUFFIX_DEGRADED
+        _mark(plan, SUFFIX_DEGRADED)
         _sync(plan)
         logger.error(
             "sandbox.apply_failed_degraded",
@@ -818,7 +1017,7 @@ async def _spawn(plan: SandboxPlan, *, shell: bool, args: Sequence[Any], kwargs:
         )
         return await _spawn_process(shell, args, dict(kwargs))
 
-    plan.state = plan.mode
+    _mark(plan)
     _sync(plan)
     return proc
 
@@ -847,12 +1046,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--cwd", default=None, help="当作「工作区」的目录（默认进程 cwd）")
     parser.add_argument("--read", action="append", default=[], help="额外只读路径（可多次）")
     parser.add_argument("--write", action="append", default=[], help="额外可写路径（可多次）")
+    parser.add_argument("--seccomp", default=None, help="seccomp 档位：l1 | strict | off")
+    parser.add_argument("--seccomp-allow", action="append", default=[], help="声明放行（strict 下非空 ⇒ 白名单模式）")
+    parser.add_argument("--seccomp-block", action="append", default=[], help="额外拦截 syscall（可多次）")
     parser.add_argument("cmd", nargs=argparse.REMAINDER, help="要执行的命令")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     plan = plan_for(
         cwd=args.cwd,
         mode=args.profile,
+        seccomp_profile=args.seccomp,
+        seccomp_allow=args.seccomp_allow,
+        seccomp_block=args.seccomp_block,
         extra_read=args.read,
         extra_write=args.write,
     )
@@ -864,6 +1069,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"state      : {plan.state}")
         for path, rights in plan.rules:
             print(f"  rule     : 0o{rights:05o} {path}")
+        if plan.seccomp is not None:
+            print(f"seccomp    : {seccomp_exec.probe().summary()}")
+            print(f"seccomp plan: {plan.seccomp.summary()}")
+            print(f"seccomp state: {plan.seccomp.state}")
+            for note in plan.seccomp.notes:
+                print(f"  note     : {note}")
+            for name in plan.seccomp.unknown:
+                print(f"  unknown  : {name}（本架构没有 / libseccomp 不认识）")
+            for rule in plan.seccomp.rules:
+                print(f"  srule    : {rule.describe()}")
         return 0
 
     cmd = list(args.cmd)
@@ -873,8 +1088,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("没有可执行的命令")
 
     try:
-        apply_current(plan)
-    except SandboxError as exc:
+        apply_plan(plan)
+    except (SandboxError, seccomp_exec.SeccompError) as exc:
         print(f"trimum sandbox: {exc}", file=sys.stderr)
         return 126
     os.execvp(cmd[0], cmd)
@@ -894,6 +1109,7 @@ def current_state() -> str:
 
 __all__ = [
     "DEFAULT_MODE",
+    "ENV_SECCOMP",
     "ENV_FAIL_CLOSED",
     "ENV_MODE",
     "MODES",
@@ -907,6 +1123,7 @@ __all__ = [
     "SandboxError",
     "SandboxPlan",
     "apply_current",
+    "apply_plan",
     "current_state",
     "load_config",
     "main",

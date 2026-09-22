@@ -79,6 +79,11 @@ llm:
 # mode: readonly（"/" 只读，连 /tmp 都不放开）/ workspace-write（默认："/" 只读 +
 #       工作区可写 + /tmp）/ strict（只读白名单 + 只放开写路径）/ off（关掉内核层）
 # 运行时覆盖：TRIMUM_SANDBOX=<mode>（systemd drop-in 写一行即生效，删掉即回滚）
+# seccomp 档位（S3，Layer K 的另一半；设计见 docs/SANDBOX-PLAN.md §6.2 / §11）
+#   l1     = 默认：放行 + 危险内核面黑名单（bpf / mount / ptrace / 命名空间 / io_uring …）
+#   strict = l1 + 网络 socket 按地址族挡（AF_UNIX 放行）；seccomp_allow 非空 ⇒ 白名单模式
+#   off    = 不施加
+# 运行时覆盖：TRIMUM_SECCOMP=<档位>（systemd drop-in 一行生效，删掉即回滚）
 sandbox:
   mode: "workspace-write"
   # 施加失败是否拒绝执行（fail-closed）。关掉＝降级运行，审计里记 <mode>:degraded
@@ -87,6 +92,13 @@ sandbox:
   # 需要 pip / npm 之类写 ~/.cache 的，在这里显式加（那属于持久化面，默认故意不放）
   read_paths: []
   write_paths: []
+  # seccomp 档位：l1（默认）/ strict / off；也认 SECURITY-DEFENSE-PLAN §7.1 的 L1_standard 等别名
+  seccomp: "l1"
+  # 白名单模式（**只在 strict 档生效**）：非空 ⇒ 默认拒绝 + 这份清单 + 内置基线。
+  # 注意：内置基线只够跑静态小二进制，Python / 动态链接程序需要在这里显式补齐。
+  seccomp_allow: []
+  # 追加拦截（任何档都生效，只会更严）
+  seccomp_block: []
 
 # Agent 级别的安全等级覆盖（可选）
 agents:

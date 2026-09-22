@@ -42,13 +42,24 @@ logger = get_logger("tool_dispatchers")
 # ---------------------------------------------------------------------------
 
 
+def _states(plan: "sandbox_exec.SandboxPlan | None") -> tuple[str, str]:
+    """一次取齐 Layer K 的两个状态（Landlock + seccomp），免得每个返回点写两遍。"""
+    if plan is None:
+        return "", ""
+    return plan.state, plan.seccomp_state
+
+
 def _ok(
     output: str = "",
     execution_id: str = "",
     risk: RiskLevel = RiskLevel.LOW,
     action: Action = Action.AUTO,
     sandbox: str = "",
+    seccomp: str = "",
+    plan: "sandbox_exec.SandboxPlan | None" = None,
 ) -> ExecuteResponse:
+    if plan is not None:
+        sandbox, seccomp = _states(plan)
     return ExecuteResponse(
         execution_id=execution_id or uuid.uuid4().hex[:12],
         status="allowed",
@@ -57,6 +68,7 @@ def _ok(
         risk=risk,
         action=action,
         sandbox=sandbox,
+        seccomp=seccomp,
     )
 
 
@@ -67,7 +79,11 @@ def _err(
     action: Action = Action.DENY,
     execution_id: str = "",
     sandbox: str = "",
+    seccomp: str = "",
+    plan: "sandbox_exec.SandboxPlan | None" = None,
 ) -> ExecuteResponse:
+    if plan is not None:
+        sandbox, seccomp = _states(plan)
     return ExecuteResponse(
         execution_id=execution_id or uuid.uuid4().hex[:12],
         status="denied",
@@ -77,6 +93,7 @@ def _err(
         action=action,
         reason=error,
         sandbox=sandbox,
+        seccomp=seccomp,
     )
 
 
@@ -84,9 +101,16 @@ def _sandbox_denied(exc: "sandbox_exec.SandboxError") -> ExecuteResponse:
     """沙箱没能施加 → **命令不执行**（fail-closed 的统一出口，派生点共用）。
 
     错误串带 ``[SANDBOX]`` 前缀，调用方与审计一眼能分清「被策略拦」与「没装上沙箱」。
+    两个状态都带上：到底哪一半没施上，审计里要看得见。
     """
     logger.error("dispatcher.sandbox_denied", error=str(exc), state=exc.state)
-    return _err(f"[SANDBOX] {exc}", exit_code=126, sandbox=exc.state)
+    sandbox, seccomp = _states(exc.plan)
+    return _err(
+        f"[SANDBOX] {exc}",
+        exit_code=126,
+        sandbox=sandbox or exc.state,
+        seccomp=seccomp,
+    )
 
 
 def _check_file_path(path: str) -> tuple[bool, str]:
@@ -414,23 +438,23 @@ class GitDispatcher:
         except sandbox_exec.SandboxError as exc:
             return _sandbox_denied(exc)
         except FileNotFoundError:
-            return _err("Git not found", exit_code=127, sandbox=plan.state)
+            return _err("Git not found", exit_code=127, plan=plan)
         except Exception as e:
-            return _err(f"Git error: {e}", exit_code=-1, sandbox=plan.state)
+            return _err(f"Git error: {e}", exit_code=-1, plan=plan)
 
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            return _err(f"Git timed out after {timeout}s", exit_code=-1, sandbox=plan.state)
+            return _err(f"Git timed out after {timeout}s", exit_code=-1, plan=plan)
 
         out = stdout.decode("utf-8", errors="replace") if stdout else ""
         err = stderr.decode("utf-8", errors="replace") if stderr else ""
         rc = proc.returncode or 0
         if rc == 0:
-            return _ok(out.strip(), sandbox=plan.state)
-        return _err(err or f"Git failed (rc={rc})", exit_code=rc, sandbox=plan.state)
+            return _ok(out.strip(), plan=plan)
+        return _err(err or f"Git failed (rc={rc})", exit_code=rc, plan=plan)
 
 
 # ===================================================================
@@ -537,11 +561,11 @@ class ProcessDispatcher:
         out = stdout.decode("utf-8", errors="replace") if stdout else ""
         err = stderr.decode("utf-8", errors="replace") if stderr else ""
         if proc.returncode == 0:
-            return _ok(out.strip()[:5000], sandbox=plan.state)
+            return _ok(out.strip()[:5000], plan=plan)
         return _err(
             err or f"ps/tasklist failed (rc={proc.returncode})",
             exit_code=proc.returncode or 1,
-            sandbox=plan.state,
+            plan=plan,
         )
 
     async def _kill_process(
@@ -571,14 +595,14 @@ class ProcessDispatcher:
             out = stdout.decode("utf-8", errors="replace") if stdout else ""
             err = stderr.decode("utf-8", errors="replace") if stderr else ""
             if proc.returncode == 0:
-                return _ok(f"Killed PID {pid}", sandbox=plan.state)
+                return _ok(f"Killed PID {pid}", plan=plan)
             return _err(
                 err or f"Kill failed (rc={proc.returncode})",
                 exit_code=proc.returncode or 1,
-                sandbox=plan.state,
+                plan=plan,
             )
         except Exception as e:
-            return _err(f"Kill error: {e}", sandbox=plan.state)
+            return _err(f"Kill error: {e}", plan=plan)
 
 
 # ===================================================================
@@ -693,9 +717,9 @@ class ShellDispatcher:
         except sandbox_exec.SandboxError as exc:
             return _sandbox_denied(exc)
         except FileNotFoundError:
-            return _err("Command not found", exit_code=127, sandbox=plan.state)
+            return _err("Command not found", exit_code=127, plan=plan)
         except Exception as e:
-            return _err(f"Shell error: {e}", exit_code=-1, sandbox=plan.state)
+            return _err(f"Shell error: {e}", exit_code=-1, plan=plan)
 
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -707,10 +731,10 @@ class ShellDispatcher:
             return _err(
                 f"Shell command timed out after {request.timeout_seconds}s",
                 exit_code=-1,
-                sandbox=plan.state,
+                plan=plan,
             )
         except Exception as e:
-            return _err(f"Shell error: {e}", exit_code=-1, sandbox=plan.state)
+            return _err(f"Shell error: {e}", exit_code=-1, plan=plan)
 
         out = stdout.decode("utf-8", errors="replace") if stdout else ""
         err = stderr.decode("utf-8", errors="replace") if stderr else ""
@@ -725,6 +749,7 @@ class ShellDispatcher:
             risk=RiskLevel.MEDIUM,
             action=Action.AUTO,
             sandbox=plan.state,
+            seccomp=plan.seccomp_state,
         )
 
 

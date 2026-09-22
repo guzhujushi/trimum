@@ -1591,6 +1591,7 @@ class ToolGateway:
 
         cmd_str = " ".join(request.args) if request.args else request.raw_command
         sandbox_state = response.sandbox or getattr(request, "sandbox", "") or ""
+        seccomp_state = response.seccomp or getattr(request, "seccomp", "") or ""
 
         event = AuditEvent(
             event_id=uuid.uuid4().hex[:12],
@@ -1608,10 +1609,12 @@ class ToolGateway:
                 "cwd": request.cwd or "",
                 "source_type": request.source_type.value if hasattr(request.source_type, 'value') else str(request.source_type),
                 "sandbox": sandbox_state,
+                "seccomp": seccomp_state,
             },
             timestamp=time.time(),
             source_type=str(request.source_type) if hasattr(request.source_type, 'value') else str(request.source_type),
             sandbox=sandbox_state,
+            seccomp=seccomp_state,
             jit_token=request.jit_token or "",
             jit_expires_at=0.0,
             jit_granted_by="",
