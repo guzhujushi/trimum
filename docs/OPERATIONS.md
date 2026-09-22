@@ -467,3 +467,40 @@ sudo bash /tmp/ubuntu_slim_desktop.sh --rollback
   ```
 - 开机自启还需要 `sudo loginctl enable-linger guzhujushi`（用户级 systemd 服务在没登录时会话不存在就起不来）；且开机时 keyring 是锁的，必须再配「空口令默认 keyring」或「0600 口令文件 + 开机解锁」之一，否则重启后仍要人工授权。
 - 拉后台常驻进程统一 `setsid nohup ... < /dev/null &`（`nohup` 单独用仍会随会话清理）。
+
+### 真机备用网络通道：Tailscale → Windows(UniClash) 代理（2026-09-23 打通）
+
+**为什么需要**：真机没有代理，直连 GitHub 虽然平时正常（实测 200 / 0.2–0.7s），但会偶发瞬断
+（`GnuTLS recv error (-110)`、TLS 握手超时），`git fetch` / `npm i` / 装扩展都可能因此失败。
+
+**链路**：真机 → Tailscale（`100.124.243.30`，Windows 笔记本）→ Windows `portproxy` → UniClash `127.0.0.1:7993` → 出境。
+
+**Windows 侧怎么搭的**（UniClash 只绑 `127.0.0.1`，**不要**改它去开 Allow LAN —— 那会把代理暴露给整个局域网）：
+
+```powershell
+# 管理员 PowerShell
+netsh interface portproxy add v4tov4 listenaddress=100.124.243.30 listenport=7993 connectaddress=127.0.0.1 connectport=7993
+New-NetFirewallRule -DisplayName "Tailscale->UniClash 7993" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 7993
+```
+
+撤销：
+```powershell
+netsh interface portproxy delete v4tov4 listenaddress=100.124.243.30 listenport=7993
+Remove-NetFirewallRule -DisplayName "Tailscale->UniClash 7993"
+```
+
+（portproxy 与防火墙规则都**持久化**，Windows 重启后仍在。）
+
+**真机侧用法**：`~/bin/with-proxy <命令>`，例如 `~/bin/with-proxy git fetch origin server`。
+代理不可达（Windows 关机 / UniClash 没开 / portproxy 丢了）时**自动降级为直连**，不会把命令卡死。
+
+**实测代价**（2026-09-23）：
+
+| 目标 | 经代理 | 直连 |
+|---|---|---|
+| `https://github.com` | 200 / 3.3–6.0s | 200 / 0.74s |
+| `https://registry.npmjs.org` | 200 / 2.6s | 200 / 0.27s |
+| `https://api.github.com` | **403**（出口节点限制） | 200 / 0.27s |
+| `git ls-remote` / `git fetch` | ✅ 成功 | ✅ 成功 |
+
+⇒ Tailscale 这条是 **DERP 中继（hkg），RTT 150–250ms**，比直连慢 4~10 倍，**只当应急备用**，不要设成全局代理。

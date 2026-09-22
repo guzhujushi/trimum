@@ -34,6 +34,7 @@
 - **真机现成工具**（2026-09-22/23 装）：
   - `~/bin/codex-run ds|qwen` —— 跑 codex（已带 nvm PATH + 注入 `~/.codex/env`）；`~/bin/codex-smoke` 冒烟。
   - `~/bin/tunnel-up` —— 恢复 `code tunnel`（内含 keyring 解锁 + 脱离会话启动）；**重启后要手动跑一次**。
+  - `~/bin/with-proxy <命令>` —— 备用网络通道（经 Tailscale → Windows UniClash `100.124.243.30:7993`）；**只在直连抽风时用**，慢 4~10 倍，代理不可达自动降级直连。
   - `~/.local/bin/code` —— VS Code CLI（1.138.0，与 server 同 commit）；扩展装在 `~/.vscode-server/extensions`。
   - VS Code 入口：`https://vscode.dev/tunnel/tianyi`（手机可用）。
 - **坑（细节见 `docs/OPERATIONS.md`）**：GitHub 凭据在 gnome-keyring 里，**没有桌面会话时 keyring 是锁的** ⇒ `code tunnel` 会误报未登录并重新要设备码；用登录口令 `gnome-keyring-daemon --unlock --replace` 解锁即可，**不要重新授权**。
@@ -79,7 +80,7 @@
 | 跑 codex | `.\scripts\codex-model.ps1 qwen` / `ds`（换 provider 必须重开进程，`/model` 改不了 provider） | `~/bin/codex-run ds|qwen`；冒烟 `~/bin/codex-smoke` |
 | `codex exec` | 无特殊要求 | **必须 `</dev/null`**：SSH 管道的 stdin 不关闭，它会干等 EOF（实测卡 7 分钟、连 API socket 都不建）；再套 `timeout 240` 兜底 |
 | 后台常驻 | `Start-Process -WindowStyle Hidden` | `setsid nohup <cmd> >>log 2>&1 < /dev/null &`（只 `nohup` 会随会话清理） |
-| 网络 | 境外 API / GitHub 走代理 `http://127.0.0.1:7993` | 真机**直连**（github / npm / marketplace 实测 200），无需代理 |
+| 网络 | 境外 API / GitHub 走代理 `http://127.0.0.1:7993` | 真机**直连**（实测 github/api/npm 全 200，0.2–0.7s）；直连偶发瞬断（`GnuTLS recv error -110` / TLS 超时）时走备用通道 **`~/bin/with-proxy <命令>`**（经 Tailscale 借 Windows 的 UniClash，慢 4~10 倍，代理不可达会自动降级直连） |
 | sudo | 无 | **agent 不代跑 sudo**，写成脚本交本人；真机 sudo 要口令 |
 | 临时文件 | `tmp/` | `tmp/`（真机重启会清 `/tmp`，长期脚本别只放 /tmp） |
 
