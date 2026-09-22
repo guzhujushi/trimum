@@ -21,6 +21,11 @@
 #   * fwupd / avahi / cups / cups-browsed / bluetooth / sysstat 对无桌面主机无意义，
 #     其中 fwupd 单独占约 192MB 内存。全部按「存在才停」，可逆。
 #   * 前置硬检查：sshd 必须 active+enabled，否则拒绝执行（防把自己关在门外）。
+#   * **红线：不要在桌面会话的终端窗口里跑本脚本**。实测在本机 GNOME 终端里跑，
+#     "systemctl disable --now gdm3" 会连带杀掉整个桌面会话 ⇒ 脚本自己被 SIGKILL，
+#     后面的 mask / 停服务全部没执行，只剩"改了 target + 停了 gdm3"的半吊子状态，
+#     而且屏幕会变成没有任何提示的黑屏（gdm 与 getty@tty1 互斥，getty 没被拉回来）。
+#     ⇒ 一律从 **SSH 会话**（或已切到 multi-user 后的控制台）里跑。
 set -uo pipefail
 
 MODE=dryrun
@@ -121,6 +126,15 @@ if systemctl is-active --quiet gdm3; then
   systemctl disable --now gdm3 >/dev/null 2>&1 && ok "gdm3 已停用" || warn "gdm3 停用失败"
 else
   skip "gdm3 未运行"
+fi
+
+# gdm.service 与 getty@tty1 互斥：gdm 起来时 getty@tty1 被顶掉，gdm 停掉后**不会自动回来**，
+# 结果本地显示器变成没有任何提示的黑屏（实测）。手动拉一个 tty1 getty，屏幕就有登录提示。
+if ! systemctl is-active --quiet getty@tty1; then
+  systemctl start getty@tty1 2>/dev/null && ok "getty@tty1 已起（本地屏幕会有文字登录提示）" \
+    || warn "getty@tty1 启动失败（本地屏幕可能仍是黑屏，重启后会自动起）"
+else
+  skip "getty@tty1 已在运行"
 fi
 
 for t in "${TARGETS[@]}"; do

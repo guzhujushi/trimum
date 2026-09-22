@@ -2530,3 +2530,43 @@ trm memory export | trm memory import   # 管道
 - **常驻化**：授权后需 `code tunnel service install`（用户级 systemd）才算 7x24。
 - **图形栈收敛**：改 `multi-user.target` + 停 `gdm3` + mask 睡眠 target + 停 fwupd/avahi/cups/cups-browsed/bluetooth/sysstat。收益：内存约省 0.9GiB、idle 30W→20~25W（**不动 `no_turbo`/governor**，编译变慢得不偿失）。
 - **真机 `~/trimum` 残留 30 个未跟踪文件**（旧版 `PRD.md` / `ARCH.md` / `docs/*` 旧文档 / `tests_backup_20260919/` / `memory/` / `backup_*.py`），备份已在，等本人点头再清。
+
+## 2026-09-22 夜·真机排障：隧道 Connected + 三个真凶（✅ 完成）
+
+> 触发：本人跑完设备码授权与省电脚本后，真机屏幕黑屏、看起来像「重启卡住」。
+
+### 结论先说：没死机，也没在重启
+
+`uptime` 11:40（12:05 开机至今**没重启过**）、`is-system-running: running`、`systemctl list-jobs` = `No jobs running`、`--failed` 为空、load 0.00、sshd/tailscaled active。**不需要强制关机**。
+
+### 黑屏的真凶：`gdm.service` 与 `getty@tty1` 互斥
+
+`gdm.service` 带 `Conflicts=getty@tty1.service`。停掉 gdm 后 **getty@tty1 不会自动回来** ⇒ 本地显示器既没有图形界面也没有文字登录提示 = 黑屏。`systemctl start getty@tty1` 即可（脚本已补这一步）。
+
+### 省电脚本只生效一半的真凶：**它是在桌面会话的终端里跑的**
+
+`systemctl disable --now gdm3` 把整个桌面会话一起杀掉 ⇒ **脚本自己也被 SIGKILL**。实测残留：`get-default=multi-user.target` ✅、gdm3 已停 ✅，但 mask 睡眠 target ❌、avahi/cups/cups-browsed/sysstat 仍 active+enabled ❌。
+⇒ **一律从 SSH 会话里跑**（已写进脚本头部红线）。
+
+### 隧道「又要设备码」的真凶：gnome-keyring 被锁
+
+- `~/.vscode/cli/code_tunnel.json` **只存** `{name,id,cluster}`；**GitHub token 在 gnome-keyring**（`~/.local/share/keyrings/login.keyring`）。
+- 桌面会话在时 keyring 由 PAM 解锁，所以 23:40 那次授权能写进去；**gdm3 一停、会话一结束 keyring 就锁了**，SSH（`Type=tty`）里新起的 keyring-daemon 读不到 ⇒ `code tunnel user show` = `not logged in` ⇒ 又发设备码。
+- **修复（实测有效）**：`printf '%s' "$USER_PASSWORD" | gnome-keyring-daemon --unlock --replace --components=secrets` → 立刻 `logged in with provider GitHub Account`，**不用重新授权**。
+- 随后同会话内 `setsid nohup code tunnel ... < /dev/null &` ⇒ `status` 报 `{"tunnel":"tianyi","tunnel":"Connected","has_editor_link":true}`，`https://vscode.dev/tunnel/tianyi` 可用。
+
+### 真机开发树
+
+已 `fetch` + `merge --ff-only` 到 `6cacd24`；`git clean -fd` 清掉 31 项旧版残留 + 空目录 `tests_backup_20260919`，工作区干净。备份 `~/trimum.bak-202609222325` 仍在。
+
+### 仍未闭环（等拍板）
+
+- **重启后自动恢复**：`code tunnel service install` 需要 `sudo loginctl enable-linger guzhujushi`（本轮 attempt 因拿不到口令而卡死，已杀）。且**开机时 keyring 是锁的**，光装 service 不够，两条路二选一：
+  1. **空口令默认 keyring**（备份后重建 `login.keyring`）⇒ 任何会话都能读 token，不在机器上存口令；
+  2. **0600 口令文件 + 开机解锁的 user service** ⇒ 保留现有 keyring，但机器上要存登录口令。
+- 省电脚本剩余步骤（mask 睡眠 target + 停 avahi/cups/cups-browsed/sysstat）需**从 SSH** 重跑一次 `--apply`。
+
+### 顺带定下的工具纪律
+
+- **PowerShell 内联远程命令一律别用**（`$( )`、`\"`、`| head` 会被 PowerShell 吃掉/报错，本轮连踩三次）⇒ 一律「本地写 `.sh` → `scp /tmp/` → `tr -d '\r' < /tmp/x.sh | bash`」。
+- 拉起的后台进程要 `setsid nohup ... < /dev/null &`，否则会随 SSH 会话一起死。

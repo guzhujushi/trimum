@@ -449,3 +449,21 @@ sudo bash /tmp/ubuntu_slim_desktop.sh --rollback
 - 收益：内存约省 0.9GiB（gdm3 + gnome-shell + fwupd 等），idle 30W→20~25W。
 - **不动** `no_turbo` / governor：压频率会让编译变慢，得不偿失。
 - `sudo` 需要密码 ⇒ **交给本人跑**，agent 不代跑。
+
+### 真机陷阱：gnome-keyring 锁住 ⇒ `code tunnel` 反复要设备码（2026-09-22 实测）
+
+- `~/.vscode/cli/code_tunnel.json` **只存** tunnel 元数据（`name` / `id` / `cluster`），**GitHub 凭据在 gnome-keyring**（`~/.local/share/keyrings/login.keyring`）。
+- 有桌面会话时 keyring 由 PAM 解锁，登录一次即可长期用；**一旦桌面会话结束（例如按本文件上面那个脚本停掉 gdm3），keyring 就锁上**，SSH（`Type=tty`）里新起的 keyring-daemon 读不到 ⇒ `code tunnel user show` 返回 `not logged in`，隧道又打印设备码。
+- **别急着重授权**，先解锁 keyring（口令在本机 `.env` 的 `USER_PASSWORD`）：
+  ```bash
+  eval "$(printf '%s' "$USER_PASSWORD" | gnome-keyring-daemon --unlock --replace --components=secrets)"
+  code tunnel user show     # 期望：logged in with provider GitHub Account
+  ```
+  解锁必须在**同一个会话里**紧接着把隧道拉起来，否则会话一结束又锁回去：
+  ```bash
+  setsid nohup "$HOME/.local/bin/code" tunnel --accept-server-license-terms --name tianyi \
+      >> "$HOME/.code-tunnel-logs/login.log" 2>&1 < /dev/null &
+  code tunnel status        # 期望：{"tunnel":"tianyi","tunnel":"Connected"}
+  ```
+- 开机自启还需要 `sudo loginctl enable-linger guzhujushi`（用户级 systemd 服务在没登录时会话不存在就起不来）；且开机时 keyring 是锁的，必须再配「空口令默认 keyring」或「0600 口令文件 + 开机解锁」之一，否则重启后仍要人工授权。
+- 拉后台常驻进程统一 `setsid nohup ... < /dev/null &`（`nohup` 单独用仍会随会话清理）。

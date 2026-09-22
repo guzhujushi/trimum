@@ -72,9 +72,12 @@ P0 安全响应链 / E5 分发渠道 / 穿插三项已收口；沙箱 **S1**（�
 - `~/.trimum/.env` 是只含 `OPENAI_*` 的老 stub（加载器已修成「按 key 叠加 + 仓库 `.env` 权威」）⇒ 建议删掉，免得再被误选【本人】
 
 ### 8. Ubuntu 真机常驻（2026-09-22 新增；背景见 `STATUS.md` 同日日志）
-- 隧道设备码授权 → 再 `code tunnel service install` 常驻（授权前 `vscode.dev/tunnel/tianyi` 不可用）【本人】
-- 真机跑省电脚本：先 `bash /tmp/ubuntu_slim_desktop.sh --verify` 体检，再 `sudo bash /tmp/ubuntu_slim_desktop.sh --apply`（回滚 `--rollback`）【本人】
-- 真机 `~/trimum` 清 30 个未跟踪旧文件（备份 `~/trimum.bak-202609222325` 已在，先征得同意）【本人】
+- **隧道重启后自动恢复**（授权与在线已完成：`vscode.dev/tunnel/tianyi`、`status` = Connected）。需**决策** + 一条 sudo：
+  `sudo loginctl enable-linger guzhujushi`（用户级 systemd 服务没 linger 起不来）；且**开机时 gnome-keyring 是锁的**（token 存在 keyring 里），光装 `code tunnel service install` 重启后仍要人工授权 ⇒ 二选一：
+  ① **空口令默认 keyring**：把 `login.keyring` 备份后重建（不落盘口令，任何会话都能读 token）；
+  ② **0600 口令文件 + 开机解锁的 user service**：保留现有 keyring，但机器上要存登录口令。【本人决策】
+- 省电脚本**剩余步骤**（mask 睡眠 target + 停 avahi/cups/cups-browsed/sysstat）：要从 **SSH** 重跑 `sudo bash /tmp/ubuntu_slim_desktop.sh --apply`（在桌面终端里跑会被 `disable --now gdm3` 连带杀掉，只剩半吊子状态；脚本头部已写红线）【本人】
+- 真机本地屏幕黑屏 ⇒ 脚本已补 `systemctl start getty@tty1`（`gdm` 与 `getty@tty1` 互斥，见 `STATUS.md` 同日日志），重跑即恢复文字登录提示【本人】
 - 备用通路：code-server + frp + Nginx 反代 `vs.guzhujushi.cn`（基础设施已备好；**tunnel 这条路用不到域名**）【DS】
 - `trm codex-proxy`：qwen 撞 429 自动降 `ds`（方案 B2，见 `docs/CODEX-MODEL-POLICY.md` §4）【DS】
 - 真机 sudo NOPASSWD 白名单（本机 `.env` 现明文存着真机 sudo 口令，见「安全收尾」）【本人】
