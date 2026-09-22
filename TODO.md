@@ -1,4 +1,4 @@
-# trimum — 待办清单
+﻿# trimum — 待办清单
 
 > 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **E5 第三片步骤 3：多用户边界（调研 + 设计，`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略（取证类武装 / 处置类不武装 / 自动触发不派子 Agent）** → **穿插项步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **穿插项步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地，`docs/SANDBOX-PLAN.md` §9.3.7）** → **真机切开关：整树同步 + 收 TCP 脚本就绪（备份 / 导入预演 / 回滚三条护栏）** → **真机切开关落地（TCP 已收口）+ LLM 路由 / 限流 / 回退 + 测试环境隔离** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **S3 seccomp 三档（真机验收 35 passed / 0 failed）**）
 > 测试基线：本地 **1636 passed / 6 failed / 23 skipped**（2026-09-22 S3 seccomp 三档之后；S2 轮 1576/6/16 → **S3 轮 1636/6/23**，+60 全为新增用例，6 条失败与 S2 轮逐条同名）；上一轮基线 **1554 passed / 2 failed / 10 skipped**（2026-09-21 沙箱前置片 TCP 收口之后；socket 收口轮 1502 → TCP 收口轮 1519；穿插项步骤 C 之后 1489 → 步骤 B 1475）；步骤 3 之后是 **1326**（只加文档）；2 项失败 = 既有宿主基线：PATH 缺 `python.exe`（`test_depends_on::test_existing_dep_returns_empty`）+ LLM 断网（`test_llm_integration`）；原先那批「沙箱写 `~/.trimum` 被拒」已由 `tests/conftest.py` 把 `TRIMUM_HOME` 指到临时目录消掉）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326** → 步骤 A 1365 → 步骤 B 1475 → **步骤 C 1489** → E7 设计轮 1489（只加文档）→ socket 收口轮 1502 → **TCP 收口轮 1519** → **LLM 路由轮 1547** → **测试隔离轮 1554**；基线里的「写真实 `~/.trimum` 被拒」那几项已由 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）消掉，剩下的 2 项（PATH 缺 `python.exe`、LLM 断网）是纯宿主状态基线与本仓库改动无关；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）；S3 轮真机跑在**合成树 `/tmp/trm-s3`**（开发树缺模块，与 `docs/SANDBOX-PLAN.md` §10.8 同源）**1645 passed / 16 failed / 4 skipped** —— 这 16 条**逐条都不是 S3**，全是宿主 / 合成树产物，归因表见 §11.6
@@ -1046,7 +1046,7 @@ shell 真的过网关（`args==["echo hi"]` + `raw_command`）/ 被拒上报 / *
 ## 🟡 后续方向（CLI 完成后）
 
 ### CLI 进阶
-- [ ] `trm ask` 墨迹/屏幕截图输入支持 【Qwen】
+- [x] `trm ask` 墨迹/屏幕截图输入支持（`--image` 多模态，6 条测试） 【Qwen】（2026-09-22）
 - [ ] `trm memory import` / `export`（记忆迁移） 【Qwen】
 - [ ] CLI 别名自定义（`.trimumrc` 配置文件） 【Qwen】
 - [ ] 自动补全脚本（bash/zsh/fish） 【Qwen】

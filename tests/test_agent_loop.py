@@ -1,4 +1,4 @@
-"""AgentLoop Phase C wiring tests — token accounting and SSE parsing."""
+﻿"""AgentLoop Phase C wiring tests — token accounting and SSE parsing."""
 
 import os
 import sys
@@ -64,3 +64,63 @@ async def test_plan_records_token_usage(monkeypatch):
     assert usage.completion_tokens == 5
     assert usage.total_tokens == 15
     assert usage.calls == 1
+
+# ── image / multimodal helpers ──
+
+
+def test_image_to_data_url_valid(tmp_path):
+    from trimum_core.agent_loop import _image_to_data_url
+
+    img = tmp_path / "test.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+    url = _image_to_data_url(str(img))
+    assert url.startswith("data:image/png;base64,")
+
+
+def test_image_to_data_url_missing():
+    import pytest
+    from trimum_core.agent_loop import _image_to_data_url
+
+    with pytest.raises(FileNotFoundError):
+        _image_to_data_url("/nonexistent/image.png")
+
+
+def test_image_to_data_url_unsupported_format(tmp_path):
+    import pytest
+    from trimum_core.agent_loop import _image_to_data_url
+
+    txt = tmp_path / "notes.txt"
+    txt.write_text("hello")
+    with pytest.raises(ValueError, match="unsupported image format"):
+        _image_to_data_url(str(txt))
+
+
+def test_build_user_content_no_images():
+    from trimum_core.agent_loop import _build_user_content
+
+    result = _build_user_content("hello")
+    assert result == "hello"
+
+
+def test_build_user_content_with_images(tmp_path):
+    from trimum_core.agent_loop import _build_user_content
+
+    img1 = tmp_path / "a.png"
+    img1.write_bytes(b"\x89PNG\r\n\x1a\n")
+    img2 = tmp_path / "b.jpg"
+    img2.write_bytes(b"\xff\xd8\xff")
+
+    result = _build_user_content("describe", [str(img1), str(img2)])
+    assert isinstance(result, list)
+    assert result[0] == {"type": "text", "text": "describe"}
+    assert result[1]["type"] == "image_url"
+    assert result[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert result[2]["type"] == "image_url"
+    assert result[2]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+def test_build_user_content_empty_list():
+    from trimum_core.agent_loop import _build_user_content
+
+    result = _build_user_content("hello", [])
+    assert result == "hello"

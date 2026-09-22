@@ -1,6 +1,6 @@
-# STATUS — 当前进度
+﻿# STATUS — 当前进度
 
-> 最后更新：2026-09-22（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **Codex 模型切换复盘（provider 改正名 + launcher 两个真 bug + `/model` 不改 provider）** → **S2 施加点收口（Landlock，7 个 spawn 点，本机 A/B 无回归）** → **S3 seccomp 三档（`l1`/`strict`/`off` + 与 Landlock 两半联动，真机验收 35/0 全绿）** → **S3 收尾交接：起手三步验证（本机 1642/0/23 + 真机 1645/16/4 + accept_s3 35/0，真机合成树重建）** → **RAG 检索能力调研（docs/RAG-RESEARCH.md\uff0c不改代码）** → **B4 security revoke + C1 ask Ctrl+C + F2 CLI-daemon 集成测试（18 条新增测试，全量 1660/0/23）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-22（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **Codex 模型切换复盘（provider 改正名 + launcher 两个真 bug + `/model` 不改 provider）** → **S2 施加点收口（Landlock，7 个 spawn 点，本机 A/B 无回归）** → **S3 seccomp 三档（`l1`/`strict`/`off` + 与 Landlock 两半联动，真机验收 35/0 全绿）** → **S3 收尾交接：起手三步验证（本机 1642/0/23 + 真机 1645/16/4 + accept_s3 35/0，真机合成树重建）** → **RAG 检索能力调研（docs/RAG-RESEARCH.md\uff0c不改代码）** → **B4 security revoke + C1 ask Ctrl+C + F2 CLI-daemon 集成测试（18 条新增测试，全量 1660/0/23）** → **CLI 进阶第一项：`trm ask --image` 多模态输入（6 条新增测试，全量 1660/6/23 无回归）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -19,6 +19,25 @@
 
 ---
 
+## 2026-09-22 CLI 进阶第一项：`trm ask --image` 多模态输入（✅ 完成）
+
+> 提交待推。全量 **1660 passed / 6 failed / 23 skipped**（6 条失败为既有宿主基线，零回归）。
+
+### 做了什么
+
+| 位置 | 内容 |
+|---|---|
+| `src/trimum_core/agent_loop.py` | 新增 `_IMAGE_MIME` / `_image_to_data_url()` / `_build_user_content()`；`run()` 与 `_plan()` 接受 `images` 参数，用户消息按 OpenAI 多模态格式携带 base64 图片 |
+| `src/trimum_core/cli/commands/ask.py` | 新增 `--image` / `-I` 参数（`nargs="+"`），透传到 `AgentLoop.run()` |
+| `tests/test_agent_loop.py` | 6 条新增：`_image_to_data_url`（有效 / 缺失 / 不支持格式）+ `_build_user_content`（无图 / 多图 / 空列表） |
+
+### 关键设计
+
+- **消息格式**：无图时 user content 保持 `str`（向后兼容）；有图时变为 `[{"type":"text",...}, {"type":"image_url","image_url":{"url":"data:...;base64,..."}}]`
+- **支持格式**：png / jpg / jpeg / gif / webp / bmp / tiff
+- **LLM 能力依赖**：图片以 OpenAI 兼容多模态格式发送；若 LLM 不支持 vision，API 报错由 `_plan()` 的 `except` 捕获并走 `_fallback_plan()` 降级
+
+---
 ## 2026-09-22 RAG 检索能力调研（✅ 调研完成，不改代码；docs/RAG-RESEARCH.md）
 
 > 因 S4（systemd-run --user 子 Agent 资源边界）是完整实现片、超出 10 分钟窗口，本轮改做用户备选：RAG 调研。

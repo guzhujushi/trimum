@@ -1,4 +1,4 @@
-"""Agent Loop — 交互式 AI Agent 执行循环。
+﻿"""Agent Loop — 交互式 AI Agent 执行循环。
 
 trm exec <自然语言指令> 的核心引擎。
 
@@ -16,10 +16,12 @@ trm exec <自然语言指令> 的核心引擎。
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
 
 from .event_bus import EventBus
@@ -50,6 +52,39 @@ log = logging.getLogger("trimum_core.agent_loop")
 # 导致交互式循环里成功的步骤被当成失败（Phase 3 收尾 P1）。
 STEP_OK_STATUSES = frozenset({"allowed", "confirmed", "success"})
 STEP_ERROR_STATUSES = frozenset({"denied", "error", "timeout", "jit_required"})
+_IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+}
+
+
+def _image_to_data_url(path: str) -> str:
+    """Read an image file and return a base64 data URL."""
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"image not found: {path}")
+    mime = _IMAGE_MIME.get(p.suffix.lower())
+    if not mime:
+        raise ValueError(f"unsupported image format: {p.suffix} ({path})")
+    b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+
+def _build_user_content(text: str, images: list[str] | None = None) -> "str | list[dict]":
+    """Build user message content; plain string when no images, multimodal list otherwise."""
+    if not images:
+        return text
+    parts: list[dict] = [{"type": "text", "text": text}]
+    for img_path in images:
+        data_url = _image_to_data_url(img_path)
+        parts.append({"type": "image_url", "image_url": {"url": data_url}})
+    return parts
 
 
 @dataclass
@@ -303,7 +338,7 @@ class AgentLoop:
 
     # ── 主入口 ──
 
-    async def run(self, prompt: str) -> list[dict]:
+    async def run(self, prompt: str, *, images: list[str] | None = None) -> list[dict]:
         """执行一个自然语言指令。
 
         返回 [(step_name, result_dict), ...]
@@ -311,7 +346,7 @@ class AgentLoop:
         self.console.info(f"正在分析: {prompt}", emoji="🔍")
 
         # 1. LLM 制定计划
-        plan = await self._plan(prompt)
+        plan = await self._plan(prompt, images=images)
         if not plan or "steps" not in plan:
             self.console.error("无法生成执行计划，请描述得更具体一些")
             return []
@@ -346,7 +381,7 @@ class AgentLoop:
 
     # ── LLM 计划 ──
 
-    async def _plan(self, prompt: str) -> Optional[dict]:
+    async def _plan(self, prompt: str, *, images: list[str] | None = None) -> Optional[dict]:
         """调用 LLM 将自然语言转换为执行计划。"""
         llm_cfg = self.sec_config.get_llm_config()
         model = llm_cfg.get("model", "deepseek-chat")
@@ -379,7 +414,7 @@ class AgentLoop:
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
+                    {"role": "user", "content": _build_user_content(prompt, images)},
                 ],
                 temperature=0.1,
                 max_tokens=1024,

@@ -1,4 +1,4 @@
-"""`trm ask` command — run an AI agent loop."""
+﻿"""`trm ask` command — run an AI agent loop."""
 
 from __future__ import annotations
 
@@ -49,6 +49,14 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="enter interactive multi-turn mode",
     )
+    parser.add_argument(
+        "--image",
+        "-I",
+        nargs="+",
+        default=None,
+        metavar="FILE",
+        help="image file(s) to include (screenshot, handwriting, etc.)",
+    )
     parser.set_defaults(handler=handler)
 
 
@@ -87,7 +95,7 @@ def handler(args: argparse.Namespace) -> int:
             if args.interactive:
                 results = await loop.run_interactive(args.prompt)
             else:
-                results = await loop.run(args.prompt)
+                results = await loop.run(args.prompt, images=args.image)
             return results, loop.get_token_usage()
         finally:
             if context_manager is not None:
