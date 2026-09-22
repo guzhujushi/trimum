@@ -1,12 +1,14 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **E5 第三片步骤 3：多用户边界（调研 + 设计，`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略（取证类武装 / 处置类不武装 / 自动触发不派子 Agent）** → **穿插项步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **穿插项步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地，`docs/SANDBOX-PLAN.md` §9.3.7）** → **真机切开关：整树同步 + 收 TCP 脚本就绪（备份 / 导入预演 / 回滚三条护栏）** → **真机切开关落地（TCP 已收口）+ LLM 路由 / 限流 / 回退 + 测试环境隔离** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）**）
-> 测试基线：本地 **1554 passed / 2 failed / 10 skipped**（2026-09-21 沙箱前置片 TCP 收口之后；socket 收口轮 1502 → TCP 收口轮 1519；穿插项步骤 C 之后 1489 → 步骤 B 1475）；步骤 3 之后是 **1326**（只加文档）；2 项失败 = 既有宿主基线：PATH 缺 `python.exe`（`test_depends_on::test_existing_dep_returns_empty`）+ LLM 断网（`test_llm_integration`）；原先那批「沙箱写 `~/.trimum` 被拒」已由 `tests/conftest.py` 把 `TRIMUM_HOME` 指到临时目录消掉）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326** → 步骤 A 1365 → 步骤 B 1475 → **步骤 C 1489** → E7 设计轮 1489（只加文档）→ socket 收口轮 1502 → **TCP 收口轮 1519** → **LLM 路由轮 1547** → **测试隔离轮 1554**；基线里的「写真实 `~/.trimum` 被拒」那几项已由 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）消掉，剩下的 2 项（PATH 缺 `python.exe`、LLM 断网）是纯宿主状态基线与本仓库改动无关；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）
-> 当前分支：`server`（= `origin/server` = `18d3144`，工作区干净）；日常只推 `server`，`main` / `ubuntu` / `arch-linux` 只在里程碑收尾时同步。
+> 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **E5 第三片步骤 3：多用户边界（调研 + 设计，`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略（取证类武装 / 处置类不武装 / 自动触发不派子 Agent）** → **穿插项步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **穿插项步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地，`docs/SANDBOX-PLAN.md` §9.3.7）** → **真机切开关：整树同步 + 收 TCP 脚本就绪（备份 / 导入预演 / 回滚三条护栏）** → **真机切开关落地（TCP 已收口）+ LLM 路由 / 限流 / 回退 + 测试环境隔离** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **S3 seccomp 三档（真机验收 35 passed / 0 failed）**）
+> 测试基线：本地 **1636 passed / 6 failed / 23 skipped**（2026-09-22 S3 seccomp 三档之后；S2 轮 1576/6/16 → **S3 轮 1636/6/23**，+60 全为新增用例，6 条失败与 S2 轮逐条同名）；上一轮基线 **1554 passed / 2 failed / 10 skipped**（2026-09-21 沙箱前置片 TCP 收口之后；socket 收口轮 1502 → TCP 收口轮 1519；穿插项步骤 C 之后 1489 → 步骤 B 1475）；步骤 3 之后是 **1326**（只加文档）；2 项失败 = 既有宿主基线：PATH 缺 `python.exe`（`test_depends_on::test_existing_dep_returns_empty`）+ LLM 断网（`test_llm_integration`）；原先那批「沙箱写 `~/.trimum` 被拒」已由 `tests/conftest.py` 把 `TRIMUM_HOME` 指到临时目录消掉）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326** → 步骤 A 1365 → 步骤 B 1475 → **步骤 C 1489** → E7 设计轮 1489（只加文档）→ socket 收口轮 1502 → **TCP 收口轮 1519** → **LLM 路由轮 1547** → **测试隔离轮 1554**；基线里的「写真实 `~/.trimum` 被拒」那几项已由 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）消掉，剩下的 2 项（PATH 缺 `python.exe`、LLM 断网）是纯宿主状态基线与本仓库改动无关；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）；S3 轮真机跑在**合成树 `/tmp/trm-s3`**（开发树缺模块，与 `docs/SANDBOX-PLAN.md` §10.8 同源）**1645 passed / 16 failed / 4 skipped** —— 这 16 条**逐条都不是 S3**，全是宿主 / 合成树产物，归因表见 §11.6
+> 当前分支：`server`；**本地领先 `origin/server`（仍停在 `18d3144`）6 个提交待推**（S2 轮 4 个 + S3 轮 2 个）——
+> 代理 `127.0.0.1:7993` 没开时 push 不上去（直连 GitHub 是 `Connection was reset`），**开代理后 `git push origin server` 即可**。
+> 日常只推 `server`，`main` / `ubuntu` / `arch-linux` 只在里程碑收尾时同步。
 
 ---
 
-## 📦 交接（2026-09-21，第三轮：S1 试装复盘 + **socket 收口** → 第四轮：**TCP 收口（代码侧）** → 第五轮：**真机切开关（整树同步 + 收 TCP）脚本就绪** → 第六轮：**真机切开关落地 + LLM 路由 / 限流 / 回退 + 测试环境隔离** → 第七轮：**Codex 侧模型分工（Qwen / deepseek-flash）**）
+## 📦 交接（2026-09-21，第三轮：S1 试装复盘 + **socket 收口** → 第四轮：**TCP 收口（代码侧）** → 第五轮：**真机切开关（整树同步 + 收 TCP）脚本就绪** → 第六轮：**真机切开关落地 + LLM 路由 / 限流 / 回退 + 测试环境隔离** → 第七轮：**Codex 侧模型分工（Qwen / deepseek-flash）** → 第八轮：**S3 seccomp 三档（真机验收 35/0）**）
 
 ### 一句话现状
 
@@ -17,7 +19,9 @@
 `/opt/trimum/.env` 经 systemd `EnvironmentFile` 注入，冒烟走 `primary:qwen3.8-27b@models.sjtu.edu.cn`。
 **Codex 侧的模型分工同时落地**：`qwen` / `ds` 两个 profile + `scripts/codex-model.ps1`（任务级切换已能跑，
 `docs/CODEX-MODEL-POLICY.md`）；**尚未做**的是「Codex 限流后自动降级」—— Codex 自身没有这个开关，只能加本地路由代理（待裁决）。
-下一步：**S3 seccomp 三档【DS】**（S2 已于 2026-09-22 收口，只剩真机 4 条命令对照），见下面「下一步」一节。
+**S3 seccomp 三档也已落地并真机验收**（`seccomp_exec` 三档 + 与 `sandbox_exec` 的 Landlock 两半联动，
+`scripts/accept_s3.py` **35 passed / 0 failed**；S2 与 S3 的真机 bug 一并修完，2026-09-22）。
+下一步：**S4 子 Agent 资源边界**（长驻子 Agent 走 `systemd-run --user` transient，见 `docs/SANDBOX-PLAN.md` §8 的 S4 行）。
 
 ### 本次（2026-09-21）完成
 
@@ -219,7 +223,43 @@ daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`�
 它会牵动 `src/`（`llm_router.py` / `doctor.py` / `health.py` / `security_config.py`）、`tests/`、
 `scripts/llm_env_dropin.sh` 与真机 drop-in —— 建议**只加新名、保留旧名作别名**，别让真机 daemon 起不来。
 
-### 收尾核对与接下来（2026-09-21 第七轮；S2 的设计口径见上「紧接着的下一项」）
+### ✅ S3 seccomp 三档（2026-09-22 第八轮：已落地 + 真机验收 35/0）
+
+**一句话**：`src/trimum_core/seccomp_exec.py`（新，733 行）给出 **`l1`（默认）/ `strict` / `off`** 三档，
+`sandbox_exec` 把它接到 Landlock 那半旁边（**Landlock 先、seccomp 后**，因为 `seccomp_load` 不可逆）；
+`models` / `security_config` / 4 个派发侧全部带上 `seccomp` 状态与审计。
+
+**三档**：`l1` = `KERNEL_BLOCK` 31 条危险内核面；`strict` = `l1` + 3 条 + **按地址族挡网络 socket**
+（`AF_INET`/`AF_INET6`/`AF_PACKET`/`AF_NETLINK`，**`AF_UNIX` 放行** —— 子 Agent 的 RPC 靠它）；
+`strict` + `seccomp_allow` 非空 ⇒ **白名单模式**（默认拒绝 + 69 条基线）。
+开关 `TRIMUM_SECCOMP`（环境变量 > `security.yaml: sandbox.seccomp` > 默认 `l1`）；
+`agent.json5` 的 `seccomp_profile` **只能更严**，包的 `allow`/`extra_syscalls` **一律忽略 + 告警**。
+
+**真机四条教训（`docs/SANDBOX-PLAN.md` §11.3，别重犯）**：
+① 能力口径是 **API level**（`seccomp_api_get`），不是版本号；
+② 判别器只能选「**不施加时一定会成功**」的 syscall（`ptrace(TRACEME)` / `io_uring_setup`）——
+`bpf`/`mount`/`setns` 非特权下本来就失败，拿它验收会得到假结论；
+③ `SCMP_CMP_EQ` **是 4 不是 0**（enum 从 `_SCMP_CMP_MIN=0` 起算）—— 填 0 会让 `seccomp_rule_add` 返回
+`-EINVAL(22)`，把「按地址族挡 socket」整条废掉（现象是 `strict` 档放行 `AF_INET`）；
+④ Landlock **只接目录与普通文件**（设备/管道不接；管道目标是 `EBADFD`）。
+
+**顺带修掉的 S2 真机 bug**：`_landlockable()` 目标过滤、`_file_read_rights()` 文件级权限、
+`EBADFD` 降级为 warning、**`readonly` 档工作区只读**（原先工作区同时在写根 ⇒ 真机实测能写，隔离失效）。
+
+**真机怎么跑**（不需要 sudo / 网络）：
+
+```bash
+cd /tmp/trm-s3 && /home/guzhujushi/trimum/.venv/bin/python scripts/accept_s3.py   # 35 passed / 0 failed
+```
+
+**本轮新增/改动**：`seccomp_exec.py`（新）、`tests/test_seccomp_exec.py`（新）、`scripts/accept_s3.py`（新）、
+`sandbox_exec.py` / `models.py` / `security_config.py` / `tool_dispatchers.py` / `cli_adapter.py` /
+`agent_launcher.py` / `tool_gateway.py` / `tests/test_sandbox_exec.py`（改）。
+
+细节：`docs/SANDBOX-PLAN.md` **§11**（交付物 / 三档口径 / 四条真机教训 / 施加顺序 / 验收 / 回归基线 / 未纳入项），
+S2 的真机修正记在 **§10.5.1**，`docs/SECURITY-DEFENSE-PLAN.md` §7.1–§7.3 也加了落地校正脚注。
+
+### 收尾核对与接下来（2026-09-21 第七轮；S2/S3 的设计口径见上）
 
 **六条裁决（2026-09-21，全部已定）**：① eBPF → **CAP_BPF + root helper**；② 非特权 userns → **不全局放开**（需要时定向给 `bwrap` 写 AppArmor profile）；
 ③ Docker 档 → **Phase 5**；④ daemon → **保持非特权 + 加特权 helper**；⑤ 沙箱 → **提到 E7 之前**；
@@ -241,11 +281,17 @@ daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`�
 
 1. 【DS】**S2 施加点收口 —— ✅ 已完成（2026-09-22）**：`sandbox_exec`（Landlock + `PR_SET_NO_NEW_PRIVS`）收 **7** 个 spawn 点
    （`tool_dispatchers.py` 的 git/shell/process list/process kill + `agent_launcher.py:132` + `cli_adapter.py:585`，gateway 兜底口径）；
-   **fail-closed + 审计**已落地；本机回归 1576 passed / 6 failed（6 条与 S2 无关，A/B 已证）；**真机 4 条命令对照待本人跑**（`docs/SANDBOX-PLAN.md` §10.6）。
-2. 【DS】S3 seccomp 三档 → S4 子 Agent systemd transient → S5 可选档（helper / Docker / bwrap profile）。
-3. **【待裁决】**把 Codex 接到本地路由上（免费的 Qwen 撞 429 时自动降 `deepseek-flash`）：
+   **fail-closed + 审计**已落地；真机三条 bug 已修（`_landlockable` 目标过滤 / 文件级权限 / `EBADFD` 降级 / `readonly` 档工作区只读），
+   真机复跑 **97 passed / 2 skipped / 0 failed**；原「4 条命令对照」已并入 `scripts/accept_s3.py`（`docs/SANDBOX-PLAN.md` §10.5.1 / §11.5）。
+2. 【DS】**S3 seccomp 三档 —— ✅ 已完成（2026-09-22）**：`seccomp_exec`（`l1` / `strict` / `off`）+ 与 Landlock 两半联动；
+   **真机 `scripts/accept_s3.py` 35 passed / 0 failed**；本机全量 1636 passed / 6 failed（6 条与 S3 无关）。
+   细节 `docs/SANDBOX-PLAN.md` §11；**四条真机教训**（API level 不是版本号 / 判别器必须「不施加也成功」 /
+   `SCMP_CMP_EQ` 是 4 不是 0 / Landlock 只接目录与普通文件）见 §11.3。
+3. 【DS】**S4 子 Agent 资源边界**（`systemd-run --user` transient：`MemoryMax`/`CPUQuota`/`TasksMax`/`NoNewPrivileges`/`SystemCallFilter`）
+   → S5 可选档（特权 helper / Docker / bwrap profile）。
+4. **【待裁决】**把 Codex 接到本地路由上（免费的 Qwen 撞 429 时自动降 `deepseek-flash`）：
    `docs/CODEX-MODEL-POLICY.md` §4（B1 LiteLLM / B2 `trm codex-proxy` 复用 `llm_router`，**推荐 B2**）。
-4. 【DS】LLM 侧的 ①②（跨进程限流、token 维度计量）；【Qwen】③④⑤（`Retry-After`、doctor 显示路由表、成本账本）。
+5. 【DS】LLM 侧的 ①②（跨进程限流、token 维度计量）；【Qwen】③④⑤（`Retry-After`、doctor 显示路由表、成本账本）。
 
 **真机切开关那轮的三条裁决（全部已定，且已生效）**：① HTTP **只留 unix socket**；② `@debug` **放行**（`bpf` 仍挡）；③ `ReadOnlyPaths=/opt/trimum` **不保留**。
 
@@ -255,8 +301,10 @@ daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`�
 ### 开工须知（省得踩坑）
 
 - **先读**：`STATUS.md`（进度与决策）、本节、`docs/` 里对应专题文档 + `docs/ARCH.md`；**不读文档直接动手 = 违规**。
-- **测试**：`python -m pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider`；基线 **1554 passed / 2 failed / 10 skipped**，
-  2 项失败是既有宿主基线（PATH 缺 `python.exe` + LLM 断网），**不算回归**。
+- **测试**：`python -m pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider`；基线 **1636 passed / 6 failed / 23 skipped**，
+  6 项失败是既有宿主基线（PATH 缺 `python.exe` + LLM 断网 + 4 条宿主 `~/.trimum` 污染），**不算回归**；
+  在真机跑合成树时**另有一批**宿主产物失败（`~/.trimum/skills` 不存在、`/run/user/1000` 候选顺序…）——
+  **逐条归因表在 `docs/SANDBOX-PLAN.md` §11.6，别重新查一遍**。
 - **分支**：日常只提交、只推送 `server`；另外三个分支只在里程碑收尾时逐提交同步。
 - **写文件**：用 node 的 `fs.writeFileSync(path, text, {encoding:"utf8"})`（UTF-8 + LF）。
   **别用 PowerShell here-string 写含中文的内容**（会按 GBK 写坏）；本环境 `apply_patch` 不可用；
@@ -276,7 +324,8 @@ Landlock / Seccomp 沙箱、记忆桥（`memory_bridge` + `experience_learner` �
 - 内置剧本只有落盘式开关（`trm workflow enable <id>`），没有「原地开关」。
 - 确认通道目前只有命令行（桌面 / WebSocket 未做）。
 - 真机：`trm env install` 的 root 真执行路径待跑；`/opt/trimum` 部署树只差 `env_file.py` 一个**测试用** helper（见「下一步」一节）。
-- 真机验收脚本：`scripts/accept_w1.py`（48/0）、`scripts/accept_e4.py`（43/0）、`scripts/accept_ipc_only.sh`（15/0，2026-09-21）；E7 的 `scripts/accept_e7.py` 待写。
+- 真机验收脚本：`scripts/accept_w1.py`（48/0）、`scripts/accept_e4.py`（43/0）、`scripts/accept_ipc_only.sh`（15/0，2026-09-21）、
+  **`scripts/accept_s3.py`（35/0，2026-09-22，覆盖 S2+S3 两半）**；E7 的 `scripts/accept_e7.py` 待写。
 - **启动失败时的退出路径**：TCP 预检那两条是 `sys.exit(3)`（什么都还没起），中途致命那条（HTTP 关 + IPC 起不来）已改 `os._exit(3)`；
   但 **HTTP 开着的 daemon 启动失败仍走 uvicorn 自己的 `sys.exit(3)`** —— 同样可能被 `ContextManager` 的
   aiosqlite 非 daemon 线程拖住（真机实测同类现象见 `docs/SANDBOX-PLAN.md` §9.3.8 发现 1）。收 S1 时一并核。
@@ -297,6 +346,18 @@ Landlock / Seccomp 沙箱、记忆桥（`memory_bridge` + `experience_learner` �
 
 SSH `guzhujushi@100.115.86.48`（免密）；开发目录 `/home/guzhujushi/trimum`，部署目录 `/opt/trimum`；
 daemon 现由 systemd 托管（`sudo systemctl restart trmd`）；需要 sudo 的操作写成脚本放到远端 `/tmp/` 并告知位置。
+
+**S3 轮的真机现场（2026-09-22）**：
+
+- **合成树 `/tmp/trm-s3`**：`/tmp/trimum-sync.tar` 解出来的完整源码树（**开发树 `/home/guzhujushi/trimum/src`
+  缺约 70/115 个模块**，`tests/` 又强制用本仓 `src`，所以本地验证一律在这个合成树里做，跑法
+  `PYTHONPATH=/tmp/trm-s3/src /home/guzhujushi/trimum/.venv/bin/python -m pytest tests -q`）。
+  注意：`PYTHONPATH` 必须指**导入根**（`.../src`），指到 `.../src/trimum_core` 会让子进程静默退回旧树。
+- **已在 `/tmp/` 待本人跑（需要 sudo，我跑不了）**：
+  `sudo bash /tmp/sync_opt_tree.sh --dry-run` → `sudo bash /tmp/sync_opt_tree.sh`（或加 `--restart`）；
+  之后 `cd /home/guzhujushi/trimum && .venv/bin/python scripts/accept_s3.py` 再验一遍部署树。
+  `--rollback` 可整树还原（备份在 `/var/backups/trimum/src-<时间戳>`）；`--rehearse-only` 非 root 也能跑。
+  风险：它是**整树覆盖 `/opt/trimum/src`**，护栏是「先备份 + 先导入预演（有新增 import 失败就 `exit 3`，一个字不碰生产）」。
 
 ---
 

@@ -345,8 +345,8 @@ sudo bash /tmp/check_sandbox_caps_root.sh             # 系统级能力核对（
 | 片 | 做什么 | 验收标准 |
 |---|---|---|
 | **S1 daemon 加固** | ✅ **脚本已就绪**（`scripts/harden_trmd_unit.sh`，dry-run 默认 / 备份 / 冒烟 / 失败自动回滚；口径见 §6.6）。**未 apply** —— 要 `sudo` 密码，等你自己跑 | daemon 重启后 `systemctl is-active` + `/proc/<pid>/status` 里 `NoNewPrivs: 1`/`Seccomp: 2` + `/proc/<pid>/mountinfo` 里 `/usr`/`/etc` 是 `ro` 而 `/home` 不是 + `mountinfo` 条目数 > 47 + `/run/trimum/trimum.sock` 存在 + 以服务用户跑 `trm status`/`trm tool list` 通过 + syscall 探针（`landlock_*`/`seccomp`/`prctl` 不被挡、`bpf`/`ptrace`/`mount` 被挡）。改前基线：`systemd-analyze security` = **9.2 UNSAFE** |
-| **S2 施加点收口** | ✅ **已落地（2026-09-22）**：`sandbox_exec`（Landlock + `PR_SET_NO_NEW_PRIVS`，ctypes）；**7** 个 spawn 点全部改走它；施加失败 **fail-closed** 并写审计 —— 细节见 **§10** | 单元测试 26 通过 / 6 项 Linux 专属 skip（本机 Windows）；真机 4 条命令对照**待本人跑**（§10.6） |
-| **S3 seccomp 档位** | 用 `libseccomp`(ctypes) 实现 `readonly` / `workspace-write` / `strict` 三档；`agent.json5` 的 `sandbox` 段声明式接进来 | 三档各自的 syscall 白/黑名单测试（含 `bpf`/`mount`/`ptrace` 被拒）；档案缺省值 = `workspace-write`；被拒的 syscall 有审计留痕 |
+| **S2 施加点收口** | ✅ **已落地（2026-09-22）**：`sandbox_exec`（Landlock + `PR_SET_NO_NEW_PRIVS`，ctypes）；**7** 个 spawn 点全部改走它；施加失败 **fail-closed** 并写审计 —— 细节见 **§10** | 本机 28 通过 / 6 项 Linux 专属 skip；**真机已验**（S3 轮复跑 **97 passed / 2 skipped / 0 failed**，三条真机 bug 已修见 §10.5.1）；原「4 条命令对照」已并入 `scripts/accept_s3.py` |
+| **S3 seccomp 档位** | ✅ **已落地（2026-09-22）**：`seccomp_exec`（`libseccomp` ctypes）实现 `l1`（默认）/ `strict` / `off` 三档；`agent.json5` 的 `sandbox.seccomp_profile` 声明式接进来（只能更严）—— 细节见 **§11** | 本机 58 通过 / 7 项 Linux 专属 skip；**真机 `scripts/accept_s3.py` 35 passed / 0 failed**；三档的黑/白名单 + 按地址族挡 socket（`AF_UNIX` 放行）逐条有判据；被拒 syscall 的审计留痕走 S2 的 `seccomp` 状态字段 |
 | **S4 子 Agent 资源边界** | 长驻子 Agent 走 `systemd-run --user` transient service（`MemoryMax`/`CPUQuota`/`TasksMax`/`NoNewPrivileges`/`SystemCallFilter`） | 子 Agent 超内存被 cgroup 杀掉且父会话收到明确失败；不装 systemd 的环境优雅降级（记 `unsupported`） |
 | **S5 可选档**（要裁决） | ① eBPF 监控的特权 helper；② Docker 隔离档（第三方包）；③ 放开非特权 userns | 各自单独裁决后再开 |
 
@@ -617,7 +617,7 @@ ImportError: cannot import name 'SecurityRuntime' from 'trimum_core.sec_executor
 
 ## 10. S2 落地记录：施加点收口（2026-09-22 实做）
 
-> 状态：**代码已落地 + 本机全量回归通过**；真机验收待本人跑（清单见 §10.6）。
+> 状态：**代码已落地 + 本机全量回归通过 + 真机已验**（S3 轮复跑 `test_sandbox_exec.py` 全绿）；三条真机 bug 修正见 §10.5.1。
 
 ### 10.1 交付物
 
@@ -693,6 +693,19 @@ ImportError: cannot import name 'SecurityRuntime' from 'trimum_core.sec_executor
 - 平台降级：非 Linux **提前返回** `unsupported`，不解析 Linux 形状的默认路径集（否则算出来一堆不存在的路径），
   且**只告警一次** —— 每次派生都喊会把日志喊爆。
 
+### 10.5.1 真机修正（2026-09-22，S3 轮跑出来的三条）
+
+S2 这两条只有在 Linux 上才暴露（本机 Windows 全 skip），三条都改了代码：
+
+| 症状（真机实测） | 原因 | 修法 |
+|---|---|---|
+| 普通文件当读根 → `EINVAL(22)` | 给普通文件配了**目录级**权限（`READ_DIR` 一类的位） | 新增 `_file_read_rights()` / `_file_write_rights()`：普通文件只给文件级权限 |
+| 字符设备（`/dev/null` `/dev/zero` `/dev/tty` `/dev/ptmx`…）→ `EINVAL(22)` | **Landlock 只接「目录 + 普通文件」**，设备/套接字/管道一律不接 | 新增 `_landlockable()`：装置前过滤，剩下的记 `sandbox.root_not_landlockable`（debug 级），不再让整档失败 |
+| `/dev/stdout` 等**管道 / 指向管道的符号链接** → `EBADFD(77)` | 父进程 stat 时还是普通文件，子进程里该 fd 已被重解释成管道 | `apply_current` 把 `EBADFD` **降级为 warning `sandbox.rule_skipped_not_a_file`**（Landlock 本来就管不着管道），不再 fail-closed |
+
+**另**：`readonly` 档原先仍把工作区算进写根 → 真机实测「`readonly` 档能写工作区」（隔离失效）。
+已改 `plan_for`：readonly 时工作区**只**进读根，写根只剩 `_ALWAYS_WRITE` / RPC socket 目录 / `TRIMUM_HOME`。
+
 ### 10.6 真机验收清单（待本人跑；不需要 `sudo`、不需要网络）
 
 ```bash
@@ -704,6 +717,8 @@ python -m trimum_core.sandbox_exec --profile workspace-write --cwd /tmp/ws -- sh
 python -m trimum_core.sandbox_exec --profile readonly        --cwd /tmp/ws -- sh -c 'echo x > b.txt'     # 期望 EACCES
 python -m pytest tests/test_sandbox_exec.py -q                               # 6 项 Linux 专属应从 skip 变 pass
 ```
+
+> 上面这 4 条已并入 `scripts/accept_s3.py`（A / C / D 组，逐条 PASS/FAIL）；真机结果见 §11.5。
 
 ### 10.7 本机回归基线（Windows，A/B 对照）
 
@@ -722,3 +737,85 @@ python -m pytest tests/test_sandbox_exec.py -q                               # 6
 - `TaskRegistry.SHELL` 派生的子进程（走 `spawn_exec`）**本轮未收**（TODO 只列 6+1 个点）—— 列为下一小步。
 - S3 seccomp 三档 / S4 子 Agent 走 systemd transient / S5 可选档（helper / Docker / bwrap profile）**不变**。
 - `trm status` / `trm doctor` 还没把沙箱状态摆到台面上（眼下只能从审计与日志看）—— 可随后补。
+
+## 11. S3 落地记录：seccomp 三档（2026-09-22 实做）
+
+> 状态：**代码已落地 + 本机全量回归通过 + 真机验收 35 passed / 0 failed**。
+> 真机跑在**合成树 `/tmp/trm-s3`**（开发树缺模块，与 §10.8 同源问题）；`/opt/trimum` 只待整树同步（§11.5）。
+
+### 11.1 交付物
+
+| 文件 | 内容 |
+|---|---|
+| `src/trimum_core/seccomp_exec.py`（新增，733 行） | Layer K 的另一半：三档档案（纯计算 `build_plan`，可注入 resolver / lib / capability）+ 施加（`apply_current`）+ 能力探测 + 独立 CLI（`python -m trimum_core.seccomp_exec`） |
+| `tests/test_seccomp_exec.py`（新增，723 行） | 逻辑层 + `TestSeccompReal`（Linux 端到端，判别器 `ptrace(PTRACE_TRACEME)` / `io_uring_setup`）+ `TestModuleCli` + `TestStaticGuards` |
+| `scripts/accept_s3.py`（新增，349 行） | 真机验收 A–I 共 **35** 项；**不需要 sudo / 不需要网络**，每条判据先跑对照组 |
+| `src/trimum_core/sandbox_exec.py` | `SandboxPlan.seccomp` / `seccomp_state`、`_build_seccomp()`（档位合成）、`apply_plan()`（**Landlock 先、seccomp 后**）、`plan_for(seccomp_profile/allow/block)`；另修 §10.5.1 三条真机 bug |
+| `models.py` | `ExecuteRequest.seccomp` / `ExecuteResponse.seccomp` / `AuditEvent.seccomp` |
+| `security_config.py` | `DEFAULT_SECURITY_YAML` 的 `sandbox:` 段新增 `seccomp` / `seccomp_allow` / `seccomp_block` |
+| `tool_dispatchers.py` / `cli_adapter.py` / `agent_launcher.py` / `tool_gateway.py` | 状态回写与审计带上 seccomp（Landlock 那半的出口 `_sandbox_denied()` 不变） |
+| `tests/test_sandbox_exec.py` | 新增 `TestLandlockTargets`（非文件目标过滤 + 文件根权限，`l1` 档也覆盖）：本机 28 通过 / 6 skip |
+
+### 11.2 三档口径
+
+| 档 | 拦什么 | 适合谁 |
+|---|---|---|
+| `off` | 不施加（照旧 exec，**明确不施加**，不再退 126） | 排障 / 一键退 |
+| `l1`（**默认**） | `KERNEL_BLOCK` **31** 条危险内核面（内核模块 / eBPF / `ptrace` / `io_uring` / 命名空间 / 挂载 / 块设备 / I/O 端口 / keyring / `open_by_handle_at`） | 常规任务 |
+| `strict` | `l1` + `STRICT_BLOCK` 3 条（`pidfd_getfd` / `process_madvise` / `kexec_load`）+ **网络 socket 按地址族挡**（`AF_INET` / `AF_INET6` / `AF_PACKET` / `AF_NETLINK`）；**`AF_UNIX` 放行**（子 Agent 的 RPC 靠它） | 未知 / 第三方 Agent |
+
+- 别名表把 `docs/SECURITY-DEFENSE-PLAN.md` §7.1 的 `L0..L3` 折进三档（`l1_standard`→`l1`、`l2`/`l3`/`jail`→`strict`）。
+- **白名单模式**：`strict` 且 `seccomp_allow` 非空 ⇒ 默认动作 `EPERM` + `WHITELIST_BASELINE`（69 条）+ 声明放行；此时**不再叠黑名单规则**（默认动作已经是拒绝，再叠只是噪声，还会让 summary 的 deny 计数误导人）。
+- **只收紧不放宽**：`agent.json5` 的 `seccomp_profile` 只能更严（`PROFILE_RANK`）；包的 `seccomp_block` / `extra_block` 可以加；包的 `seccomp_allow` / `extra_syscalls` **一律忽略 + 告警**（与 S2 的 manifest `write` 同一口径）。
+- 开关：`TRIMUM_SECCOMP`（环境变量 > `security.yaml: sandbox.seccomp` > 内置默认 `l1`）。`TRIMUM_SANDBOX` 管 Landlock 那半，**两条互相独立**。
+- 审计状态：`off` / `unsupported` / `l1` / `strict` / `<档>:failed`；两半各记一份（`sandbox` 与 `seccomp` 两个字段），任一失败都走 S2 的 fail-closed 出口。
+- 与 §8 旧验收口径的一处差异：那里写「档案缺省值 = `workspace-write`」—— 那其实是 **Landlock 的 mode**；seccomp 的默认档是 **`l1`**（不是 `off`），已在 §11.5 的 A4 里钉住。
+
+### 11.3 真机实测踩出来的四条（**别再重犯**）
+
+1. **能力口径是 API level，不是版本号** —— `seccomp_api_get()` 给 `6`；`seccomp_version()` 走 ctypes 读不出来（`restype` 试 `c_uint` / `c_int` / `c_ulong` 全是垃圾）。对外一律报 `api_level=N`。
+2. **判别器只能选「不施加时一定会成功」的 syscall** —— 用 `ptrace(PTRACE_TRACEME)`（对照组 `rc=0`）与 `io_uring_setup`（对照组返回 fd）。`bpf` / `mount` / `setns` 在非特权下**本来就失败**（`EINVAL` / `ENOENT`），拿它们验收只会得出「拦住了」的**假结论**。`accept_s3.py` 的 B 组就是这个自证。
+3. **§7.2 原始清单里有两个不是 syscall** —— `swapcontext` 是 glibc 函数（libseccomp 解析成 `__NR_SCMP_UNDEF`），`poweroff` 是命令。两者都已从 `KERNEL_BLOCK` 删掉，并补上 `io_uring_register` / `kcmp` / keyring 三条 / `open_by_handle_at`（最后这条能**绕过 Landlock 的路径检查**，必须挡）。
+4. **`SCMP_CMP_EQ` 是 4，不是 0**（真机探针实证，`tmp/probe_cmp.py`）—— `enum scmp_compare` 从 `_SCMP_CMP_MIN = 0` 起算，填 0 会被 libseccomp 判成**非法算子**，`seccomp_rule_add` 直接 `-EINVAL(22)`，把「按地址族挡 socket」整条规则废掉（外面看到的现象是 `strict` 档**放行了 `AF_INET`**）。探针输出：`op=0 → rc=-22`，`op=1..7 → rc=0`，`sizeof(struct scmp_arg_cmp)=24`（结构体布局与 ctypes 变参调用本身都没问题）。
+
+（Landlock 侧的第五、六条 —— 只收「目录 + 普通文件」、`readonly` 档能写工作区 —— 属 S2 的真机 bug，记在 §10.5.1。）
+
+### 11.4 施加顺序（别写反）
+
+`sandbox_exec.apply_plan()` 里 **Landlock 先、seccomp 后**：`seccomp_load()` **不可逆**，必须排在所有可能失败的步骤之后（Landlock 出问题还能降级 / 告警，seccomp 装不上就是整档失败）。
+
+### 11.5 真机验收
+
+```bash
+# 合成树（开发树缺模块，与 §10.8 同源）；/opt/trimum 待整树同步后再跑一遍
+cd /tmp/trm-s3 && /home/guzhujushi/trimum/.venv/bin/python scripts/accept_s3.py
+```
+
+结果：**35 passed / 0 failed** —— A 能力 / B 对照组自证 / C `l1` / D `strict` / E `off` / F 白名单 / G 与 S2 联动 / H fail-closed 与只收紧 / I 审计与正常命令。
+不需要 `sudo`、不需要网络，全程用临时 `TRIMUM_HOME`（不碰 `~/.trimum`、不重启 daemon）。
+
+### 11.6 回归基线
+
+| 树 | 结果 |
+|---|---|
+| 本机 Windows，`test_seccomp_exec.py` + `test_sandbox_exec.py` | **86 passed / 13 skipped / 0 failed**（其中 seccomp 58 / sandbox 28） |
+| 本机 Windows，全量 `tests` | **1636 passed / 6 failed / 23 skipped**（6 条与 S2 同源：`test_depends_on` 的 `PATH`、`test_llm_integration` 断网、4 条宿主 `~/.trimum` 污染） |
+| 真机 `/tmp/trm-s3`，两个文件 | **97 passed / 2 skipped / 0 failed**（首跑 8 条失败 → 3 条 → 0 条） |
+| 真机 `/tmp/trm-s3`，全量 `tests` | **1645 passed / 16 failed / 4 skipped** —— 16 条**逐条都不是 S3**，全是宿主 / 合成树产物 |
+
+那 16 条的归因（**下轮别再重新查一遍**）：
+
+| 条数 | 用例 | 真因 |
+|---|---|---|
+| 7 | `test_skill_integration` | 宿主 `~/.trimum/skills` **不存在**（技能是运行时装进 home 的；Windows 本机有 `hello-world` / `git-deploy` 所以本机绿） |
+| 2 | `test_tool_file_loading` | 宿主 `~/.trimum/tools` 缺 `mcp`；`git` 用例因为 `/tmp/trm-s3` **不是 git 仓库**（tar 不带 `.git`）退 128 |
+| 4 | `test_socket_path_consistency` | 宿主 `XDG_RUNTIME_DIR=/run/user/1000` 造出第二条 `/run/user/*` 候选，与断言的排序冲突（Linux 专有，Windows 上 skip） |
+| 1 | `test_other_dispatchers::TestEnvDispatcher::test_env_list_sorted` | 宿主 `_=/home/guzhujushi/trimum/.venv/bin/python` 排在 `Z=` 之后 |
+| 2 | `test_depends_on` / `test_llm_integration` | 与本机同一批宿主基线（`PATH` 缺 `python.exe` / 连不上 `models.sjtu.edu.cn`） |
+
+### 11.7 未纳入本轮 & 下一步
+
+- 白名单模式的 `allow` 是**运维口子**（`security.yaml: sandbox.seccomp_allow`），**不是包口子**；`WHITELIST_BASELINE` 只够跑最小 shell / 静态小二进制，Python 与动态链接程序要显式补齐 syscall。
+- `TaskRegistry.SHELL` 派生的子进程仍未收口（S2 起挂着）。
+- `trm status` / `trm doctor` 还没把 Landlock + seccomp 状态摆上台面。
+- S1 的 `SystemCallFilter`（管 **daemon 自己**）与 S3（管**子进程**）是**两套**，别混。

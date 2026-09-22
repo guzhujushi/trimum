@@ -463,6 +463,12 @@ eBPF map 写入告警事件
 | L2-受限 | 白名单约 60 个核心系统调用 | 第三方 / 未信任 Agent |
 | L3-监狱 | 白名单约 20 个：read/write/close/exit/mmap/munmap/brk | 沙箱内执行未知二进制 |
 
+> **落地校正（2026-09-22，S3）**：本仓库**没有**照搬 `L0..L3` 这一列 —— 落成三档
+> **`l1`（默认）/ `strict` / `off`**，且默认形态是**黑名单**（`L1/L2/L3` 描述的白名单只在
+> `strict` + `seccomp_allow` 非空时启用，见 `seccomp_exec.WHITELIST_BASELINE`）。
+> `L1_standard` 这类旧名保留在别名表里（`seccomp_exec.ALIASES`），写进 `agent.json5` 仍认。
+> 细节：`docs/SANDBOX-PLAN.md` §11。
+
 ### 7.2 L1 标准白名单（禁止列表）
 
 以下系统调用在 L1 及以上策略中一律禁止：
@@ -479,6 +485,14 @@ pivot_root, chroot                            // 根文件系统逃逸
 swapon, swapoff, reboot, poweroff              // 系统级操作
 ```
 
+> **落地校正（2026-09-22，S3，真机实证）**：上面这段清单**不是**逐条可用的 syscall 表，两点要改：
+> ① `swapcontext` 是 **glibc 函数**（libseccomp 解析成 `__NR_SCMP_UNDEF`），`poweroff` 是**命令**，两者都不是 syscall —— 已删；
+> ② 补上 `io_uring_register`、`kcmp`、`add_key`/`keyctl`/`request_key`、`open_by_handle_at`
+> （最后这条能**绕过 Landlock 的路径检查**，必须挡）。
+> 真实清单以代码为准：`seccomp_exec.KERNEL_BLOCK`（31 条）+ `STRICT_BLOCK`（3 条）。
+> 另外「`L1` 及以上一律禁止」的说法只对**黑名单档**成立；白名单档（`strict` + `allow`）是
+> 「默认拒绝 + 基线放行」，语义相反。
+
 ### 7.3 Agent sandbox.json 声明
 
 ```json5
@@ -491,6 +505,14 @@ swapon, swapoff, reboot, poweroff              // 系统级操作
   }
 }
 ```
+
+> **落地校正（2026-09-22，S3）**：`extra_syscalls` 是**放宽**，包**不许**用它 ——
+> `sandbox_exec._build_seccomp()` 会**忽略 + 告警**（`sandbox.manifest_seccomp_allow_ignored`），
+> 与 `sandbox.json` 里写 `write` 路径同一口径。要放宽只能由运维在
+> `security.yaml: sandbox.seccomp_allow` 里做（且只在 `strict` 档生效）。
+> `extra_block` 可以加（只会更严）。`seccomp_profile` 只能**往严里收**（`PROFILE_RANK`），
+> 所以示例里的 `"L1_standard"` 在默认 `l1` 下等于没写。字段名实际是 `agent.json5` 的
+> `sandbox.seccomp_profile`（`sandbox.json` 是本文早期叫法）。
 
 ### 7.4 与现有三层体系集成
 

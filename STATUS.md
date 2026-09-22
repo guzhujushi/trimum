@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-22（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **Codex 模型切换复盘（provider 改正名 + launcher 两个真 bug + `/model` 不改 provider）** → **S2 施加点收口（Landlock，7 个 spawn 点，本机 A/B 无回归）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-22（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **Codex 模型切换复盘（provider 改正名 + launcher 两个真 bug + `/model` 不改 provider）** → **S2 施加点收口（Landlock，7 个 spawn 点，本机 A/B 无回归）** → **S3 seccomp 三档（`l1`/`strict`/`off` + 与 Landlock 两半联动，真机验收 35/0 全绿）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -13,10 +13,66 @@
 > 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
 > E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
 > 失败项均为既有宿主状态基线（Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网），与本轮各次开工前同名同数，无回归。
+> **S3 轮补（2026-09-22）**：`scripts/accept_s3.py` **35 PASS / 0 FAIL**（真机合成树 `/tmp/trm-s3`）；
+> `test_seccomp_exec.py` + `test_sandbox_exec.py` **97 passed / 2 skipped / 0 failed**；全量 **1645 passed / 16 failed / 4 skipped**
+> —— 这 16 条逐条归因见 `docs/SANDBOX-PLAN.md` §11.6（全是宿主 / 合成树产物，无 S3 回归）。
 
 ---
 
-## 2026-09-22 S2 施加点收口：内核层沙箱落地（✅ 代码已落地 + 本机 A/B 回归；真机验收待本人跑）
+## 2026-09-22 S3 seccomp 三档：内核层沙箱的另一半（✅ 代码已落地 + 本机回归 + **真机验收 35 passed / 0 failed**）
+
+**做了什么**：新增 `src/trimum_core/seccomp_exec.py`（733 行）—— 三档**档案**（纯计算 `build_plan`，
+resolver / lib / capability 全可注入 ⇒ 逻辑层在 Windows 上也能测）+ **施加**（`apply_current`，libseccomp 走 ctypes）
++ 能力探测 + 独立 CLI（`python -m trimum_core.seccomp_exec --status / --profile`）；
+`sandbox_exec` 把它接到 Landlock 那半旁边（**Landlock 先、seccomp 后**）。
+
+**三档**：
+
+| 档 | 内容 | 谁用 |
+|---|---|---|
+| `off` | 不施加（照旧 exec，**明确不施加**，不再退 126） | 排障 / 一键退 |
+| `l1`（**默认**） | `KERNEL_BLOCK` **31** 条危险内核面（内核模块 / eBPF / `ptrace` / `io_uring` / 命名空间 / 挂载 / 块设备 / I/O 端口 / keyring / `open_by_handle_at`） | 常规任务 |
+| `strict` | `l1` + `STRICT_BLOCK` 3 条 + **按地址族挡网络 socket**（`AF_INET`/`AF_INET6`/`AF_PACKET`/`AF_NETLINK`），**`AF_UNIX` 放行** | 未知 / 第三方 Agent |
+
+**关键口径**：
+
+- `TRIMUM_SECCOMP`（环境变量 > `security.yaml: sandbox.seccomp` > 默认 `l1`）；与 `TRIMUM_SANDBOX`（Landlock 那半）**互相独立**；
+- **施加顺序**：`apply_plan()` 里 **Landlock 先、seccomp 后** —— `seccomp_load()` **不可逆**，必须排在所有可能失败的步骤之后；
+- 只收紧不放宽：`agent.json5` 的 `seccomp_profile` 只能更严（`PROFILE_RANK`）；包的 `seccomp_allow` / `extra_syscalls`
+  **忽略 + 告警**（`sandbox.manifest_seccomp_allow_ignored`），包的 `seccomp_block` / `extra_block` 可以加；
+- `strict` + `seccomp_allow` 非空 ⇒ **白名单模式**（默认动作 `EPERM` + 69 条基线 + 声明放行），此时**不再叠黑名单规则**；
+- 审计：`sandbox` 与 `seccomp` **两个字段各记一份**（`off` / `unsupported` / `l1` / `strict` / `<档>:failed`）。
+
+**真机跑出来的四条（`docs/SANDBOX-PLAN.md` §11.3）**：
+
+| # | 事实 | 代价（不修会怎样） |
+|---|---|---|
+| 1 | 能力口径是 **API level**（`seccomp_api_get()` = 6），不是版本号 —— `seccomp_version()` 走 ctypes 读不出来（`restype` 试 `c_uint`/`c_int`/`c_ulong` 全是垃圾） | 能力判定失真 |
+| 2 | 判别器只能选「**不施加时一定会成功**」的 syscall（`ptrace(TRACEME)` / `io_uring_setup`）；`bpf` / `mount` / `setns` 非特权下**本来就失败** | 验收得出「拦住了」的**假结论** |
+| 3 | **`SCMP_CMP_EQ` 是 4，不是 0**（`enum scmp_compare` 从 `_SCMP_CMP_MIN = 0` 起算） | `seccomp_rule_add` 返回 `-EINVAL(22)`，「按地址族挡 socket」**整条失效** ⇒ `strict` 档**放行 `AF_INET`** |
+| 4 | Landlock 只接「目录 + 普通文件」 | 见下面 S2 小节的真机修正三条 |
+
+探针留在 `tmp/probe_cmp.py`（真机输出：`op=0 → rc=-22`、`op=1..7 → rc=0`、`sizeof(struct scmp_arg_cmp)=24`）。
+
+**回归**：
+
+| 树 | 结果 |
+|---|---|
+| 本机 Windows（`test_seccomp_exec` + `test_sandbox_exec`） | **86 passed / 13 skipped / 0 failed** |
+| 本机 Windows（全量 `tests`） | **1636 passed / 6 failed / 23 skipped**（6 条与 S2 轮逐条同名，与 S3 无关） |
+| 真机 `/tmp/trm-s3`（两个文件） | **97 passed / 2 skipped / 0 failed**（首跑 8 条失败 → 3 条 → 0 条） |
+| 真机 `/tmp/trm-s3`（全量） | **1645 passed / 16 failed / 4 skipped**（16 条全是宿主 / 合成树产物，归因表见 §11.6） |
+| 真机 `scripts/accept_s3.py` | **35 passed / 0 failed** |
+
+**提交**：`5041885`（本片：`seccomp_exec` + 两半联动 + 两个测试文件 + `accept_s3.py` + 三条真机修正）/ `@DOCS@`（文档回填：`SANDBOX-PLAN` §10.5.1+§11、`SECURITY-DEFENSE-PLAN` §7.1–§7.3 脚注、`TODO` / `STATUS`）。
+
+**未做**：`TaskRegistry.SHELL` 的派生点仍未收（S2 起挂着）；`trm status` / `doctor` 还没把沙箱状态摆到台面上；
+`/opt/trimum` 的整树同步待本人 `sudo`（`/tmp/sync_opt_tree.sh` + `/tmp/trimum-sync.tar` 已就位）；
+白名单模式的 `allow` 只给运维（`security.yaml`），不是包口子。
+
+---
+
+## 2026-09-22 S2 施加点收口：内核层沙箱落地（✅ 代码已落地 + 本机 A/B 回归 + **真机已验**）
 
 **做了什么**：新增 `src/trimum_core/sandbox_exec.py`（Layer K，923 行）—— Landlock 三个 syscall（444/445/446，
 全走 `ctypes`，零依赖、不要 root）+ `prctl(PR_SET_NO_NEW_PRIVS)`，把**全部 7 个 spawn 点**收到一处。
@@ -50,8 +106,19 @@ S2 工作区 **1576 passed / 6 failed / 16 skipped** → **+26 passed（新增�
 
 **提交**：`92ac32c`（本片：`sandbox_exec` + 7 个接入点 + 32 项测试 + 文档）/ `3276aab`（前一片尾巴：Codex 模型分工脚本与文档）。
 
-**未做**：真机 4 条命令对照（`docs/SANDBOX-PLAN.md` §10.6，本人跑）；`TaskRegistry.SHELL` 的派生点未收；
-`trm status` / `doctor` 还没把沙箱状态摆到台面上。
+**真机修正（2026-09-22 S3 轮补齐，见 `docs/SANDBOX-PLAN.md` §10.5.1）**：
+
+1. **Landlock 只接「目录 + 普通文件」** —— 字符设备（`/dev/null` `/dev/ptmx`…）给权限是 `EINVAL(22)`，
+   管道 / 指向管道的符号链接（`/dev/stdout`…）是 `EBADFD(77)`。修法：新增 `_landlockable()` 装置前过滤
+   （剩下的记 `sandbox.root_not_landlockable`，debug 级）+ `_file_read_rights()` / `_file_write_rights()`
+   （**普通文件不给目录级权限**）+ `EBADFD` **降级为 warning `sandbox.rule_skipped_not_a_file`**（不再 fail-closed）。
+2. **`readonly` 档工作区只读** —— 原先工作区同时进了写根，真机实测「`readonly` 档能写工作区」（**隔离失效**）；
+   已改 `plan_for`：readonly 时工作区只进读根。
+
+真机复跑（2026-09-22）：`test_sandbox_exec.py` + `test_seccomp_exec.py` **97 passed / 2 skipped / 0 failed**；
+原「真机 4 条命令对照」已并入 `scripts/accept_s3.py`（A / C / D 组）。
+
+**未做**：`TaskRegistry.SHELL` 的派生点未收；`trm status` / `doctor` 还没把沙箱状态摆到台面上。
 
 ---
 
