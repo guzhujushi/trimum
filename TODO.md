@@ -49,6 +49,30 @@
 
 **推送**：origin/server 之前停在 dad54c9，本地领先 1 个提交（a72dc5 RAG 调研）—— 2026-09-22 已手动推送完成（开代理 127.0.0.1:7993）；下轮开工前若看到落后仍先开代理再推。
 
+### 🤝 交接（2026-09-22，零散待办前三项完成）
+
+> 本轮完成 B4 / C1 / F2 三项，提交 `94ad3c6`，已推 `origin/server`。
+> 全量 **1660 passed / 0 failed / 23 skipped**（比 S3 轮 1642 多 18 条新增，零回归）。
+
+**已完成**：
+- **B4** `trm security revoke <token_id>`：前缀匹配 ≥4 位、幂等、RPC + CLI
+- **C1** `trm ask` Ctrl+C 中断处理：exit code 130
+- **F2** CLI↔daemon 集成测试（9 条）：health RPC/HTTP、status 在线/离线、security tokens+revoke RPC
+
+**下一项（按顺序）**：
+1. `trm ask` 墨迹/屏幕截图输入支持
+2. `trm memory import` / `export`（记忆迁移）
+3. CLI 别名自定义（`.trimumrc` 配置文件）
+4. 自动补全脚本（bash/zsh/fish）
+5. 确定性字段 confidence 分级（三级分流）
+6. API Key Manager
+
+**需要用户本人跑（`sudo`，agent 跑不了）**：
+- `sudo bash /tmp/sync_opt_tree.sh --dry-run` → 满意后 `--restart`（`--rollback` 整树还原）
+- `sudo bash /tmp/trm_env_install_real.sh`（root 真执行路径，幂等）
+
+**推送**：`origin/server` = `94ad3c6`（工作区干净）。下轮开工前若看到落后仍先开代理（`127.0.0.1:7993`）再推。
+
 ### 📚 穿插项：RAG 检索能力调研（2026-09-22，只调研不改代码）
 
 > 因 S4（systemd-run 资源边界）是完整实现片，超出 10 分钟窗口，本轮改做用户给的备选：RAG 调研。
