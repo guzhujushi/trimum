@@ -64,7 +64,7 @@ resolver / lib / capability 全可注入 ⇒ 逻辑层在 Windows 上也能测�
 | 真机 `/tmp/trm-s3`（全量） | **1645 passed / 16 failed / 4 skipped**（16 条全是宿主 / 合成树产物，归因表见 §11.6） |
 | 真机 `scripts/accept_s3.py` | **35 passed / 0 failed** |
 
-**提交**：`5041885`（本片：`seccomp_exec` + 两半联动 + 两个测试文件 + `accept_s3.py` + 三条真机修正）/ `@DOCS@`（文档回填：`SANDBOX-PLAN` §10.5.1+§11、`SECURITY-DEFENSE-PLAN` §7.1–§7.3 脚注、`TODO` / `STATUS`）。
+**提交**：`5041885`（本片：`seccomp_exec` + 两半联动 + 两个测试文件 + `accept_s3.py` + 三条真机修正）/ `45cd19f`（文档回填：`SANDBOX-PLAN` §10.5.1+§11、`SECURITY-DEFENSE-PLAN` §7.1–§7.3 脚注、`TODO` / `STATUS`）。
 
 **未做**：`TaskRegistry.SHELL` 的派生点仍未收（S2 起挂着）；`trm status` / `doctor` 还没把沙箱状态摆到台面上；
 `/opt/trimum` 的整树同步待本人 `sudo`（`/tmp/sync_opt_tree.sh` + `/tmp/trimum-sync.tar` 已就位）；
