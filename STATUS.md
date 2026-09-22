@@ -2595,6 +2595,6 @@ gitea、alist 可考虑挪真机（阿里云内存太紧）；myblog / frps / ng
 
 ### 顺带发现（已进 TODO）
 
-- 阿里云 `frps.toml` 的 `auth.token = trimum2026` 偏弱 ⇒ 建议轮换。
+- 阿里云 `frps.toml` 的 `auth.token` 偏弱，且**本轮误把该值明文写进 `TODO.md`/`STATUS.md` 并推到公开仓库**，已在新提交里抹掉字面值 ⇒ **按已泄露处理，尽快轮换**（需同步真机的 frpc 配置）。教训：写文档时任何真实密钥只能写「位置 + 形状」，绝不写值。
 - 本机 `:8080`（python，绑在 Tailscale IP）与 `:57322`（node）身份不明，非管理员拿不到命令行 ⇒ 待本人确认。
 - 真机可用 Clash/Mihomo 客户端（复用现有订阅）**取代** `with-proxy` 那条经笔记本的迂回路径。
