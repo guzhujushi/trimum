@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
+from . import sandbox_exec
 from .ecosystem import ESCALATING_FLAGS, EcosystemEntry, ImportRefused, assess_risk
 
 #: 探测 ``--help`` 的候选旗标（按顺序试）。
@@ -581,14 +582,19 @@ async def generic_executor(
         timeout = DEFAULT_TOOL_TIMEOUT
 
     cwd = request.get("cwd") or None
+    # Layer K：E4 的 CLI 广接入也是一条真实派生通道，同样收到 sandbox_exec
+    plan = sandbox_exec.plan_for(request, cwd=cwd)
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await sandbox_exec.spawn_exec(
+            plan,
             path,
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
         )
+    except sandbox_exec.SandboxError as exc:
+        return {**_err(f"[SANDBOX] {exc}", exit_code=126), "sandbox": plan.state}
     except OSError as exc:
         return _err(f"cannot start {binary}: {exc}")
 
@@ -609,8 +615,9 @@ async def generic_executor(
             "data": {"exit_code": exit_code},
             "error": err or f"{binary} exited with {exit_code}",
             "exit_code": exit_code,
+            "sandbox": plan.state,
         }
-    return _ok(output=out, data={"stderr": err, "exit_code": exit_code})
+    return {**_ok(output=out, data={"stderr": err, "exit_code": exit_code}), "sandbox": plan.state}
 
 
 __all__ = [

@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from . import sandbox_exec
 from .logger import get_logger
 
 log = get_logger("trimum_core.agent_launcher")
@@ -94,6 +95,8 @@ class LaunchResult:
     error: Optional[str] = None
     script: Optional[Path] = None
     log_path: Optional[Path] = None
+    # 内核层（Layer K）沙箱的实际状态（见 sandbox_exec.SandboxPlan.state）
+    sandbox: Optional[str] = None
 
 
 async def launch_agent(
@@ -106,10 +109,12 @@ async def launch_agent(
     extra_env: Optional[dict[str, str]] = None,
     startup_grace: float = STARTUP_GRACE_SECONDS,
 ) -> LaunchResult:
-    """真正把子 Agent 拉起来（``asyncio.create_subprocess_exec``）。
+    """真正把子 Agent 拉起来（``sandbox_exec.spawn_exec``，S2 后唯一入口）。
 
     没找到脚本 → 返回空结果，由调用方决定"只登记"还是报错。
     进程秒退 → 返回 ``error``（含 stderr 摘要），调用方标记 FAILED。
+    沙箱：子 Agent 拿的是「脚本目录当工作区」的档案；施加失败**不启动**（fail-closed），
+    错误里带 ``[SANDBOX]`` 语义的 ``sandbox denied``，同时记 ``sandbox`` 状态。
     """
     script = script or resolve_agent_script(agent_type, base)
     if script is None:
@@ -127,17 +132,33 @@ async def launch_agent(
     # 本次启动前的写入量：秒退时只读这一次的输出
     log_offset = log_path.stat().st_size if log_path.exists() else 0
 
+    plan = sandbox_exec.plan_for(cwd=str(script.parent))
     try:
         with open(log_path, "ab") as sink:
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                str(script),
-                agent_id,
-                cwd=str(script.parent),
-                env=build_agent_env(agent_id, agent_type, socket_path, extra_env),
-                stdout=sink,
-                stderr=sink,
-            )
+            try:
+                process = await sandbox_exec.spawn_exec(
+                    plan,
+                    sys.executable,
+                    str(script),
+                    agent_id,
+                    cwd=str(script.parent),
+                    env=build_agent_env(agent_id, agent_type, socket_path, extra_env),
+                    stdout=sink,
+                    stderr=sink,
+                )
+            except sandbox_exec.SandboxError as exc:
+                log.error(
+                    "agent_launcher.sandbox_denied",
+                    agent_type=agent_type,
+                    error=str(exc),
+                    sandbox=plan.state,
+                )
+                return LaunchResult(
+                    error=f"sandbox denied: {exc}",
+                    script=script,
+                    log_path=log_path,
+                    sandbox=plan.state,
+                )
     except Exception as e:
         log.warning("agent_launcher.spawn_failed", agent_type=agent_type, error=str(e))
         return LaunchResult(
@@ -160,6 +181,7 @@ async def launch_agent(
             error=f"agent exited immediately (code={process.returncode}){detail}",
             script=script,
             log_path=log_path,
+            sandbox=plan.state,
         )
 
     log.info(
@@ -169,9 +191,14 @@ async def launch_agent(
         pid=process.pid,
         script=str(script),
         log_path=str(log_path),
+        sandbox=plan.state,
     )
     return LaunchResult(
-        process=process, pid=process.pid, script=script, log_path=log_path
+        process=process,
+        pid=process.pid,
+        script=script,
+        log_path=log_path,
+        sandbox=plan.state,
     )
 
 

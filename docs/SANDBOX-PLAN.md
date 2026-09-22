@@ -345,7 +345,7 @@ sudo bash /tmp/check_sandbox_caps_root.sh             # 系统级能力核对（
 | 片 | 做什么 | 验收标准 |
 |---|---|---|
 | **S1 daemon 加固** | ✅ **脚本已就绪**（`scripts/harden_trmd_unit.sh`，dry-run 默认 / 备份 / 冒烟 / 失败自动回滚；口径见 §6.6）。**未 apply** —— 要 `sudo` 密码，等你自己跑 | daemon 重启后 `systemctl is-active` + `/proc/<pid>/status` 里 `NoNewPrivs: 1`/`Seccomp: 2` + `/proc/<pid>/mountinfo` 里 `/usr`/`/etc` 是 `ro` 而 `/home` 不是 + `mountinfo` 条目数 > 47 + `/run/trimum/trimum.sock` 存在 + 以服务用户跑 `trm status`/`trm tool list` 通过 + syscall 探针（`landlock_*`/`seccomp`/`prctl` 不被挡、`bpf`/`ptrace`/`mount` 被挡）。改前基线：`systemd-analyze security` = **9.2 UNSAFE** |
-| **S2 施加点收口** | 新增 `sandbox_exec`（Landlock + `PR_SET_NO_NEW_PRIVS`，ctypes）；6 个 spawn 点全部改走它；施加失败 **fail-closed** 并写审计 | 单元测试：允许路径可写 / 未允许路径 `EACCES` / 施加失败时命令**不执行**且审计有记录 / Windows 上报 `unsupported` 而非放行 |
+| **S2 施加点收口** | ✅ **已落地（2026-09-22）**：`sandbox_exec`（Landlock + `PR_SET_NO_NEW_PRIVS`，ctypes）；**7** 个 spawn 点全部改走它；施加失败 **fail-closed** 并写审计 —— 细节见 **§10** | 单元测试 26 通过 / 6 项 Linux 专属 skip（本机 Windows）；真机 4 条命令对照**待本人跑**（§10.6） |
 | **S3 seccomp 档位** | 用 `libseccomp`(ctypes) 实现 `readonly` / `workspace-write` / `strict` 三档；`agent.json5` 的 `sandbox` 段声明式接进来 | 三档各自的 syscall 白/黑名单测试（含 `bpf`/`mount`/`ptrace` 被拒）；档案缺省值 = `workspace-write`；被拒的 syscall 有审计留痕 |
 | **S4 子 Agent 资源边界** | 长驻子 Agent 走 `systemd-run --user` transient service（`MemoryMax`/`CPUQuota`/`TasksMax`/`NoNewPrivileges`/`SystemCallFilter`） | 子 Agent 超内存被 cgroup 杀掉且父会话收到明确失败；不装 systemd 的环境优雅降级（记 `unsupported`） |
 | **S5 可选档**（要裁决） | ① eBPF 监控的特权 helper；② Docker 隔离档（第三方包）；③ 放开非特权 userns | 各自单独裁决后再开 |
@@ -613,3 +613,112 @@ ImportError: cannot import name 'SecurityRuntime' from 'trimum_core.sec_executor
 > **第五轮（同日）**：这一步做成了两个可验收脚本（整树备份 / 导入预演 / 回滚三条护栏 + 失败自动回滚），
 > 前置门已实测能拦住旧部署树（`--check` 两条 FAIL）；第一次真机跑失败的两条真因与修法见 §9.3.9。
 > 顺序：① `sudo bash /tmp/sync_opt_tree.sh --restart` ② `sudo bash /tmp/switch_ipconly.sh --check` ③ 再 `--apply`。
+---
+
+## 10. S2 落地记录：施加点收口（2026-09-22 实做）
+
+> 状态：**代码已落地 + 本机全量回归通过**；真机验收待本人跑（清单见 §10.6）。
+
+### 10.1 交付物
+
+| 文件 | 内容 |
+|---|---|
+| `src/trimum_core/sandbox_exec.py`（新增，923 行） | Layer K 唯一派生入口：能力探测 / 档案解析 / 施加 / 审计状态回写 / 独立 CLI |
+| `tests/test_sandbox_exec.py`（新增，500 行） | 32 项：**26 通过**，6 项 Linux 真机专属（本机 Windows 上 skip） |
+| `models.py` | `ExecuteRequest.sandbox` / `ExecuteResponse.sandbox` / `AgentManifest.sandbox` / `AuditEvent.sandbox` |
+| `security_config.py` | `DEFAULT_SECURITY_YAML` 新增 `sandbox:` 段（`mode` / `fail_closed` / `read_paths` / `write_paths`）+ `get_sandbox_config()` |
+| `tool_dispatchers.py` | 4 个分发点（git / shell / process list / process kill）改走 `sandbox_exec` |
+| `agent_launcher.py` | `launch_agent` 改走 `sandbox_exec`；新增 `LaunchResult.sandbox`，施加失败**不启动**子 Agent |
+| `cli_adapter.py` | E4 广接入的 `generic_executor` 改走 `sandbox_exec` |
+| `tool_gateway.py` | dispatch 前先算一遍档案（兜底口径）+ 审计带 `sandbox` |
+| `tests/conftest.py` | autouse fixture 隔离进程级缓存（能力探测 / 配置 / 一次性告警） |
+
+### 10.2 收口后的派生点清单（6 → **7**）
+
+原设计（§6.1）列 6 个；实做时发现**第 7 个**：E4 的 CLI 广接入也是一条真实派生通道，同样必须收。
+
+| # | 位置 | 工具面 |
+|---|---|---|
+| 1 | `tool_dispatchers.py` → `GitDispatcher._run_git` | `git_*` |
+| 2 | `tool_dispatchers.py` → `ShellDispatcher.execute` | `shell` |
+| 3 | `tool_dispatchers.py` → `ProcessDispatcher._list_processes` | `process list` |
+| 4 | `tool_dispatchers.py` → `ProcessDispatcher._kill_process` | `process kill` |
+| 5 | `agent_launcher.py` → `launch_agent` | 子 Agent 进程 |
+| 6 | `cli_adapter.py` → `generic_executor` | `trm tool import-cli` 装出来的 CLI 工具 |
+| 7 | `tool_gateway.py`（dispatch 之前） | **不是派生点**：算一遍档案，给「file 型工具把 request 重建成新对象」那条路兜底 |
+
+**唯一真正的派生入口 = `sandbox_exec._spawn_process`**（`spawn_exec` / `spawn_shell` 是它唯一的上层）。
+`tests/test_sandbox_exec.py::TestNoBypass` 用静态断言钉住：`tool_dispatchers.py` / `agent_launcher.py` 里
+不许再出现 `create_subprocess*`，且 `sandbox_exec.plan_for(` 的出现次数被锁死（绕过就会红）。
+
+### 10.3 状态词表（审计口径的唯一来源）
+
+| `state` | 含义 | 命令跑不跑 |
+|---|---|---|
+| `off` | 开关关了（`TRIMUM_SANDBOX=off`） | 跑 |
+| `unsupported` | 平台（Windows）或内核不支持 —— **如实报，不假装已隔离**（§6.5） | 跑 |
+| `readonly` / `workspace-write` / `strict` | 施加成功 | 跑 |
+| `<mode>:failed` | 档案不可用 / 施加失败 | **不跑**（fail-closed） |
+| `<mode>:degraded` | 同上，但 `fail_closed=false` 降级放行（记 ERROR + 状态如实标 degraded） | 跑 |
+
+回写路径：`request.sandbox`（对象 setattr / dict 键两条路都写）、`response.sandbox`、
+`AuditEvent.sandbox` + `details["sandbox"]`、`LaunchResult.sandbox`；被拒的统一出口是
+`tool_dispatchers._sandbox_denied()`（错误串带 `[SANDBOX]` 前缀，`exit_code=126`）。
+
+### 10.4 两档运行时开关（systemd drop-in 一行生效，删掉即回滚）
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `TRIMUM_SANDBOX` | `workspace-write` | 档位：`readonly` / `workspace-write` / `strict` / `off` |
+| `TRIMUM_SANDBOX_FAIL_CLOSED` | `true` | 施加失败是否拒绝执行 |
+
+优先级：内置默认 < `security.yaml` 的 `sandbox:` 段 < **环境变量**（一键退的抓手）。
+`agent.json5` 的 `sandbox` 段**只能往严里收**（`_MODE_RANK`），且 manifest 里的 `write` 一律**忽略并告警**
+—— 包不许给自己加可写面（否则一个 `trm install` 来的包就能把自己放出来）。
+
+### 10.5 三档档案与已知取舍
+
+- `readonly`：`/` 只读 + 工作区只读 + `TRIMUM_HOME` 可写；**连 `/tmp` 都不放开**（审阅类任务不该有落盘面）。
+- `workspace-write`（默认）：`/` 只读 + 工作区可写 + `/tmp` `/var/tmp` + `TRIMUM_HOME` + RPC socket 目录 + 设备面。
+- `strict`：读白名单（`/usr` `/bin` `/sbin` `/lib` `/lib64` `/etc` `/proc` `/sys` `/dev`）+ 只放开写路径。
+- 系统面永不当工作区（`/` `/etc` `/usr` `/var` `/run` `/dev` …），否则「cwd 落在 `/` 就等于整个根可写」。
+- 已知取舍（**写进文档，不装作没有**）：
+  1. `preexec_fn` 在多线程进程里是 CPython 文档点名「不保证安全」的用法。缓解：会失败的判定（模式合法性 /
+     平台与内核能力 / 路径是否存在）**全在父进程做完**，子进程里只剩 syscall；ctypes 结构体也父进程预建。
+  2. kernel 6.8 = Landlock **ABI 4**：没有 `FS_IOCTL_DEV`（设备 ioctl 不设限），也没有 socket / signal 的抽象
+     → **不承诺 socket 维度隔离**（含 trimum 自己的 RPC socket）。ABI 2 起加 `REFER`、3 起加 `TRUNCATE`、
+     5 起加 `IOCTL_DEV`，规则位按探测到的 ABI 生成。
+  3. `~/.cache` / `~/.local` **默认不放**（持久化面）：pip / npm 要写就在这里显式加 `sandbox.write_paths`。
+  4. 设备面（`/dev/null` 等）与 `/tmp` 是「不放开就什么都跑不了」的最小放开，**不是安全边界**。
+- 平台降级：非 Linux **提前返回** `unsupported`，不解析 Linux 形状的默认路径集（否则算出来一堆不存在的路径），
+  且**只告警一次** —— 每次派生都喊会把日志喊爆。
+
+### 10.6 真机验收清单（待本人跑；不需要 `sudo`、不需要网络）
+
+```bash
+cd /home/guzhujushi/trimum
+python -m trimum_core.sandbox_exec --status                                  # 期望 capability: supported abi=4
+mkdir -p /tmp/ws && cd /tmp/ws
+python -m trimum_core.sandbox_exec --profile workspace-write --cwd /tmp/ws -- sh -c 'echo hi > a.txt'    # 期望成功
+python -m trimum_core.sandbox_exec --profile workspace-write --cwd /tmp/ws -- sh -c 'cat $HOME/.bashrc'  # 期望 EACCES
+python -m trimum_core.sandbox_exec --profile readonly        --cwd /tmp/ws -- sh -c 'echo x > b.txt'     # 期望 EACCES
+python -m pytest tests/test_sandbox_exec.py -q                               # 6 项 Linux 专属应从 skip 变 pass
+```
+
+### 10.7 本机回归基线（Windows，A/B 对照）
+
+| 树 | 结果 |
+|---|---|
+| `261f452`（HEAD，`git archive` 导出的干净树） | **1548 passed / 6 failed / 12 skipped**（其中 2 条 skip 是导出树缺 `tmp/research/awesome-README.md` 快照，属基线噪声） |
+| S2 工作区 | **1576 passed / 6 failed / 16 skipped** → **+26 passed（新增用例）、+6 skipped（Linux 专属）**，差额精确等于新用例数 |
+
+6 条 failed 与 S2 **无关**，两棵树逐条一致：2 条宿主基线（`test_depends_on` 的 `PATH` 里没有 `python.exe`；
+`test_llm_integration` 连不上 `models.sjtu.edu.cn`）+ 4 条宿主 `~/.trimum` 污染（`--fakehome` 后 41/41 全绿）。
+归因脚本 `tmp/cleanrun.py`：剥掉宿主常驻的 21 个环境变量（`TRIMUM_LLM_*` / `AGENT_LLM_*` / `GROQ_API_KEY` /
+`163_EMAIL` / …）再跑。
+
+### 10.8 未纳入本轮 & 下一步
+
+- `TaskRegistry.SHELL` 派生的子进程（走 `spawn_exec`）**本轮未收**（TODO 只列 6+1 个点）—— 列为下一小步。
+- S3 seccomp 三档 / S4 子 Agent 走 systemd transient / S5 可选档（helper / Docker / bwrap profile）**不变**。
+- `trm status` / `trm doctor` 还没把沙箱状态摆到台面上（眼下只能从审计与日志看）—— 可随后补。

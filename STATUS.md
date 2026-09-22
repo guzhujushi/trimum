@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-21（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-22（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **Codex 模型切换复盘（provider 改正名 + launcher 两个真 bug + `/model` 不改 provider）** → **S2 施加点收口（Landlock，7 个 spawn 点，本机 A/B 无回归）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -16,6 +16,81 @@
 
 ---
 
+## 2026-09-22 S2 施加点收口：内核层沙箱落地（✅ 代码已落地 + 本机 A/B 回归；真机验收待本人跑）
+
+**做了什么**：新增 `src/trimum_core/sandbox_exec.py`（Layer K，923 行）—— Landlock 三个 syscall（444/445/446，
+全走 `ctypes`，零依赖、不要 root）+ `prctl(PR_SET_NO_NEW_PRIVS)`，把**全部 7 个 spawn 点**收到一处。
+
+**7 个点**（原设计列 6 个；实做时发现 E4 的 CLI 广接入 `cli_adapter.generic_executor` 也是一条真实派生通道）：
+
+| # | 位置 | 面 |
+|---|---|---|
+| 1–4 | `tool_dispatchers.py`：`GitDispatcher._run_git` / `ShellDispatcher.execute` / `ProcessDispatcher._list_processes` / `._kill_process` | `git_*` / `shell` / `process list` / `process kill` |
+| 5 | `agent_launcher.py:launch_agent` | 子 Agent（施加失败**不启动**） |
+| 6 | `cli_adapter.py:generic_executor` | `trm tool import-cli` 装出来的 CLI 工具 |
+| 7 | `tool_gateway.py`（dispatch 之前） | 不算派生点：给「file 型工具把 request 重建成新对象」那条路兜底 |
+
+`TestNoBypass` 用静态断言钉住：这两个文件里不许再出现 `create_subprocess*`，且 `plan_for(` 的调用次数被锁死。
+
+**关键口径**：
+
+- 施加在**子进程**（`preexec_fn` 钩子）—— daemon 自己不施（Landlock 只能收紧、不可逆，见 `docs/SANDBOX-PLAN.md` §6.1）；
+- 状态词表（审计唯一口径）：`off` / `unsupported` / `readonly|workspace-write|strict` /
+  `<mode>:failed`（**命令不跑**，fail-closed）/ `<mode>:degraded`（关掉 fail-closed 才降级放行，且记 ERROR）；
+- 两档开关：`TRIMUM_SANDBOX`（默认 `workspace-write`）+ `TRIMUM_SANDBOX_FAIL_CLOSED`（默认 `true`），
+  drop-in 写一行即生效、删掉即回滚；优先级 = 内置默认 < `security.yaml` < 环境变量；
+- 放宽方向锁死：`agent.json5` 只能往严里收（`_MODE_RANK`），manifest 里的 `write` **一律忽略 + 告警**；
+- Windows → 如实报 `unsupported`（不假装已隔离、也不静默放行），且**只告警一次**。
+
+**回归（本机 Windows，两棵树 A/B 对照）**：HEAD `261f452` 干净树 **1548 passed / 6 failed / 12 skipped**；
+S2 工作区 **1576 passed / 6 failed / 16 skipped** → **+26 passed（新增用例）/ +6 skipped（Linux 专属）**，
+差额精确等于新用例数。**6 条失败两棵树逐条一致**，与 S2 无关：2 条宿主基线（`PATH` 缺 `python.exe`、
+连不上 `models.sjtu.edu.cn`）+ 4 条宿主 `~/.trimum` 污染（`--fakehome` 后 41/41 全绿）。
+归因脚本 `tmp/cleanrun.py`（剥掉宿主常驻的 21 个脏环境变量再跑）。
+
+**未做**：真机 4 条命令对照（`docs/SANDBOX-PLAN.md` §10.6，本人跑）；`TaskRegistry.SHELL` 的派生点未收；
+`trm status` / `doctor` 还没把沙箱状态摆到台面上。
+
+---
+
+## 2026-09-22 Codex 模型切换复盘：为什么「qwen3.8-27b / sjtu-jiaowoisan 都不行」（✅ 已修 + 已复验）
+
+**症状**：09-22 早上连开 6 个会话，用 `/model` 依次填 `qwen3.6-27b` → `qwen3.8-27b` → `sjtu-jiaowoisan`，
+全部得到同一条报错：`The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed <填的那个>`。
+
+**两个根因（都有 rollout 证据，不是猜的）**：
+
+| # | 根因 | 证据 |
+|---|---|---|
+| A | `/model` 只改**模型名**，**不改 provider**；会话的 provider 始终是 `deepseek-api` | 6 条 rollout 的 `session_meta.model_provider` 全是 `deepseek-api`，而 `turn_context.model` = 你填的值；报错文本来自 DeepSeek |
+| B | `sjtu-jiaowusuan` 是 **provider 名，不是模型名**，写进 `/model` 必然失败 | 同上：`...but you passed sjtu-jiaowoisan` |
+
+⇒ **换 provider 只能重开进程**：`.\scripts\codex-model.ps1 qwen` / `codex -p qwen`（`-p ds` 同理）。另加两个**免记路径**的入口：`scripts\codex-qwen.cmd` / `scripts\codex-ds.cmd`（纯 ASCII 批处理转发，
+内部带 `-NoProfile -ExecutionPolicy Bypass`，双击可跑；交互式与 `-Exec` 两种都实测过）。
+`qwen3.8-27b` 只存在于 `provider = sjtu-jiaowusuan` 上，单独改模型名没有意义。
+
+**顺带查出 `scripts/codex-model.ps1` 的两个真 bug（昨天落下的，本机已复现）**：
+
+| bug | 现象 | 修法 |
+|---|---|---|
+| `.env` 候选顺序错 | 候选表把 `~/.trimum/.env`（只剩 `OPENAI_*` 的老 stub）排在仓库 `.env` **之前**，旧实现**只取第一个存在的候选** ⇒ `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY` 一个都没注入（父进程环境里也没有时）；`codex -p qwen` 只得到 `ERROR: Missing environment variable: JIAOWOISAN_API_KEY.` | 低→高优先级依次加载 + 仓库根 `.env` 权威 + 进程原有变量优先；并在起 codex **之前**校验 profile → provider → `env_key` 是否存在，缺了直接给人话报错 |
+| PS 5.1 把 codex 的 stderr 当致命错误 | 原生命令写 stderr 的每行被包成 ErrorRecord，配上脚本里的 `$ErrorActionPreference = 'Stop'` ⇒ codex 一启动（总会写 `Reading additional input from stdin...`）就抛错中止，`-Exec` 路径其实一次都没跑成 | 在 `& $codex` 前把偏好放回 `Continue`；成败看 `$LASTEXITCODE` |
+
+**署名改正**：Codex provider `sjtu-jiaowoisan` → **`sjtu-jiaowusuan`**（2026-09-22 定名：先误改为 `jiaowosuan`，经确认最终用 `jiaowusuan`）；
+改 `~/.codex/config.toml` 2 处 + `~/.codex/qwen.config.toml` 1 处，
+备份 `~/.codex/backups/config.toml.20260922-072948.bak` / `qwen.config.toml.20260922-072948.bak`。
+
+**复验（2026-09-22 07:33，`codex-cli 0.152.0`）**：先**清空进程里的 key**，
+再跑 `.\scripts\codex-model.ps1 qwen -Exec "只回复两个字：可以"` →
+`provider: sjtu-jiaowusuan` / 回复「可以」/ 退出码 **0**，且脚本自报「注入 33 个变量，.env: ~/.trimum/.env ; D:\trimum\.env」
+⇒ key 确实是从仓库 `.env` 注入的。
+（昨天那份证据取自 **0.151.0-alpha.7.2**；本机已升 **0.152.0**，profile 机制未变，已重新验证。）
+
+**未做（留给裁决）**：环境变量 `JIAOWOISAN_API_KEY` 本轮**没改名** —— 它同时被 `src/`（`llm_router.py` /
+`doctor.py` / `health.py` / `security_config.py`）、`tests/`、`scripts/llm_env_dropin.sh` 和真机 drop-in 引用，
+盲改会让真机 daemon 起不来。选项见 `TODO.md` 的「🤖 Codex 模型分工」小节。
+
+---
 ## 2026-09-21 Codex 侧模型分工与「限流降级」调研（✅ 已落地；提交 `de619c5`）
 
 **需求**：简单任务用交我算免费的 Qwen、难任务用 deepseek-flash，并希望「像 trimum 一样限流后自动降级」。
@@ -30,7 +105,7 @@ models-manager 内部回落 / session 模型不可用回落四种，与限流无
 |---|---|
 | `wire_api` 只接受 `responses` | 故意写 `bogus` → 报错 "unknown variant `bogus`, expected `responses`" |
 | 交我算 `/api/v1/responses` 可用 | 最小请求 **HTTP 200**（`object:"response"`、`model:"qwen3.8-27b"`、24 tokens；响应带 `_litellm_tpm_reserved_model` ⇒ 后端是 LiteLLM 网关） |
-| `codex exec -p qwen` 端到端通 | `model: qwen3.8-27b` / `provider: sjtu-jiaowoisan` / 回复「可以」/ 退出码 **0**（跑两次） |
+| `codex exec -p qwen` 端到端通 | `model: qwen3.8-27b` / `provider: sjtu-jiaowusuan` / 回复「可以」/ 退出码 **0**（跑两次） |
 | profile 不能写在 `config.toml` | 0.151 要求独立文件 `~/.codex/<name>.config.toml`（`sjtu-min.config.toml` 是先例） |
 | 次数才是瓶颈 | 一次 `codex exec`（2 字回复）用掉 **14~15k tokens**；交我算 10 次/分 ⇒ 长会话必撞 429，**Qwen 只适合单次小任务** |
 
@@ -117,7 +192,8 @@ daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`�
 `env_file.reset_loaded()`、health 用例显式屏蔽 `.env`。全量回到 **1554 passed / 2 failed / 10 skipped**，
 两条失败仍是宿主基线（PATH 缺 `python.exe` + 本机沙箱断网），与本轮改动无关。
 
-**下一步**：S2 施加点收口（Landlock + `PR_SET_NO_NEW_PRIVS`，6 个 spawn 点，fail-closed + 审计）。
+**下一步**：① **真机跑 S2 的 4 条命令对照**（`docs/SANDBOX-PLAN.md` §10.6，不需要 `sudo`，**本人跑**）；
+② 【DS】S3 seccomp 三档（`readonly` / `workspace-write` / `strict`）。
 LLM 侧剩余待办：跨进程限流 / token 维度计量 / `Retry-After` / `trm doctor` 显示路由表 / 成本账本（见 `docs/LLM-ROUTING.md` §8）。
 
 ---

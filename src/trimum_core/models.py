@@ -437,6 +437,10 @@ class ExecuteRequest(BaseModel):
     raw_command: str = ""
     # 是否跳过 cwd jail 检查（默认不跳过）
     skip_cwd_check: bool = False
+    # 内核层（Layer K）沙箱的**实际**状态，由 ``sandbox_exec`` 回写：
+    # off | unsupported | readonly | workspace-write | strict
+    # | <mode>:failed（施加失败、命令没跑）| <mode>:degraded（关了 fail-closed、降级跑）
+    sandbox: str = ""
 
 
 class ExecuteResponse(BaseModel):
@@ -450,6 +454,9 @@ class ExecuteResponse(BaseModel):
     risk: RiskLevel = RiskLevel.LOW
     action: Action = Action.AUTO
     reason: str = ""
+    # 内核层（Layer K）沙箱的**实际**状态（sandbox_exec 回写）：
+    # 空 = 本次没有派生进程（内核层不适用，比如 file_* 工具）
+    sandbox: str = ""
 
 
 class AgentStatus(str, Enum):
@@ -585,6 +592,11 @@ class AgentManifest(BaseModel):
     system_prompt: str = ""
     # 工作目录限制（cwd jail）
     work_dir: str = ""  # 允许访问的工作目录根路径，空=不限制
+    # agent.json5 的 sandbox 段（S2；设计见 docs/SANDBOX-PLAN.md §6.2）：
+    #   {mode: readonly|strict, read: [...]}
+    # 只能比全局档位**更严**，不能放宽；写路径一律不认（包带来的 manifest 不许
+    # 给自己加可写面 —— 放宽只能由运维在 security.yaml 的 write_paths 里做）
+    sandbox: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -646,6 +658,8 @@ class AuditEvent(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
     timestamp: float = 0.0
     source_type: str = ""
+    # 内核层（Layer K）沙箱状态（sandbox_exec 回写；见 ExecuteRequest.sandbox）
+    sandbox: str = ""
     # JIT 授权相关
     jit_token: str = ""
     jit_expires_at: float = 0.0

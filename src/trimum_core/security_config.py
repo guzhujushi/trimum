@@ -75,6 +75,19 @@ llm:
     api_key_env: "DEEPSEEK_API_KEY"
     base_url: "https://api.deepseek.com/v1"
 
+# 内核层沙箱（Layer K，S2；设计见 docs/SANDBOX-PLAN.md §6.2）
+# mode: readonly（"/" 只读，连 /tmp 都不放开）/ workspace-write（默认："/" 只读 +
+#       工作区可写 + /tmp）/ strict（只读白名单 + 只放开写路径）/ off（关掉内核层）
+# 运行时覆盖：TRIMUM_SANDBOX=<mode>（systemd drop-in 写一行即生效，删掉即回滚）
+sandbox:
+  mode: "workspace-write"
+  # 施加失败是否拒绝执行（fail-closed）。关掉＝降级运行，审计里记 <mode>:degraded
+  fail_closed: true
+  # 默认已含：工作区(cwd) / /tmp / /var/tmp / <TRIMUM_HOME> / RPC socket 目录 / 设备面。
+  # 需要 pip / npm 之类写 ~/.cache 的，在这里显式加（那属于持久化面，默认故意不放）
+  read_paths: []
+  write_paths: []
+
 # Agent 级别的安全等级覆盖（可选）
 agents:
   # download-manager:
@@ -167,6 +180,12 @@ class SecurityConfig:
         if not self._loaded:
             self.load()
         return self._raw.get("llm", {})
+
+    def get_sandbox_config(self) -> dict:
+        """获取内核层沙箱（Layer K）配置段 ``sandbox:``。"""
+        if not self._loaded:
+            self.load()
+        return self._raw.get("sandbox", {}) or {}
 
     def get_agent_security(self, agent_name: str) -> AgentSecurityConfig:
         """获取 Agent 的完整安全配置。"""

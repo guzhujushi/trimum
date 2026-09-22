@@ -30,6 +30,7 @@ from .models import (
     Action,
     ToolType,
 )
+from . import sandbox_exec
 from .logger import get_logger
 from .mcp_bridge import split_name
 
@@ -46,6 +47,7 @@ def _ok(
     execution_id: str = "",
     risk: RiskLevel = RiskLevel.LOW,
     action: Action = Action.AUTO,
+    sandbox: str = "",
 ) -> ExecuteResponse:
     return ExecuteResponse(
         execution_id=execution_id or uuid.uuid4().hex[:12],
@@ -54,6 +56,7 @@ def _ok(
         exit_code=0,
         risk=risk,
         action=action,
+        sandbox=sandbox,
     )
 
 
@@ -63,6 +66,7 @@ def _err(
     risk: RiskLevel = RiskLevel.MEDIUM,
     action: Action = Action.DENY,
     execution_id: str = "",
+    sandbox: str = "",
 ) -> ExecuteResponse:
     return ExecuteResponse(
         execution_id=execution_id or uuid.uuid4().hex[:12],
@@ -72,7 +76,17 @@ def _err(
         risk=risk,
         action=action,
         reason=error,
+        sandbox=sandbox,
     )
+
+
+def _sandbox_denied(exc: "sandbox_exec.SandboxError") -> ExecuteResponse:
+    """沙箱没能施加 → **命令不执行**（fail-closed 的统一出口，派生点共用）。
+
+    错误串带 ``[SANDBOX]`` 前缀，调用方与审计一眼能分清「被策略拦」与「没装上沙箱」。
+    """
+    logger.error("dispatcher.sandbox_denied", error=str(exc), state=exc.state)
+    return _err(f"[SANDBOX] {exc}", exit_code=126, sandbox=exc.state)
 
 
 def _check_file_path(path: str) -> tuple[bool, str]:
@@ -328,7 +342,7 @@ class FileDispatcher:
 
 
 class GitDispatcher:
-    """Git operations via asyncio.create_subprocess_exec."""
+    """Git operations via ``sandbox_exec``（Layer K 施加点，不再直接 spawn）。"""
 
     GIT_CMD = "git"
 
@@ -367,7 +381,7 @@ class GitDispatcher:
         else:
             git_args = args
 
-        return await self._run_git(git_args, cwd, request.timeout_seconds)
+        return await self._run_git(git_args, cwd, request.timeout_seconds, request)
 
     @staticmethod
     def _tool_to_git_subcommand(tool: ToolType) -> Optional[str]:
@@ -383,28 +397,40 @@ class GitDispatcher:
         }
         return mapping.get(tool)
 
-    async def _run_git(self, git_args: list[str], cwd: Optional[str], timeout: float = 30.0) -> ExecuteResponse:
+    async def _run_git(
+        self,
+        git_args: list[str],
+        cwd: Optional[str],
+        timeout: float = 30.0,
+        request: Optional[ExecuteRequest] = None,
+    ) -> ExecuteResponse:
         cmd = [self.GIT_CMD] + git_args
+        plan = sandbox_exec.plan_for(request, cwd=cwd)
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=cwd,
+            proc = await sandbox_exec.spawn_exec(
+                plan, *cmd, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE, cwd=cwd,
             )
-            try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return _err(f"Git timed out after {timeout}s", exit_code=-1)
-            out = stdout.decode("utf-8", errors="replace") if stdout else ""
-            err = stderr.decode("utf-8", errors="replace") if stderr else ""
-            rc = proc.returncode or 0
-            if rc == 0:
-                return _ok(out.strip())
-            return _err(err or f"Git failed (rc={rc})", exit_code=rc)
+        except sandbox_exec.SandboxError as exc:
+            return _sandbox_denied(exc)
         except FileNotFoundError:
-            return _err("Git not found", exit_code=127)
+            return _err("Git not found", exit_code=127, sandbox=plan.state)
         except Exception as e:
-            return _err(f"Git error: {e}", exit_code=-1)
+            return _err(f"Git error: {e}", exit_code=-1, sandbox=plan.state)
+
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return _err(f"Git timed out after {timeout}s", exit_code=-1, sandbox=plan.state)
+
+        out = stdout.decode("utf-8", errors="replace") if stdout else ""
+        err = stderr.decode("utf-8", errors="replace") if stderr else ""
+        rc = proc.returncode or 0
+        if rc == 0:
+            return _ok(out.strip(), sandbox=plan.state)
+        return _err(err or f"Git failed (rc={rc})", exit_code=rc, sandbox=plan.state)
 
 
 # ===================================================================
@@ -478,67 +504,81 @@ class HttpDispatcher:
 
 
 class ProcessDispatcher:
-    """Process operations via os + asyncio.create_subprocess_exec."""
+    """Process operations via os + ``sandbox_exec``（Layer K 施加点）。"""
 
     async def execute(self, request: ExecuteRequest) -> ExecuteResponse:
         tool = request.tool
         args = request.args
 
         if tool == ToolType.PROCESS_LIST:
-            return await self._list_processes()
+            return await self._list_processes(request)
         if tool == ToolType.PROCESS_KILL:
-            return await self._kill_process(args)
+            return await self._kill_process(args, request)
         if tool == ToolType.PROCESS:
             if args and args[0] == "list":
-                return await self._list_processes()
+                return await self._list_processes(request)
             if args and args[0] == "kill":
-                return await self._kill_process(args[1:])
+                return await self._kill_process(args[1:], request)
             return _err("Usage: process list | process kill <pid>")
         return _err(f"Unsupported process tool: {tool}", risk=RiskLevel.LOW)
 
-    async def _list_processes(self) -> ExecuteResponse:
+    async def _list_processes(self, request: Optional[ExecuteRequest] = None) -> ExecuteResponse:
         """List running processes via `ps aux` on Linux or `tasklist` on Windows."""
-        if platform.system() == "Windows":
-            proc = await asyncio.create_subprocess_exec(
-                "tasklist", "/FO", "CSV", "/NH",
+        verb = ["tasklist", "/FO", "CSV", "/NH"] if platform.system() == "Windows" else ["ps", "aux"]
+        plan = sandbox_exec.plan_for(request)
+        try:
+            proc = await sandbox_exec.spawn_exec(
+                plan, *verb,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                "ps", "aux",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            )
+        except sandbox_exec.SandboxError as exc:
+            return _sandbox_denied(exc)
         stdout, stderr = await proc.communicate()
         out = stdout.decode("utf-8", errors="replace") if stdout else ""
         err = stderr.decode("utf-8", errors="replace") if stderr else ""
         if proc.returncode == 0:
-            return _ok(out.strip()[:5000])
-        return _err(err or f"ps/tasklist failed (rc={proc.returncode})", exit_code=proc.returncode or 1)
+            return _ok(out.strip()[:5000], sandbox=plan.state)
+        return _err(
+            err or f"ps/tasklist failed (rc={proc.returncode})",
+            exit_code=proc.returncode or 1,
+            sandbox=plan.state,
+        )
 
-    async def _kill_process(self, args: list[str]) -> ExecuteResponse:
+    async def _kill_process(
+        self,
+        args: list[str],
+        request: Optional[ExecuteRequest] = None,
+    ) -> ExecuteResponse:
         if not args:
             return _err("Usage: process kill <pid> [signal=15]")
         pid = args[0]
         signal_num = args[1] if len(args) > 1 else ("9" if platform.system() == "Windows" else "15")
+        verb = (
+            ["taskkill", "/F" if signal_num == "9" else "", "/PID", pid]
+            if platform.system() == "Windows"
+            else ["kill", f"-{signal_num}", pid]
+        )
+        plan = sandbox_exec.plan_for(request)
         try:
-            if platform.system() == "Windows":
-                proc = await asyncio.create_subprocess_exec(
-                    "taskkill", "/F" if signal_num == "9" else "", "/PID", pid,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-            else:
-                proc = await asyncio.create_subprocess_exec(
-                    "kill", f"-{signal_num}", pid,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
+            proc = await sandbox_exec.spawn_exec(
+                plan, *verb,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+        except sandbox_exec.SandboxError as exc:
+            return _sandbox_denied(exc)
+        try:
             stdout, stderr = await proc.communicate()
             out = stdout.decode("utf-8", errors="replace") if stdout else ""
             err = stderr.decode("utf-8", errors="replace") if stderr else ""
             if proc.returncode == 0:
-                return _ok(f"Killed PID {pid}")
-            return _err(err or f"Kill failed (rc={proc.returncode})", exit_code=proc.returncode or 1)
+                return _ok(f"Killed PID {pid}", sandbox=plan.state)
+            return _err(
+                err or f"Kill failed (rc={proc.returncode})",
+                exit_code=proc.returncode or 1,
+                sandbox=plan.state,
+            )
         except Exception as e:
-            return _err(f"Kill error: {e}")
+            return _err(f"Kill error: {e}", sandbox=plan.state)
 
 
 # ===================================================================
@@ -624,53 +664,68 @@ class SystemDispatcher:
 
 
 class ShellDispatcher:
-    """Shell command execution via asyncio.create_subprocess_shell.
+    """Shell command execution via ``sandbox_exec.spawn_shell``.
 
     This is the original _run_subprocess behavior, preserved for
     legitimate shell use (pipes, compound commands).
+
+    内核层沙箱施在**子进程**上（preexec 钩子），daemon 自己不进沙箱 —— Landlock
+    只能收紧、不可逆，施在自己身上就退不下来了（docs/SANDBOX-PLAN.md §6.1）。
     """
 
     async def execute(self, request: ExecuteRequest) -> ExecuteResponse:
-        """Execute a shell command via subprocess shell=True."""
+        """Execute a shell command via a sandboxed subprocess shell=True."""
         cmd_str = " ".join(request.args) if isinstance(request.args, list) else request.args
         cmd_str = cmd_str.strip()
         if not cmd_str:
             return _err("Empty command")
 
+        plan = sandbox_exec.plan_for(request)
         try:
-            proc = await asyncio.create_subprocess_shell(
+            proc = await sandbox_exec.spawn_shell(
+                plan,
                 cmd_str,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=request.env if request.env else None,
                 cwd=request.cwd,
             )
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=request.timeout_seconds
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return _err(f"Shell command timed out after {request.timeout_seconds}s", exit_code=-1)
-
-            out = stdout.decode("utf-8", errors="replace") if stdout else ""
-            err = stderr.decode("utf-8", errors="replace") if stderr else ""
-            rc = proc.returncode or 0
-
-            return ExecuteResponse(
-                execution_id=uuid.uuid4().hex[:12],
-                status="allowed" if rc == 0 else "error",
-                output=out,
-                error=err,
-                exit_code=rc,
-                risk=RiskLevel.MEDIUM,
-                action=Action.AUTO,
-            )
+        except sandbox_exec.SandboxError as exc:
+            return _sandbox_denied(exc)
         except FileNotFoundError:
-            return _err("Command not found", exit_code=127)
+            return _err("Command not found", exit_code=127, sandbox=plan.state)
         except Exception as e:
-            return _err(f"Shell error: {e}", exit_code=-1)
+            return _err(f"Shell error: {e}", exit_code=-1, sandbox=plan.state)
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=request.timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return _err(
+                f"Shell command timed out after {request.timeout_seconds}s",
+                exit_code=-1,
+                sandbox=plan.state,
+            )
+        except Exception as e:
+            return _err(f"Shell error: {e}", exit_code=-1, sandbox=plan.state)
+
+        out = stdout.decode("utf-8", errors="replace") if stdout else ""
+        err = stderr.decode("utf-8", errors="replace") if stderr else ""
+        rc = proc.returncode or 0
+
+        return ExecuteResponse(
+            execution_id=uuid.uuid4().hex[:12],
+            status="allowed" if rc == 0 else "error",
+            output=out,
+            error=err,
+            exit_code=rc,
+            risk=RiskLevel.MEDIUM,
+            action=Action.AUTO,
+            sandbox=plan.state,
+        )
 
 
 # ===================================================================

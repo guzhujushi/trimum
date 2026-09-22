@@ -51,6 +51,7 @@ from .security_config import SecurityConfig
 from .file_trust import FileTrustTracker
 from .security_rule import SecurityRule, DecisionResult
 from . import capability
+from . import sandbox_exec
 from .audit_store import AuditStore
 from .tool_dispatchers import DispatcherRegistry
 from .tool_file_loader import is_enabled, scan_tools
@@ -873,6 +874,18 @@ class ToolGateway:
         status = "allowed" if action == Action.AUTO else "confirmed"
 
         # ------------------------------------------------------------------
+        # Layer K：内核层沙箱档案（先算一遍，给审计留一份兜底口径）
+        # ------------------------------------------------------------------
+        # 真正的**施加**发生在派生点（``sandbox_exec.spawn_*``，Layer K 的执行者），
+        # 这里只把状态写回 ``request.sandbox``：file 型工具会把 request 重新构造一遍
+        # （``request.model_dump()`` → ``ExecuteRequest(**request)``），它那条路
+        # 靠 ``response.sandbox`` 回传；两条路合起来审计才有沙箱口径。
+        try:
+            sandbox_exec.plan_for(request)
+        except Exception as exc:  # noqa: BLE001 —— 档案解析失败不该拦住执行
+            logger.warning("gateway.sandbox_plan_failed", error=str(exc))
+
+        # ------------------------------------------------------------------
         # File-based tool execution (優先走 main.py)
         # ------------------------------------------------------------------
         if tool_def:
@@ -1577,6 +1590,7 @@ class ToolGateway:
             return
 
         cmd_str = " ".join(request.args) if request.args else request.raw_command
+        sandbox_state = response.sandbox or getattr(request, "sandbox", "") or ""
 
         event = AuditEvent(
             event_id=uuid.uuid4().hex[:12],
@@ -1593,9 +1607,11 @@ class ToolGateway:
                 "exit_code": response.exit_code,
                 "cwd": request.cwd or "",
                 "source_type": request.source_type.value if hasattr(request.source_type, 'value') else str(request.source_type),
+                "sandbox": sandbox_state,
             },
             timestamp=time.time(),
             source_type=str(request.source_type) if hasattr(request.source_type, 'value') else str(request.source_type),
+            sandbox=sandbox_state,
             jit_token=request.jit_token or "",
             jit_expires_at=0.0,
             jit_granted_by="",

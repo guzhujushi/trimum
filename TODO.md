@@ -11,13 +11,13 @@
 ### 一句话现状
 
 **P0 安全响应链、E5 分发渠道、穿插三项都已收口**；沙箱是 E7 的前置片，**六条裁决 + 三条新裁决全部已定**。
-**沙箱前置片已经真落地**：S1 系统级加固已在真机 `apply` 并在位；**TCP 已收口** —— `trm status` →
+**沙箱前置片已经真落地**：S1 系统级加固已在真机 `apply` 并在位；**S2 施加点收口已落地**（Landlock，7 个 spawn 点，2026-09-22）；**TCP 已收口** —— `trm status` →
 `source: rpc` + `http: disabled` + `ipc socket: ok`，全机 8321 无监听（23:07 复核：pid 27582 / uptime 27m）。
 **LLM 的「一处策略」也在生产跑着**：`trimum_core.llm_router`（选谁 / 等多久 / 失败换谁）+ `env_file` 加载器 +
 `/opt/trimum/.env` 经 systemd `EnvironmentFile` 注入，冒烟走 `primary:qwen3.8-27b@models.sjtu.edu.cn`。
 **Codex 侧的模型分工同时落地**：`qwen` / `ds` 两个 profile + `scripts/codex-model.ps1`（任务级切换已能跑，
 `docs/CODEX-MODEL-POLICY.md`）；**尚未做**的是「Codex 限流后自动降级」—— Codex 自身没有这个开关，只能加本地路由代理（待裁决）。
-下一步：**S2 施加点收口【DS】**，见下面「下一步」一节。
+下一步：**S3 seccomp 三档【DS】**（S2 已于 2026-09-22 收口，只剩真机 4 条命令对照），见下面「下一步」一节。
 
 ### 本次（2026-09-21）完成
 
@@ -100,9 +100,11 @@ sudo bash /tmp/switch_ipconly.sh --apply    # 写 20-http-off.conf → 重启 �
 **同步后的行为变化（用户需知）**：命令面升到 **78 条**；8 条取证剧本已被武装（随 L4 事件自动触发；处置类不武装、
 自动触发不派子 Agent）。
 
-**紧接着的下一项 = S2 施加点收口**（Landlock + `PR_SET_NO_NEW_PRIVS`）：新增 `sandbox_exec`，把 6 个 spawn 点
-（`tool_dispatchers.py` 5 处 + `agent_launcher.py:132`）全部收口，施加失败 **fail-closed** + 审计留痕。
-真机前提已具备（Landlock 非特权可用、跨 `execve` 继承、systemd 黑名单未误伤 444/445/446）。
+**紧接着的下一项 = S2 施加点收口 —— ✅ 已收口（2026-09-22）**：新增 `sandbox_exec`（Landlock + `PR_SET_NO_NEW_PRIVS`），
+把 **7** 个 spawn 点全部收到一处（`tool_dispatchers.py` 的 git/shell/process list/process kill + `agent_launcher.py`
++ E4 广接入的 `cli_adapter.py`，外加 gateway 的兜底口径），施加失败 **fail-closed** + 审计留痕。
+新增用例 32 项（26 通过 / 6 项 Linux 专属 skip）；本机 A/B 回归无新增失败。细节见 `docs/SANDBOX-PLAN.md` **§10**，
+**只剩真机 4 条命令对照**（§10.6，本人跑）。下一片 = S3 seccomp 三档。
 
 ### ✅ LLM 模型路由与节流（2026-09-21 第五轮：已落地；设计/分工见 `docs/LLM-ROUTING.md`）
 
@@ -195,8 +197,13 @@ daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`�
 
 **怎么读标签**：`【Qwen】` = 单次小任务，够用且免费（`scripts/codex-model.ps1 qwen`）；
 `【DS】` = 上 deepseek-flash（`scripts/codex-model.ps1 ds`）。
+**不会敲命令行就用这两个**：`scripts\codex-qwen.cmd`（Qwen）/ `scripts\codex-ds.cmd`（DS）—— 双击或直接敲路径即可。
 **为什么不能全靠 Qwen**：交我算 10 次/分，而 Codex 每次调用 ~15k tokens、一个 turn 十几次调用 ⇒ 几秒就撞 429；
 且 Codex **没有**「限流自动降级」的开关（证据 / 替代方案：`docs/CODEX-MODEL-POLICY.md`）。
+**⚠ 2026-09-22 复盘（踩过的坑）**：`/model` 只改**模型名**、**不改 provider** —— 在 `ds` 会话里填
+`qwen3.8-27b`，甚至填 provider 名 `sjtu-jiaowusuan`，都会被 DeepSeek 以
+`The supported API model names are deepseek-flash, deepseek-v4-pro` 拒掉。
+**换 provider 必须重开进程**：`.\scripts\codex-model.ps1 qwen`（launcher 的两个真 bug 已修，见 STATUS）。
 
 | 任务类型 | 模型 | 怎么跑 |
 |---|---|---|
@@ -207,6 +214,10 @@ daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`�
 | 并发与竞态（socket / IPC / 跨进程限流 / 文件锁） | 【DS】 | 同上 |
 | 真机切换与回滚、破坏性操作前的设计与复核 | 【DS】 | 同上 |
 | 架构裁决、跨模块重构、长链路调试 | 【DS】 | 同上 |
+
+**待裁决（2026-09-22）**：环境变量 `JIAOWOISAN_API_KEY` 要不要跟着 provider 一起改名（`JIAOWOSUAN_API_KEY`）？
+它会牵动 `src/`（`llm_router.py` / `doctor.py` / `health.py` / `security_config.py`）、`tests/`、
+`scripts/llm_env_dropin.sh` 与真机 drop-in —— 建议**只加新名、保留旧名作别名**，别让真机 daemon 起不来。
 
 ### 收尾核对与接下来（2026-09-21 第七轮；S2 的设计口径见上「紧接着的下一项」）
 
@@ -228,8 +239,9 @@ daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`�
 
 **接下来（按优先级；模型标签见上「🤖 Codex 模型分工」）**：
 
-1. 【DS】**S2 施加点收口**：新增 `sandbox_exec`（Landlock + `PR_SET_NO_NEW_PRIVS`），收 6 个 spawn 点
-   （`tool_dispatchers.py:641/389/502/507/525/530` + `agent_launcher.py:132`），**fail-closed + 审计**；真机前提已具备。
+1. 【DS】**S2 施加点收口 —— ✅ 已完成（2026-09-22）**：`sandbox_exec`（Landlock + `PR_SET_NO_NEW_PRIVS`）收 **7** 个 spawn 点
+   （`tool_dispatchers.py` 的 git/shell/process list/process kill + `agent_launcher.py:132` + `cli_adapter.py:585`，gateway 兜底口径）；
+   **fail-closed + 审计**已落地；本机回归 1576 passed / 6 failed（6 条与 S2 无关，A/B 已证）；**真机 4 条命令对照待本人跑**（`docs/SANDBOX-PLAN.md` §10.6）。
 2. 【DS】S3 seccomp 三档 → S4 子 Agent systemd transient → S5 可选档（helper / Docker / bwrap profile）。
 3. **【待裁决】**把 Codex 接到本地路由上（免费的 Qwen 撞 429 时自动降 `deepseek-flash`）：
    `docs/CODEX-MODEL-POLICY.md` §4（B1 LiteLLM / B2 `trm codex-proxy` 复用 `llm_router`，**推荐 B2**）。
@@ -278,6 +290,8 @@ Landlock / Seccomp 沙箱、记忆桥（`memory_bridge` + `experience_learner` �
   但仍建议给这台机配一条 NOPASSWD 白名单。
 - Codex 的 profile 依赖**进程环境**里的 `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`（二者都不是持久化的用户环境变量）
   → 用 `scripts/codex-model.ps1` 起就不会漏；直接敲 `codex -p qwen` 前先确认 key 在环境里。
+  **2026-09-22 修**：该脚本原先会挑到 `~/.trimum/.env`（只剩 `OPENAI_*` 的老 stub）而漏掉真 key，
+  已改为「仓库 `.env` 权威 + 起 codex 前校验 `env_key`」；建议把 `~/.trimum/.env` 这个老 stub 删掉，免得再被误选。
 
 ### 真机
 
