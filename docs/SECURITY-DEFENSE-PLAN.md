@@ -511,6 +511,14 @@ ToolGateway.execute()
 
 > 基于 Linux Landlock LSM 的文件系统权限限制。
 > 与 Seccomp 互补：Seccomp 管"能调什么系统调用"，Landlock 管"能读写执行哪些路径"。
+>
+> **落地情况（2026-09-22，S2）**：本节设计已在**代码层**落地 —— 实现是 `src/trimum_core/sandbox_exec.py`
+> （Landlock 三个 syscall + `PR_SET_NO_NEW_PRIVS`，纯 ctypes、零依赖），口径与验收见 `docs/SANDBOX-PLAN.md` §10。
+> 与本文原始设计的三处差异（以 §10 为准）：
+> ① 档位名称改为 `readonly` / `workspace-write`（默认）/ `strict`；
+> ② 施加点**不在** daemon 的 PolicyEngine 里判路径，而在**子进程**里用 `preexec` 钩子施内核规则
+>    （Landlock 只能收紧、不可逆，施在 daemon 自己身上就退不下来了）；`PolicyEngine.check_landlock()` 保持原样；
+> ③ `agent.json5` 只接受**收紧**（可声明只读路径），写面一律不放给包，放宽只能由运维在 `security.yaml` 里做。
 
 ### 8.1 权限等级
 
