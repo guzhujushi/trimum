@@ -1539,6 +1539,28 @@ class ToolGateway:
         """便捷方法：颁发 JIT 令牌（同 issue_jit_token）。"""
         return self.issue_jit_token(agent_id, tool, command, granted_by, ttl)
 
+    def revoke_jit_token(self, token_str: str) -> bool:
+        """撤销一个 JIT 授权令牌。
+
+        幂等：令牌不存在或已撤销都返回 False，不抛异常。
+        被撤销的令牌立即失效（_verify_jit_token 找不到即拒）。
+
+        Args:
+            token_str: 完整令牌字符串（tokens 列表只露前 8 位，
+                        CLI 侧做前缀匹配）。
+
+        Returns:
+            True 表示真的删了一个还在的令牌。
+        """
+        if not hasattr(self, "_jit_tokens"):
+            self._jit_tokens: dict[str, JITToken] = {}
+        if token_str in self._jit_tokens:
+            del self._jit_tokens[token_str]
+            logger.info("gateway.jit_revoked", token=token_str[:8] + "...")
+            return True
+        return False
+
+
     # ------------------------------------------------------------------
     # 凭证脱敏
     # ------------------------------------------------------------------

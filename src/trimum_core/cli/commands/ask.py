@@ -96,7 +96,12 @@ def handler(args: argparse.Namespace) -> int:
                 except Exception:
                     pass
 
-    results, usage = asyncio.run(_execute())
+    try:
+        results, usage = asyncio.run(_execute())
+    except KeyboardInterrupt:
+        print()
+        print(" interrupted by user")
+        return 130
 
     data = {
         "agent": args.agent,

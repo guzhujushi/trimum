@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-22（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **Codex 模型切换复盘（provider 改正名 + launcher 两个真 bug + `/model` 不改 provider）** → **S2 施加点收口（Landlock，7 个 spawn 点，本机 A/B 无回归）** → **S3 seccomp 三档（`l1`/`strict`/`off` + 与 Landlock 两半联动，真机验收 35/0 全绿）** → **S3 收尾交接：起手三步验证（本机 1642/0/23 + 真机 1645/16/4 + accept_s3 35/0，真机合成树重建）** → **RAG 检索能力调研（docs/RAG-RESEARCH.md\uff0c不改代码）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-22（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **Codex 模型切换复盘（provider 改正名 + launcher 两个真 bug + `/model` 不改 provider）** → **S2 施加点收口（Landlock，7 个 spawn 点，本机 A/B 无回归）** → **S3 seccomp 三档（`l1`/`strict`/`off` + 与 Landlock 两半联动，真机验收 35/0 全绿）** → **S3 收尾交接：起手三步验证（本机 1642/0/23 + 真机 1645/16/4 + accept_s3 35/0，真机合成树重建）** → **RAG 检索能力调研（docs/RAG-RESEARCH.md\uff0c不改代码）** → **B4 security revoke + C1 ask Ctrl+C + F2 CLI-daemon 集成测试（18 条新增测试，全量 1660/0/23）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -115,6 +115,33 @@ resolver / lib / capability 全可注入 ⇒ 逻辑层在 Windows 上也能测�
 
 ---
 
+
+## 2026-09-22 零散待办前三项：B4 security revoke + C1 ask Ctrl+C + F2 CLI-daemon 集成测试（✅ 全部完成）
+
+> 按 `TODO.md` 顺序做前三项。全量回归 **1660 passed / 0 failed / 23 skipped**（比上轮 1642 多 18 条新增，零回归）。
+
+### B4：`trm security revoke <token_id>`
+
+- `ToolGateway.revoke_jit_token(token_str)`：幂等，找不到返回 False；找到则删除 + 审计日志。
+- `api_server._revoke_jit_token(state, token_str)`：前缀匹配（≥4 位），多个匹配报模糊；新 RPC `security.revoke`。
+- CLI `security.py`：`revoke` 子命令（走 RPC，失败返回 exit 1 + 错误信息）。
+
+### C1：`trm ask` Ctrl+C 中断处理
+
+- `ask.py handler`：`asyncio.run(_execute())` 外包 `try/except KeyboardInterrupt`，捕到则打印 `interrupted by user` + 返回 exit code 130（壱明 SIGINT 口径）。
+
+### F2：CLI↔daemon 集成测试（`test_integration.py::TestCliDaemonIntegration`，9 条）
+
+- 真 `create_app` + `TestClient` + 真 `IpcHandler` RPC router（不起真 daemon 进程）。
+- 覆盖：health RPC/HTTP 合同一致、`trm status` 在线/离线、`security tokens` RPC（措蔽 + 过滤）、`security revoke` RPC（完整串 / 前缀 / 不存在）。
+
+### 测试新增（18 条）
+
+| 文件 | 新增 |
+|---|---|
+| `tests/test_cli.py` | 1（`security revoke` 解析） |
+| `tests/test_cli_commands.py` | 8（revoke CLI ×4 + Ctrl+C ×1 + gateway ×3） |
+| `tests/test_integration.py` | 9（F2 集成全部） |
 
 ## 2026-09-22 S2 施加点收口：内核层沙箱落地（✅ 代码已落地 + 本机 A/B 回归 + **真机已验**）
 

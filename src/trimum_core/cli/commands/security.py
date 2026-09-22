@@ -27,6 +27,15 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
     tokens_parser = nested.add_parser("tokens", help="list valid JIT tokens")
     tokens_parser.set_defaults(handler=handler)
 
+    revoke_parser = nested.add_parser(
+        "revoke", help="revoke a valid JIT token (full or prefix >= 4 chars)"
+    )
+    revoke_parser.add_argument(
+        "token_id",
+        help="full token string or a unique prefix (>= 4 chars)",
+    )
+    revoke_parser.set_defaults(handler=handler)
+
     learning_parser = nested.add_parser(
         "learning", help="show policy learning status (profiles + learned rules)"
     )
@@ -47,7 +56,7 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
 
 def _show_help(args: argparse.Namespace) -> int:
     del args
-    print("usage: trm security {status,allow-once,tokens,learning,learn} ...")
+    print("usage: trm security {status,allow-once,tokens,revoke,learning,learn} ...")
     return 0
 
 
@@ -114,6 +123,16 @@ def _tokens_data() -> dict:
     return {"tokens": []}
 
 
+def _revoke_data(token_id: str) -> dict:
+    from trimum_core.config import Config
+
+    config = Config()
+    result = rpc_call(config, "security.revoke", {"token_id": token_id})
+    if isinstance(result, dict):
+        return result
+    return {"revoked": False, "error": "daemon unreachable (is trmd running?)"}
+
+
 def _learning_data() -> dict:
     from trimum_core.config import Config
 
@@ -169,6 +188,10 @@ def handler(args: argparse.Namespace) -> int:
             return fail(f"failed to issue token: {exc}")
     elif command == "tokens":
         data = _tokens_data()
+    elif command == "revoke":
+        data = _revoke_data(args.token_id)
+        if not data.get("revoked"):
+            return fail(data.get("error", "revocation failed"))
     elif command == "learning":
         data = _learning_data()
     elif command == "learn":

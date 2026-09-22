@@ -34,6 +34,7 @@ class TestBuildParser:
             ["memory", "list"],
             ["memory", "set", "key", "value"],
             ["security", "allow-once", "agent-1", "--ttl", "60"],
+            ["security", "revoke", "abcd1234"],
             ["daemon", "start"],
             ["log", "tail"],
             ["log", "--audit"],

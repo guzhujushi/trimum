@@ -308,6 +308,28 @@ def _jit_tokens(state: AppState, agent_id: str = "") -> list[dict]:
     return result
 
 
+def _revoke_jit_token(state: AppState, token_str: str) -> dict:
+    """撤销一个 JIT 令牌（按完整串或前缀匹配）。
+
+    前缀至少 4 位，避免误伤；匹配到多个也拒绝（要更精确的前缀）。
+    """
+    if not token_str or len(token_str) < 4:
+        return {"revoked": False, "error": "token_id too short (need >= 4 chars)"}
+
+    prefix = token_str.rstrip(".")
+    tokens = getattr(state.tool_gateway, "_jit_tokens", {})
+    matches = [full for full in tokens if full.startswith(prefix)]
+    if not matches:
+        return {"revoked": False, "error": "token not found (expired, used, or already revoked)"}
+    if len(matches) > 1:
+        return {
+            "revoked": False,
+            "error": f"ambiguous prefix: {len(matches)} tokens match",
+        }
+    state.tool_gateway.revoke_jit_token(matches[0])
+    return {"revoked": True, "token": matches[0][:8] + "..."}
+
+
 def _learning_status(state: AppState) -> dict:
     """学习状态：全局摘要 + 各 Agent 画像。"""
     engine = state.learning_engine
@@ -444,6 +466,10 @@ def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
     @router.register("security.learn")
     async def rpc_security_learn(params: dict) -> dict:
         return _run_learning(state, bool(params.get("inject")))
+
+    @router.register("security.revoke")
+    async def rpc_security_revoke(params: dict) -> dict:
+        return _revoke_jit_token(state, str(params.get("token_id", "")))
 
 
 def create_app(config: Config) -> FastAPI:

@@ -969,3 +969,189 @@ async def test_gateway_security_rule_with_rule_allows():
         req = ExecuteRequest(tool=ToolType.SHELL, args=["echo safe"],)
         resp = await gw.execute(req)
         assert resp.status in ("allowed", "success")
+
+
+# ================================================================
+# F2 CLI <-> daemon integration tests
+# ================================================================
+# End-to-end: real FastAPI app (TestClient) + real IpcHandler RPC router.
+# No daemon process is spawned; the CLI functions call the same
+# rpc_call / http_json helpers that would hit a live daemon.
+
+
+class _DaemonFixture:
+    """Build a create_app + IpcHandler pair wired to a temp socket path."""
+
+    def __init__(self, tmp_path):
+        from trimum_core.api_server import create_app, _register_ipc_routes
+        from trimum_core.config import Config
+        from trimum_core.ipc_handler import IpcHandler
+        from fastapi.testclient import TestClient
+
+        config = Config()
+        config.set("logging.file", str(tmp_path / "logs" / "trimum.log"))
+        config.set("context.db_path", str(tmp_path / "context.db"))
+        config.set("core.socket_path", str(tmp_path / "trimum.sock"))
+        config.set("policy.path", str(tmp_path / "policy.yaml"))
+
+        self.config = config
+        self.app = create_app(config)
+        self.state = self.app.state.trimum
+        self.client = TestClient(self.app)
+
+        self.ipc = IpcHandler(socket_path=str(tmp_path / "trimum.sock"))
+        _register_ipc_routes(self.ipc, self.state)
+
+
+class TestCliDaemonIntegration:
+    """F2: CLI functions hitting a real daemon (in-process)."""
+
+    def test_health_rpc(self, tmp_path):
+        """trm health (RPC path) returns version and pid."""
+        import asyncio
+
+        fx = _DaemonFixture(tmp_path)
+        payload = asyncio.run(fx.ipc.router.get("health")({}))
+
+        assert "version" in payload
+        assert "pid" in payload
+        assert payload["pid"] == os.getpid()
+
+    def test_health_http(self, tmp_path):
+        """trm health (HTTP path) returns the same contract."""
+        fx = _DaemonFixture(tmp_path)
+        body = fx.client.get("/health").json()
+
+        assert "version" in body
+        assert "pid" in body
+        assert body["pid"] == os.getpid()
+
+    def test_status_data_running_via_rpc(self, tmp_path, monkeypatch):
+        """trm status assembles data when daemon is reachable via RPC."""
+        import asyncio
+        from trimum_core.cli.commands import status as status_mod
+
+        fx = _DaemonFixture(tmp_path)
+
+        def fake_rpc(config, method, params=None, timeout=2.0):
+            if method == "health":
+                return asyncio.run(fx.ipc.router.get("health")({}))
+            if method == "agents.list":
+                return {"agents": [{"id": "trm-exec"}]}
+            return None
+
+        # get_daemon_status internally calls rpc_call(config, "health"),
+        # but the config it passes is its own, not fx.config.
+        # Monkeypatch it directly so the health payload comes from our fixture.
+        def fake_daemon_status(config):
+            health = asyncio.run(fx.ipc.router.get("health")({}))
+            return {"running": True, "source": "rpc", "health": health}
+
+        monkeypatch.setattr(status_mod, "get_daemon_status", fake_daemon_status)
+        monkeypatch.setattr(status_mod, "http_json", lambda *a, **k: None)
+        monkeypatch.setattr(status_mod, "_find_daemon_pid", lambda cfg, health: os.getpid())
+        monkeypatch.setattr(status_mod, "_process_info", lambda pid: {"pid": pid, "uptime_seconds": 1.0})
+        monkeypatch.setattr(status_mod, "_system_snapshot", lambda: {"cpu_percent": 5.0})
+        monkeypatch.setattr(status_mod, "_agent_count", lambda config: 1)
+
+        data = status_mod.get_status_data(fx.config)
+
+        assert data["running"] is True
+        assert data["source"] == "rpc"
+        assert data["version"] is not None
+        assert data["agents"] == 1
+
+    def test_status_data_offline(self, monkeypatch):
+        """trm status reports offline when no daemon is reachable."""
+        from trimum_core.cli.commands import status as status_mod
+
+        class _FakeCfg:
+            host = "127.0.0.1"
+            port = 8321
+            socket_path = "/tmp/trimum-test.sock"
+
+        monkeypatch.setattr(
+            status_mod,
+            "get_daemon_status",
+            lambda config: {"running": False, "source": None, "health": None},
+        )
+        monkeypatch.setattr(status_mod, "_find_daemon_pid", lambda *a: None)
+        monkeypatch.setattr(status_mod, "_system_snapshot", lambda: {})
+
+        data = status_mod.get_status_data(_FakeCfg())
+
+        assert data["running"] is False
+        assert data["pid"] is None
+        assert data["agents"] is None
+
+    def test_security_tokens_rpc(self, tmp_path):
+        """trm security tokens (RPC) lists live tokens with masked secrets."""
+        import asyncio
+        from trimum_core.models import ToolType
+
+        fx = _DaemonFixture(tmp_path)
+        token = fx.state.tool_gateway.issue_jit_token(
+            agent_id="a1", tool=ToolType.SHELL, command="ls", ttl=300
+        )
+
+        payload = asyncio.run(fx.ipc.router.get("security.tokens")({}))
+
+        assert len(payload["tokens"]) == 1
+        assert payload["tokens"][0]["agent_id"] == "a1"
+        assert payload["tokens"][0]["token"] == token.token[:8] + "..."
+        assert payload["tokens"][0]["command"] == "ls"
+
+    def test_security_revoke_rpc(self, tmp_path):
+        """trm security revoke (RPC) removes a live token."""
+        import asyncio
+        from trimum_core.models import ToolType
+
+        fx = _DaemonFixture(tmp_path)
+        token = fx.state.tool_gateway.issue_jit_token(
+            agent_id="a1", tool=ToolType.SHELL, command="ls", ttl=300
+        )
+        full = token.token
+
+        payload = asyncio.run(fx.ipc.router.get("security.revoke")({"token_id": full}))
+        assert payload["revoked"] is True
+
+        # token is gone
+        payload = asyncio.run(fx.ipc.router.get("security.tokens")({}))
+        assert len(payload["tokens"]) == 0
+
+    def test_security_revoke_prefix_match(self, tmp_path):
+        """trm security revoke matches by prefix (>= 4 chars)."""
+        import asyncio
+        from trimum_core.models import ToolType
+
+        fx = _DaemonFixture(tmp_path)
+        token = fx.state.tool_gateway.issue_jit_token(
+            agent_id="a1", tool=ToolType.SHELL, command="ls", ttl=300
+        )
+
+        prefix = token.token[:6]
+        payload = asyncio.run(fx.ipc.router.get("security.revoke")({"token_id": prefix}))
+        assert payload["revoked"] is True
+
+    def test_security_revoke_not_found(self, tmp_path):
+        """trm security revoke returns error for unknown token."""
+        import asyncio
+
+        fx = _DaemonFixture(tmp_path)
+        payload = asyncio.run(fx.ipc.router.get("security.revoke")({"token_id": "nonexistent1234"}))
+        assert payload["revoked"] is False
+        assert "not found" in payload["error"]
+
+    def test_health_http_and_rpc_agree(self, tmp_path):
+        """HTTP /health and RPC health return identical keys and values (minus uptime)."""
+        import asyncio
+
+        fx = _DaemonFixture(tmp_path)
+
+        http_body = fx.client.get("/health").json()
+        rpc_body = asyncio.run(fx.ipc.router.get("health")({}))
+
+        assert set(http_body.keys()) == set(rpc_body.keys())
+        http_stripped = {k: v for k, v in http_body.items() if k != "uptime"}
+        rpc_stripped = {k: v for k, v in rpc_body.items() if k != "uptime"}
+        assert http_stripped == rpc_stripped

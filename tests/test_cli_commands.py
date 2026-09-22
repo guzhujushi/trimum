@@ -262,3 +262,133 @@ class TestSecurityLearningCommand:
 
         assert json.loads(capsys.readouterr().out)["injected"] == 3
         assert seen == {"method": "security.learn", "params": {"inject": True}}
+
+
+class TestSecurityRevokeCommand:
+    """`trm security revoke` — JIT token revocation via RPC."""
+
+    def test_revoke_via_rpc_success(self, monkeypatch, capsys):
+        from trimum_core.cli.commands import security as security_mod
+
+        seen = {}
+
+        def fake_rpc(config, method, params=None, timeout=2.0):
+            seen["method"] = method
+            seen["params"] = params
+            return {"revoked": True, "token": "abcd1234..."}
+
+        monkeypatch.setattr(security_mod, "rpc_call", fake_rpc)
+
+        assert main(["--json", "security", "revoke", "abcd1234"]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["revoked"] is True
+        assert seen == {
+            "method": "security.revoke",
+            "params": {"token_id": "abcd1234"},
+        }
+
+    def test_revoke_not_found_fails(self, monkeypatch, capsys):
+        from trimum_core.cli.commands import security as security_mod
+
+        monkeypatch.setattr(
+            security_mod,
+            "rpc_call",
+            lambda config, method, params=None, timeout=2.0: {
+                "revoked": False,
+                "error": "token not found (expired, used, or already revoked)",
+            },
+        )
+
+        assert main(["--json", "security", "revoke", "zzzz9999"]) == 1
+        err = capsys.readouterr().err
+        assert "token not found" in err
+
+    def test_revoke_ambiguous_prefix_fails(self, monkeypatch, capsys):
+        from trimum_core.cli.commands import security as security_mod
+
+        monkeypatch.setattr(
+            security_mod,
+            "rpc_call",
+            lambda config, method, params=None, timeout=2.0: {
+                "revoked": False,
+                "error": "ambiguous prefix: 2 tokens match",
+            },
+        )
+
+        assert main(["--json", "security", "revoke", "abcd"]) == 1
+        err = capsys.readouterr().err
+        assert "ambiguous" in err
+
+    def test_revoke_daemon_down_fails(self, monkeypatch, capsys):
+        from trimum_core.cli.commands import security as security_mod
+
+        monkeypatch.setattr(security_mod, "rpc_call", lambda *a, **k: None)
+
+        assert main(["--json", "security", "revoke", "abcd1234"]) == 1
+        err = capsys.readouterr().err
+        assert "daemon unreachable" in err
+
+
+class TestAskCtrlC:
+    """`trm ask` — KeyboardInterrupt handling returns exit code 130."""
+
+    def test_ask_keyboard_interrupt_returns_130(self, monkeypatch, capsys):
+        from trimum_core.cli.commands import ask as ask_mod
+
+        class _FakeArgs:
+            prompt = "do something"
+            agent = "trm-exec"
+            interactive = False
+            json = False
+            quiet = False
+
+        def _explode(*args, **kwargs):
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr(ask_mod, "asyncio", _FakeAsyncio(_explode))
+
+        rc = ask_mod.handler(_FakeArgs())
+        assert rc == 130
+        assert "interrupted" in capsys.readouterr().out
+
+
+class _FakeAsyncio:
+    """Minimal stand-in for the asyncio module (only .run is used)."""
+
+    def __init__(self, run_fn):
+        self._run_fn = run_fn
+
+    def run(self, *args, **kwargs):
+        return self._run_fn(*args, **kwargs)
+
+
+class TestGatewayRevokeJitToken:
+    """ToolGateway.revoke_jit_token — unit level."""
+
+    def test_revoke_existing_token(self):
+        from trimum_core.tool_gateway import ToolGateway
+        from trimum_core.models import ToolType
+
+        gw = ToolGateway()
+        token = gw.issue_jit_token("agent-1", ToolType.SHELL, "ls")
+        full = token.token
+
+        assert gw.revoke_jit_token(full) is True
+        assert full not in gw._jit_tokens
+
+    def test_revoke_nonexistent_token_returns_false(self):
+        from trimum_core.tool_gateway import ToolGateway
+        from trimum_core.models import ToolType
+
+        gw = ToolGateway()
+        token = gw.issue_jit_token("agent-1", ToolType.SHELL, "ls")
+        full = token.token
+
+        assert gw.revoke_jit_token(full) is True
+        assert gw.revoke_jit_token(full) is False  # idempotent
+
+    def test_revoke_empty_gateway_returns_false(self):
+        from trimum_core.tool_gateway import ToolGateway
+
+        gw = ToolGateway()
+        assert gw.revoke_jit_token("nonexistent") is False

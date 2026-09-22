@@ -34,7 +34,7 @@
    （基线 **1645 / 16 / 4**，16 条全是宿主 / 合成树产物）；
    真机验收 `... scripts/accept_s3.py` → 期望 **35 passed / 0 failed**。
    （`PYTHONPATH` 必须指**导入根** `.../src`；指到 `.../src/trimum_core` 会让子进程静默退回旧树。）
-3. **下一项**：**S4 子 Agent 资源边界**（`systemd-run --user` transient）；自己的档位 `.\scripts\codex-model.ps1 qwen`。
+3. **下一项**：**S4 子 Agent 资源边界**（`systemd-run --user` transient）；【完整实现片，非单次小任务】自己的档位 `.\scripts\codex-model.ps1 qwen`。
 
 **需要用户本人跑（`sudo`，agent 跑不了）**：`sudo bash /tmp/sync_opt_tree.sh --dry-run` → 满意后
 `sudo bash /tmp/sync_opt_tree.sh --restart`（`/tmp/trimum-sync.tar` 与 `/tmp/sync_opt_tree.sh` 已就位；
@@ -658,7 +658,7 @@ trm config set <key> <value>       # 设置配置项
 - [x] **C1. `trm ask` 体验优化**
   - 单次提问模式：`trm ask "..."` → SSE 流式输出 → 显示 token 统计
   - `--interactive` 模式：Rich prompt 多轮循环（未引入 prompt_toolkit）
-  - [ ] Ctrl+C 中断处理 【Qwen】
+  - [x] Ctrl+C 中断处理 【Qwen】（2026-09-22）
   - 会话记忆挂载（`ContextManager.register_session/update_session`）
 - [x] **C2. `trm agent` 命令组**
   - `list`：列出所有注册 agent
@@ -693,7 +693,7 @@ trm config set <key> <value>       # 设置配置项
 - [x] **F1. CLI 单元测试**（2026-09-20 核实已完成：`tests/test_cli.py` 32 项 + `tests/test_cli_commands.py`）
   - `tests/test_cli.py`：每个子命令的参数解析、返回值
   - Mock daemon/RPC 层，不依赖真实服务
-- [ ] **F2. 集成测试**（待补 CLI↔daemon 端到端） 【Qwen】
+- [x] **F2. 集成测试**（CLI↔daemon 端到端，9 条包含 health/status/security tokens+revoke RPC+HTTP） 【Qwen】（2026-09-22）
   - `tests/test_integration.py` 目前只覆盖 gateway / workflow / event_bus，无 CLI 侧用例
   - 真实起 daemon 后 `trm status` / `trm health` 连通性
   - `trm ask` 端到端流程
