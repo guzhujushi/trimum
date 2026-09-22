@@ -1,6 +1,6 @@
 # STATUS — 当前进度
 
-> 最后更新：2026-09-22（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **Codex 模型切换复盘（provider 改正名 + launcher 两个真 bug + `/model` 不改 provider）** → **S2 施加点收口（Landlock，7 个 spawn 点，本机 A/B 无回归）** → **S3 seccomp 三档（`l1`/`strict`/`off` + 与 Landlock 两半联动，真机验收 35/0 全绿）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
+> 最后更新：2026-09-22（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **Codex 模型切换复盘（provider 改正名 + launcher 两个真 bug + `/model` 不改 provider）** → **S2 施加点收口（Landlock，7 个 spawn 点，本机 A/B 无回归）** → **S3 seccomp 三档（`l1`/`strict`/`off` + 与 Landlock 两半联动，真机验收 35/0 全绿）** → **S3 收尾交接：起手三步验证（本机 1642/0/23 + 真机 1645/16/4 + accept_s3 35/0，真机合成树重建）** → **RAG 检索能力调研（docs/RAG-RESEARCH.md\uff0c不改代码）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
 >
 > 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
 > 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
@@ -87,6 +87,34 @@ resolver / lib / capability 全可注入 ⇒ 逻辑层在 Windows 上也能测�
 白名单模式的 `allow` 只给运维（`security.yaml`），不是包口子。
 
 ---
+
+## 2026-09-22 S3 收尾交接：起手三步验证（✅ 全过 + 真机合成树重建）
+
+> 按 TODO.md「交给 Qwen：S3 收尾之后的起手三步」逐条执行。
+
+**第 1 步 · 读文档**：STATUS.md S3 小节 + docs/SANDBOX-PLAN.md §11（§11.3 四条真机教训、§11.6 归因表），已读，不重查。
+
+**第 2 步 · 跑测试**（全部通过）：
+
+| 树 | 命令 | 结果 | 基线 | 判定 |
+|---|---|---|---|---|
+| 本机 Windows 全量 | python tmp/cleanrun.py tests -q --basetemp D:/trimum/tmp/pytest-fresh -p no:cacheprovider | **1642 passed / 0 failed / 23 skipped**（91.8s） | 1636/6/23 | ✅ 通过且优于基线（6 条宿主失败本轮未复现） |
+| 真机 /tmp/trm-s3 全量 | cd /tmp/trm-s3 && PYTHONPATH=/tmp/trm-s3/src /home/guzhujushi/trimum/.venv/bin/python -m pytest tests -q | **1645 passed / 16 failed / 4 skipped**（67.3s） | 1645/16/4 | ✅ 逐条吻合 §11.6 归因表（7 skill_integration + 2 tool_file_loading + 4 socket_path_consistency + 1 env_list_sorted + 1 test_depends_on + 1 llm_integration） |
+| 真机 ccept_s3.py | 同上 PYTHONPATH | **35 passed / 0 failed** | 35/0 | ✅ 全绿 |
+
+**真机合成树重建**（原 /tmp/trm-s3 已不存在，home 树 /home/guzhujushi/trimum 非 git 仓库且停在 09-20）：
+
+- 从 home 树 tar 出 src / 	ests / scripts / config 到 /tmp/trm-s3；
+- 逐文件比对本地开发树，**43 个版本差文件**（P0 / E5 / 穿插 A-B-C / LLM 路由 / S2 / S3 各轮改动）全部同步上去；
+- 补 config/trust/（	rimum-root.crt + README.md，原 tar 未含非 .py 文件）与空 skills/ 目录（skill_integration 用例需要）；
+- 重建后基线与 §11.6 完全一致 —— 证明合成树现在与本地开发树等价。
+
+**推送**：origin/server 之前停在 dad54c9，本地领先 1 个提交（a72dc5 RAG 调研文档）—— 已开代理推送，四分支纪律不变（日常只推 server）。
+
+**下一项**：S4 子 Agent 资源边界（systemd-run --user transient，见 docs/SANDBOX-PLAN.md §8 S4 行）。
+
+---
+
 
 ## 2026-09-22 S2 施加点收口：内核层沙箱落地（✅ 代码已落地 + 本机 A/B 回归 + **真机已验**）
 
