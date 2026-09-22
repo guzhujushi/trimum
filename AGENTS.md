@@ -27,10 +27,16 @@
 - 所有临时文件放 `tmp/`，根目录 `tmp_*` 必须移入 `tmp/` 并忽略。
 
 ## 真机
-- SSH：`guzhujushi@100.115.86.48`（免密）。
-- 开发目录：`/home/guzhujushi/trimum`
+- SSH：`guzhujushi@100.115.86.48`（免密，Tailscale）。屏幕是无桌面的文字控制台（`multi-user.target` + `getty@tty1`）。
+- 开发目录：`/home/guzhujushi/trimum`（git，跟 `server` 分支）
 - 部署目录：`/opt/trimum`
 - 源码同步到两处；测试文件优先同步到 home；`/opt/trimum/tests` 需要 sudo。
+- **真机现成工具**（2026-09-22/23 装）：
+  - `~/bin/codex-run ds|qwen` —— 跑 codex（已带 nvm PATH + 注入 `~/.codex/env`）；`~/bin/codex-smoke` 冒烟。
+  - `~/bin/tunnel-up` —— 恢复 `code tunnel`（内含 keyring 解锁 + 脱离会话启动）；**重启后要手动跑一次**。
+  - `~/.local/bin/code` —— VS Code CLI（1.138.0，与 server 同 commit）；扩展装在 `~/.vscode-server/extensions`。
+  - VS Code 入口：`https://vscode.dev/tunnel/tianyi`（手机可用）。
+- **坑（细节见 `docs/OPERATIONS.md`）**：GitHub 凭据在 gnome-keyring 里，**没有桌面会话时 keyring 是锁的** ⇒ `code tunnel` 会误报未登录并重新要设备码；用登录口令 `gnome-keyring-daemon --unlock --replace` 解锁即可，**不要重新授权**。
 
 ## sudo 规则
 - 需要 sudo 的操作写成脚本，`scp` 到远端 `/tmp/`，并明确告诉用户脚本位置。
@@ -58,7 +64,26 @@
   - 日常只需读「当前状态」+ 最新一条日志即可定位；历史细节按需翻对应日期条目。
 
 
-## 本机写入与 shell 纪律（2026-09-22 实测）
+## 平台判别（每个任务第一步，2026-09-23 加）
+
+**先判定自己在哪台机器上跑，再选口径。** 判据：能跑 `uname -s` 得到 `Linux` ⇒ **真机侧**；
+只有 PowerShell、`$env:OS` = `Windows_NT` ⇒ **Windows 侧**。两边都是 trimum 仓库，但**命令口径完全不同**。
+
+| 事项 | Windows 侧（本地开发机） | 真机侧（Ubuntu / 天逸510S，7x24 常驻） |
+|---|---|---|
+| 写文件 | Node REPL `fs.writeFileSync(path, text, {encoding:"utf8"})`；**别**用 PS here-string（按 GBK 写坏中文） | 直接 `cat > file <<'EOF'`（UTF-8 + LF 天然正确），Node 写法同样可用 |
+| 行尾 | 生成的 `.sh` 必须 LF；推到真机前一律 `tr -d '\r'` | 天然 LF，无需处理 |
+| Shell | PowerShell：**没有 `<` 重定向**；`$( )`、`\"`、`$HOME`、管道会被 PowerShell 吃掉/展开 | 正常 bash，可直接跑 |
+| 复杂命令 | **一律写成 `.sh` 文件再跑，不要内联**（内联一次坑一次，实测踩了三次） | 可直接跑；多步同样建议写文件 |
+| 连对方 | `scp tmp/x.sh guzhujushi@100.115.86.48:/tmp/` → `ssh -o BatchMode=yes guzhujushi@100.115.86.48 "tr -d '\r' < /tmp/x.sh > /tmp/x2.sh; bash /tmp/x2.sh 2>&1"` | 本地直接 `bash x.sh`，无需 scp |
+| 跑 codex | `.\scripts\codex-model.ps1 qwen` / `ds`（换 provider 必须重开进程，`/model` 改不了 provider） | `~/bin/codex-run ds|qwen`；冒烟 `~/bin/codex-smoke` |
+| `codex exec` | 无特殊要求 | **必须 `</dev/null`**：SSH 管道的 stdin 不关闭，它会干等 EOF（实测卡 7 分钟、连 API socket 都不建）；再套 `timeout 240` 兜底 |
+| 后台常驻 | `Start-Process -WindowStyle Hidden` | `setsid nohup <cmd> >>log 2>&1 < /dev/null &`（只 `nohup` 会随会话清理） |
+| 网络 | 境外 API / GitHub 走代理 `http://127.0.0.1:7993` | 真机**直连**（github / npm / marketplace 实测 200），无需代理 |
+| sudo | 无 | **agent 不代跑 sudo**，写成脚本交本人；真机 sudo 要口令 |
+| 临时文件 | `tmp/` | `tmp/`（真机重启会清 `/tmp`，长期脚本别只放 /tmp） |
+
+## 本机写入与 shell 纪律（Windows 侧，2026-09-22 实测）
 
 - **写含中文的文件**：走 Node REPL 的 `fs.writeFileSync(path, text, { encoding: "utf8" })`（自带 LF，实测 round-trip 一致、`cr=0`）。
   PowerShell 5.1 的 here-string / `Set-Content` 会把中文按 GBK 写坏；本环境 `apply_patch` 不可用。
