@@ -48,3 +48,23 @@
   脚本 `scripts/setup_ubuntu_toolchain.sh`（装工具链）、`scripts/check_sandbox_caps{,_root}.sh`（能力自检）、`scripts/harden_trmd_unit.sh`（**S1 daemon 加固，默认 dry-run，`--apply` 才装，失败自动回滚**）——**都需 sudo，真机 sudo 需要密码，只能本人跑**。
 - **运维**：`docs/OPERATIONS.md`；**包渠道运维**（造根 / 打包 / 建索引 / 上线 / 轮换根）：`docs/PACKAGE-CHANNEL-OPS.md`；**多用户边界**（调研 + 设计，2026-09-21）：`docs/MULTI-USER-BOUNDARY.md`；**进度 / 待办**：`STATUS.md` / `TODO.md`。
 - **原始调研件**：`tmp/research/`（已 gitignore，`docs/` 有多处引用，且是 `trm mcp catalog import` 的默认输入，不要整目录清空）。
+
+## 文档分工与追加式（2026-09-22 改）
+
+- **`TODO.md` 只留未闭环的待办 + 红线**；已完成的历史进度一律进 `STATUS.md`，不重复叙述。
+- **`STATUS.md` = 常驻区（就地小改）+ 追加日志（只增不改）**：
+  - 顶部「当前状态 / 任务清单 / 决策记录 / 下一步」为常驻区，随进展就地小改。
+  - 底部「## 日志」按日期从旧到新；**新进展只追加到文件最末尾**，不回填、不通读全文。
+  - 日常只需读「当前状态」+ 最新一条日志即可定位；历史细节按需翻对应日期条目。
+
+
+## 本机写入与 shell 纪律（2026-09-22 实测）
+
+- **写含中文的文件**：走 Node REPL 的 `fs.writeFileSync(path, text, { encoding: "utf8" })`（自带 LF，实测 round-trip 一致、`cr=0`）。
+  PowerShell 5.1 的 here-string / `Set-Content` 会把中文按 GBK 写坏；本环境 `apply_patch` 不可用。
+  大改用「整篇重写」，小改用「锚点唯一才替换」（锚点出现次数不为 1 就报错退出）。
+- **Git Bash 可用**：`& "C:\Program Files\Git\bin\bash.exe" -lc "<脚本>"`。中文内联、here-doc 都无损，行尾保持 LF。
+  - PATH 上的 `bash` 是别的包装器，**用绝对路径**指向 `C:\Program Files\Git\bin\bash.exe`。
+  - **别**把 bash 传给工具自己的 shell 参数：那样 bash 把 stdin 当脚本读，here-doc 会把后续内容吃掉（实测出 0 字节文件 + 卡住）。
+  - 命令行里避免出现单独的 `<`（PowerShell 会当成保留重定向符而报解析错）；重定向写 `>`、here-doc 写 `<<` 都正常。
+- **临时文件**一律进 `tmp/`；改动前的备份命名 `tmp/<file>.bak_<原因>`（`*.bak_*` 已在 `.gitignore`）。

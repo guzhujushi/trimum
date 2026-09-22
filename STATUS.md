@@ -1,922 +1,17 @@
-﻿# STATUS — 当前进度
-
-> 最后更新：2026-09-22（W1 workflow 执行语义 → **EventBus 通信审计** → **根目录文档合并与清理** → **P0 步骤 1/3：载荷契约扁平化** → **步骤 2/3：L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：装配统一 + 处置映射 + 签名收敛** → **步骤 3/3：定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式 + 打包/校验器** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove` 卸载与注销** → **步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **步骤 3：多用户边界调研 + 设计（`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略** → **步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **E7 前置调研：ECC 适合吗（`docs/CODING-AGENT-REUSE-RESEARCH.md`，参考对象建议改为 aider，只调研不改代码）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地）** → **真机切开关（TCP 已收口：http: disabled，PASS=10/0/0）** → **LLM 路由 / 限流 / 回退（新模块 llm_router.py + .env 加载器，真机冒烟 OK）** → **测试环境隔离（.env 加载器带出的用例间污染）** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **Codex 模型切换复盘（provider 改正名 + launcher 两个真 bug + `/model` 不改 provider）** → **S2 施加点收口（Landlock，7 个 spawn 点，本机 A/B 无回归）** → **S3 seccomp 三档（`l1`/`strict`/`off` + 与 Landlock 两半联动，真机验收 35/0 全绿）** → **S3 收尾交接：起手三步验证（本机 1642/0/23 + 真机 1645/16/4 + accept_s3 35/0，真机合成树重建）** → **RAG 检索能力调研（docs/RAG-RESEARCH.md\uff0c不改代码）** → **B4 security revoke + C1 ask Ctrl+C + F2 CLI-daemon 集成测试（18 条新增测试，全量 1660/0/23）** → **CLI 进阶第一项：`trm ask --image` 多模态输入（6 条新增测试，全量 1660/6/23 无回归）** → **CLI 进阶第二项：`trm memory import/export` 记忆迁移（4 条新增测试，全量 1664/6/23 无回归）**；2026-09-20 的 M4 / M4.5 / E4 / W1 进度见文末各节）
->
-> 当前阶段：Phase 3 收尾**已完成** —— P0/P1 阻断项全部清零并在真机 Ubuntu 验证通过。
-> 原「下一阶段 P0 = CLI-Anything 接入」经调研**已否决**（见 `docs/CLI-ANYTHING-RESEARCH.md`）：CLI-Anything 的 `browser` 依赖 Node.js + DOMShell，且 `browser-cdp` 并不存在；浏览器能力继续用自研 CDP 工具。
-> 当前方向：**生态四层**（`docs/ECOSYSTEM-STRATEGY.md`）—— L1 MCP 已完成 **M0/M1/M2/M3/M4** 与**远端工具聚合**（`<server>__<tool>` 进 `ToolRegistry`），
-> E4 三个导入器已落地，W1 workflow 执行语义已闭环（真机 48/0）。
-> **P0 安全响应链接线已闭环**（2026-09-20 只读审计新立：`tool_gateway.py:715` 的 L4 只拦不报，剧本在真机上永远不会被自动触发）：
-> 2026-09-21 四步走完 —— 步骤 1/3（载荷契约扁平化）、步骤 2/3（L4 改走 `SecMonitor.inspect()`）、
-> 步骤 2 补丁（装配统一 + 处置映射 + 签名收敛）、步骤 3/3（定 `workflow.trigger` 归属）；
-> **E5 官方分发渠道**已闭环：第二片（`.trmpkg` + `trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + 证书能力运行期交集）、**第三片步骤 1**（`trm install --remove` 卸载与注销）、**步骤 2**（`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md` 运维手册）、**步骤 3**（多用户边界：调研 + 设计，**不改代码** → `docs/MULTI-USER-BOUNDARY.md`）—— **E5 第三片三步骤全部收口**；剩 官网服务端托管（域名 / 托管 / CI = 产品决策，暂缓）。P2 杂项（daemon 部署形态 / 桌面确认通道 / SDK 测试 / SonarQube 重扫）随时穿插。
-> 真机验收记录（Ubuntu，`guzhujushi@100.115.86.48`）：M4 隔离 daemon **16 PASS / 0 FAIL**（全量 827/11/2）；
-> E4 `scripts/accept_e4.py` **43 PASS / 0 FAIL**；W1 `scripts/accept_w1.py` **48 PASS / 0 FAIL**（另 `test_workflow_runtime.py` 69 passed）。
-> 失败项均为既有宿主状态基线（Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网），与本轮各次开工前同名同数，无回归。
-> **S3 轮补（2026-09-22）**：`scripts/accept_s3.py` **35 PASS / 0 FAIL**（真机合成树 `/tmp/trm-s3`）；
-> `test_seccomp_exec.py` + `test_sandbox_exec.py` **97 passed / 2 skipped / 0 failed**；全量 **1645 passed / 16 failed / 4 skipped**
-> —— 这 16 条逐条归因见 `docs/SANDBOX-PLAN.md` §11.6（全是宿主 / 合成树产物，无 S3 回归）。
-
----
-
-## 2026-09-22 CLI 进阶第二项：`trm memory import` / `export` 记忆迁移（✅ 完成）
-
-> 全量 **1664 passed / 6 failed / 23 skipped**（6 条失败为既有宿主基线，零回归）。
-
-### 做了什么
-
-| 位置 | 内容 |
-|---|---|
-| `src/trimum_core/cli/commands/memory.py` | 新增 `export`（JSON v1，支持 `--file` 或 stdout）和 `import`（`--file` 或 stdin）子命令 |
-| `tests/test_memory_import_export.py` | 4 条测试：空导出 / 有数据导出 / 导出→导入往返 / 版本校验 |
-
-### 导出格式（JSON v1）
-
-```json
-{
-  "version": 1,
-  "exported_at": "2026-09-22T12:00:00+00:00",
-  "global_entries": {"key": "value"},
-  "agent_entries": {"agent-id": {"key": "value"}},
-  "categories": [{"domain": "...", "category": "...", "description": "..."}]
-}
-```
-
-### 用法
-
-```
-trm memory export -o backup.json
-trm memory import -i backup.json
-trm memory export | trm memory import   # 管道
-```
-
----
-## 2026-09-22 CLI 进阶第一项：`trm ask --image` 多模态输入（✅ 完成）
-
-> 提交待推。全量 **1660 passed / 6 failed / 23 skipped**（6 条失败为既有宿主基线，零回归）。
-
-### 做了什么
-
-| 位置 | 内容 |
-|---|---|
-| `src/trimum_core/agent_loop.py` | 新增 `_IMAGE_MIME` / `_image_to_data_url()` / `_build_user_content()`；`run()` 与 `_plan()` 接受 `images` 参数，用户消息按 OpenAI 多模态格式携带 base64 图片 |
-| `src/trimum_core/cli/commands/ask.py` | 新增 `--image` / `-I` 参数（`nargs="+"`），透传到 `AgentLoop.run()` |
-| `tests/test_agent_loop.py` | 6 条新增：`_image_to_data_url`（有效 / 缺失 / 不支持格式）+ `_build_user_content`（无图 / 多图 / 空列表） |
-
-### 关键设计
-
-- **消息格式**：无图时 user content 保持 `str`（向后兼容）；有图时变为 `[{"type":"text",...}, {"type":"image_url","image_url":{"url":"data:...;base64,..."}}]`
-- **支持格式**：png / jpg / jpeg / gif / webp / bmp / tiff
-- **LLM 能力依赖**：图片以 OpenAI 兼容多模态格式发送；若 LLM 不支持 vision，API 报错由 `_plan()` 的 `except` 捕获并走 `_fallback_plan()` 降级
-
----
-## 2026-09-22 RAG 检索能力调研（✅ 调研完成，不改代码；docs/RAG-RESEARCH.md）
-
-> 因 S4（systemd-run --user 子 Agent 资源边界）是完整实现片、超出 10 分钟窗口，本轮改做用户备选：RAG 调研。
-> 纯文档，无代码改动，测试基线不变。
-
-- **现状**：ContextManager.search() 已用 **SQLite FTS5**（unicode61）做关键词检索，MemoryClassifier
-  做 domain/category 过滤——**但没有语义检索**（无 embedding / 无向量 / 无混合排序）。
-- **结论**：trimum 的 RAG = 给现有记忆层补一条「**本地 embedding + sqlite-vec**」语义通道，再 **RRF 混合排序**；
-  存储 / 命名空间 / 读确认（project_ctx/global_ctx）/ 审计**全部复用现成**，只加「语义召回」一层，全程离线、只读。
-- **推荐路径**：R1（把 FTS5 search() 接进记忆读取路径，零新依赖）→ R2（sqlite-vec + 本地 embedding 走
-  llm_router 本地档）→ R3（BM25 + 向量 RRF 融合 + 经 context_compactor 装窗 + 审计留痕）。
-- **不做的（YAGNI）**：LangChain / LlamaIndex、长文档 chunking、FAISS / 专用向量库 / 常驻向量服务、云 embedding API。
-- **归属**：E7 前置能力切片，**未立项**，等 E7 节奏再排。
-
-## 2026-09-22 S3 seccomp 三档：内核层沙箱的另一半（✅ 代码已落地 + 本机回归 + **真机验收 35 passed / 0 failed**）
-
-**做了什么**：新增 `src/trimum_core/seccomp_exec.py`（733 行）—— 三档**档案**（纯计算 `build_plan`，
-resolver / lib / capability 全可注入 ⇒ 逻辑层在 Windows 上也能测）+ **施加**（`apply_current`，libseccomp 走 ctypes）
-+ 能力探测 + 独立 CLI（`python -m trimum_core.seccomp_exec --status / --profile`）；
-`sandbox_exec` 把它接到 Landlock 那半旁边（**Landlock 先、seccomp 后**）。
-
-**三档**：
-
-| 档 | 内容 | 谁用 |
-|---|---|---|
-| `off` | 不施加（照旧 exec，**明确不施加**，不再退 126） | 排障 / 一键退 |
-| `l1`（**默认**） | `KERNEL_BLOCK` **31** 条危险内核面（内核模块 / eBPF / `ptrace` / `io_uring` / 命名空间 / 挂载 / 块设备 / I/O 端口 / keyring / `open_by_handle_at`） | 常规任务 |
-| `strict` | `l1` + `STRICT_BLOCK` 3 条 + **按地址族挡网络 socket**（`AF_INET`/`AF_INET6`/`AF_PACKET`/`AF_NETLINK`），**`AF_UNIX` 放行** | 未知 / 第三方 Agent |
-
-**关键口径**：
-
-- `TRIMUM_SECCOMP`（环境变量 > `security.yaml: sandbox.seccomp` > 默认 `l1`）；与 `TRIMUM_SANDBOX`（Landlock 那半）**互相独立**；
-- **施加顺序**：`apply_plan()` 里 **Landlock 先、seccomp 后** —— `seccomp_load()` **不可逆**，必须排在所有可能失败的步骤之后；
-- 只收紧不放宽：`agent.json5` 的 `seccomp_profile` 只能更严（`PROFILE_RANK`）；包的 `seccomp_allow` / `extra_syscalls`
-  **忽略 + 告警**（`sandbox.manifest_seccomp_allow_ignored`），包的 `seccomp_block` / `extra_block` 可以加；
-- `strict` + `seccomp_allow` 非空 ⇒ **白名单模式**（默认动作 `EPERM` + 69 条基线 + 声明放行），此时**不再叠黑名单规则**；
-- 审计：`sandbox` 与 `seccomp` **两个字段各记一份**（`off` / `unsupported` / `l1` / `strict` / `<档>:failed`）。
-
-**真机跑出来的四条（`docs/SANDBOX-PLAN.md` §11.3）**：
-
-| # | 事实 | 代价（不修会怎样） |
-|---|---|---|
-| 1 | 能力口径是 **API level**（`seccomp_api_get()` = 6），不是版本号 —— `seccomp_version()` 走 ctypes 读不出来（`restype` 试 `c_uint`/`c_int`/`c_ulong` 全是垃圾） | 能力判定失真 |
-| 2 | 判别器只能选「**不施加时一定会成功**」的 syscall（`ptrace(TRACEME)` / `io_uring_setup`）；`bpf` / `mount` / `setns` 非特权下**本来就失败** | 验收得出「拦住了」的**假结论** |
-| 3 | **`SCMP_CMP_EQ` 是 4，不是 0**（`enum scmp_compare` 从 `_SCMP_CMP_MIN = 0` 起算） | `seccomp_rule_add` 返回 `-EINVAL(22)`，「按地址族挡 socket」**整条失效** ⇒ `strict` 档**放行 `AF_INET`** |
-| 4 | Landlock 只接「目录 + 普通文件」 | 见下面 S2 小节的真机修正三条 |
-
-探针留在 `tmp/probe_cmp.py`（真机输出：`op=0 → rc=-22`、`op=1..7 → rc=0`、`sizeof(struct scmp_arg_cmp)=24`）。
-
-**回归**：
-
-| 树 | 结果 |
-|---|---|
-| 本机 Windows（`test_seccomp_exec` + `test_sandbox_exec`） | **86 passed / 13 skipped / 0 failed** |
-| 本机 Windows（全量 `tests`） | **1636 passed / 6 failed / 23 skipped**（6 条与 S2 轮逐条同名，与 S3 无关） |
-| 真机 `/tmp/trm-s3`（两个文件） | **97 passed / 2 skipped / 0 failed**（首跑 8 条失败 → 3 条 → 0 条） |
-| 真机 `/tmp/trm-s3`（全量） | **1645 passed / 16 failed / 4 skipped**（16 条全是宿主 / 合成树产物，归因表见 §11.6） |
-| 真机 `scripts/accept_s3.py` | **35 passed / 0 failed** |
-
-**提交**：`5041885`（本片：`seccomp_exec` + 两半联动 + 两个测试文件 + `accept_s3.py` + 三条真机修正）/
-`45cd19f`（文档回填：`SANDBOX-PLAN` §10.5.1+§11、`SECURITY-DEFENSE-PLAN` §7.1–§7.3 脚注、`TODO` / `STATUS`）/
-`fa2542e`（回填文档提交号）/ `e2046a6` + 本次（`TODO` 的「交给 Qwen 的起手三步」与状态刷新）—— **均已推 `origin/server`**。
-
-**未做**：`TaskRegistry.SHELL` 的派生点仍未收（S2 起挂着）；`trm status` / `doctor` 还没把沙箱状态摆到台面上；
-`/opt/trimum` 的整树同步待本人 `sudo`（`/tmp/sync_opt_tree.sh` + `/tmp/trimum-sync.tar` 已就位）；
-白名单模式的 `allow` 只给运维（`security.yaml`），不是包口子。
-
----
-
-## 2026-09-22 S3 收尾交接：起手三步验证（✅ 全过 + 真机合成树重建）
-
-> 按 TODO.md「交给 Qwen：S3 收尾之后的起手三步」逐条执行。
-
-**第 1 步 · 读文档**：STATUS.md S3 小节 + docs/SANDBOX-PLAN.md §11（§11.3 四条真机教训、§11.6 归因表），已读，不重查。
-
-**第 2 步 · 跑测试**（全部通过）：
-
-| 树 | 命令 | 结果 | 基线 | 判定 |
-|---|---|---|---|---|
-| 本机 Windows 全量 | python tmp/cleanrun.py tests -q --basetemp D:/trimum/tmp/pytest-fresh -p no:cacheprovider | **1642 passed / 0 failed / 23 skipped**（91.8s） | 1636/6/23 | ✅ 通过且优于基线（6 条宿主失败本轮未复现） |
-| 真机 /tmp/trm-s3 全量 | cd /tmp/trm-s3 && PYTHONPATH=/tmp/trm-s3/src /home/guzhujushi/trimum/.venv/bin/python -m pytest tests -q | **1645 passed / 16 failed / 4 skipped**（67.3s） | 1645/16/4 | ✅ 逐条吻合 §11.6 归因表（7 skill_integration + 2 tool_file_loading + 4 socket_path_consistency + 1 env_list_sorted + 1 test_depends_on + 1 llm_integration） |
-| 真机 ccept_s3.py | 同上 PYTHONPATH | **35 passed / 0 failed** | 35/0 | ✅ 全绿 |
-
-**真机合成树重建**（原 /tmp/trm-s3 已不存在，home 树 /home/guzhujushi/trimum 非 git 仓库且停在 09-20）：
-
-- 从 home 树 tar 出 src / 	ests / scripts / config 到 /tmp/trm-s3；
-- 逐文件比对本地开发树，**43 个版本差文件**（P0 / E5 / 穿插 A-B-C / LLM 路由 / S2 / S3 各轮改动）全部同步上去；
-- 补 config/trust/（	rimum-root.crt + README.md，原 tar 未含非 .py 文件）与空 skills/ 目录（skill_integration 用例需要）；
-- 重建后基线与 §11.6 完全一致 —— 证明合成树现在与本地开发树等价。
-
-**推送**：origin/server 之前停在 dad54c9，本地领先 1 个提交（a72dc5 RAG 调研文档）—— 已开代理推送，四分支纪律不变（日常只推 server）。
-
-**下一项**：S4 子 Agent 资源边界（systemd-run --user transient，见 docs/SANDBOX-PLAN.md §8 S4 行）。
-
----
-
-
-## 2026-09-22 零散待办前三项：B4 security revoke + C1 ask Ctrl+C + F2 CLI-daemon 集成测试（✅ 全部完成）
-
-> 按 `TODO.md` 顺序做前三项。全量回归 **1660 passed / 0 failed / 23 skipped**（比上轮 1642 多 18 条新增，零回归）。
-
-### B4：`trm security revoke <token_id>`
-
-- `ToolGateway.revoke_jit_token(token_str)`：幂等，找不到返回 False；找到则删除 + 审计日志。
-- `api_server._revoke_jit_token(state, token_str)`：前缀匹配（≥4 位），多个匹配报模糊；新 RPC `security.revoke`。
-- CLI `security.py`：`revoke` 子命令（走 RPC，失败返回 exit 1 + 错误信息）。
-
-### C1：`trm ask` Ctrl+C 中断处理
-
-- `ask.py handler`：`asyncio.run(_execute())` 外包 `try/except KeyboardInterrupt`，捕到则打印 `interrupted by user` + 返回 exit code 130（壱明 SIGINT 口径）。
-
-### F2：CLI↔daemon 集成测试（`test_integration.py::TestCliDaemonIntegration`，9 条）
-
-- 真 `create_app` + `TestClient` + 真 `IpcHandler` RPC router（不起真 daemon 进程）。
-- 覆盖：health RPC/HTTP 合同一致、`trm status` 在线/离线、`security tokens` RPC（措蔽 + 过滤）、`security revoke` RPC（完整串 / 前缀 / 不存在）。
-
-### 测试新增（18 条）
-
-| 文件 | 新增 |
-|---|---|
-| `tests/test_cli.py` | 1（`security revoke` 解析） |
-| `tests/test_cli_commands.py` | 8（revoke CLI ×4 + Ctrl+C ×1 + gateway ×3） |
-| `tests/test_integration.py` | 9（F2 集成全部） |
-
-## 2026-09-22 S2 施加点收口：内核层沙箱落地（✅ 代码已落地 + 本机 A/B 回归 + **真机已验**）
-
-**做了什么**：新增 `src/trimum_core/sandbox_exec.py`（Layer K，923 行）—— Landlock 三个 syscall（444/445/446，
-全走 `ctypes`，零依赖、不要 root）+ `prctl(PR_SET_NO_NEW_PRIVS)`，把**全部 7 个 spawn 点**收到一处。
-
-**7 个点**（原设计列 6 个；实做时发现 E4 的 CLI 广接入 `cli_adapter.generic_executor` 也是一条真实派生通道）：
-
-| # | 位置 | 面 |
-|---|---|---|
-| 1–4 | `tool_dispatchers.py`：`GitDispatcher._run_git` / `ShellDispatcher.execute` / `ProcessDispatcher._list_processes` / `._kill_process` | `git_*` / `shell` / `process list` / `process kill` |
-| 5 | `agent_launcher.py:launch_agent` | 子 Agent（施加失败**不启动**） |
-| 6 | `cli_adapter.py:generic_executor` | `trm tool import-cli` 装出来的 CLI 工具 |
-| 7 | `tool_gateway.py`（dispatch 之前） | 不算派生点：给「file 型工具把 request 重建成新对象」那条路兜底 |
-
-`TestNoBypass` 用静态断言钉住：这两个文件里不许再出现 `create_subprocess*`，且 `plan_for(` 的调用次数被锁死。
-
-**关键口径**：
-
-- 施加在**子进程**（`preexec_fn` 钩子）—— daemon 自己不施（Landlock 只能收紧、不可逆，见 `docs/SANDBOX-PLAN.md` §6.1）；
-- 状态词表（审计唯一口径）：`off` / `unsupported` / `readonly|workspace-write|strict` /
-  `<mode>:failed`（**命令不跑**，fail-closed）/ `<mode>:degraded`（关掉 fail-closed 才降级放行，且记 ERROR）；
-- 两档开关：`TRIMUM_SANDBOX`（默认 `workspace-write`）+ `TRIMUM_SANDBOX_FAIL_CLOSED`（默认 `true`），
-  drop-in 写一行即生效、删掉即回滚；优先级 = 内置默认 < `security.yaml` < 环境变量；
-- 放宽方向锁死：`agent.json5` 只能往严里收（`_MODE_RANK`），manifest 里的 `write` **一律忽略 + 告警**；
-- Windows → 如实报 `unsupported`（不假装已隔离、也不静默放行），且**只告警一次**。
-
-**回归（本机 Windows，两棵树 A/B 对照）**：HEAD `261f452` 干净树 **1548 passed / 6 failed / 12 skipped**；
-S2 工作区 **1576 passed / 6 failed / 16 skipped** → **+26 passed（新增用例）/ +6 skipped（Linux 专属）**，
-差额精确等于新用例数。**6 条失败两棵树逐条一致**，与 S2 无关：2 条宿主基线（`PATH` 缺 `python.exe`、
-连不上 `models.sjtu.edu.cn`）+ 4 条宿主 `~/.trimum` 污染（`--fakehome` 后 41/41 全绿）。
-归因脚本 `tmp/cleanrun.py`（剥掉宿主常驻的 21 个脏环境变量再跑）。
-
-**提交**：`92ac32c`（本片：`sandbox_exec` + 7 个接入点 + 32 项测试 + 文档）/ `3276aab`（前一片尾巴：Codex 模型分工脚本与文档）。
-
-**真机修正（2026-09-22 S3 轮补齐，见 `docs/SANDBOX-PLAN.md` §10.5.1）**：
-
-1. **Landlock 只接「目录 + 普通文件」** —— 字符设备（`/dev/null` `/dev/ptmx`…）给权限是 `EINVAL(22)`，
-   管道 / 指向管道的符号链接（`/dev/stdout`…）是 `EBADFD(77)`。修法：新增 `_landlockable()` 装置前过滤
-   （剩下的记 `sandbox.root_not_landlockable`，debug 级）+ `_file_read_rights()` / `_file_write_rights()`
-   （**普通文件不给目录级权限**）+ `EBADFD` **降级为 warning `sandbox.rule_skipped_not_a_file`**（不再 fail-closed）。
-2. **`readonly` 档工作区只读** —— 原先工作区同时进了写根，真机实测「`readonly` 档能写工作区」（**隔离失效**）；
-   已改 `plan_for`：readonly 时工作区只进读根。
-
-真机复跑（2026-09-22）：`test_sandbox_exec.py` + `test_seccomp_exec.py` **97 passed / 2 skipped / 0 failed**；
-原「真机 4 条命令对照」已并入 `scripts/accept_s3.py`（A / C / D 组）。
-
-**未做**：`TaskRegistry.SHELL` 的派生点未收；`trm status` / `doctor` 还没把沙箱状态摆到台面上。
-
----
-
-## 2026-09-22 Codex 模型切换复盘：为什么「qwen3.8-27b / sjtu-jiaowoisan 都不行」（✅ 已修 + 已复验）
-
-**症状**：09-22 早上连开 6 个会话，用 `/model` 依次填 `qwen3.6-27b` → `qwen3.8-27b` → `sjtu-jiaowoisan`，
-全部得到同一条报错：`The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed <填的那个>`。
-
-**两个根因（都有 rollout 证据，不是猜的）**：
-
-| # | 根因 | 证据 |
-|---|---|---|
-| A | `/model` 只改**模型名**，**不改 provider**；会话的 provider 始终是 `deepseek-api` | 6 条 rollout 的 `session_meta.model_provider` 全是 `deepseek-api`，而 `turn_context.model` = 你填的值；报错文本来自 DeepSeek |
-| B | `sjtu-jiaowusuan` 是 **provider 名，不是模型名**，写进 `/model` 必然失败 | 同上：`...but you passed sjtu-jiaowoisan` |
-
-⇒ **换 provider 只能重开进程**：`.\scripts\codex-model.ps1 qwen` / `codex -p qwen`（`-p ds` 同理）。另加两个**免记路径**的入口：`scripts\codex-qwen.cmd` / `scripts\codex-ds.cmd`（纯 ASCII 批处理转发，
-内部带 `-NoProfile -ExecutionPolicy Bypass`，双击可跑；交互式与 `-Exec` 两种都实测过）。
-`qwen3.8-27b` 只存在于 `provider = sjtu-jiaowusuan` 上，单独改模型名没有意义。
-
-**顺带查出 `scripts/codex-model.ps1` 的两个真 bug（昨天落下的，本机已复现）**：
-
-| bug | 现象 | 修法 |
-|---|---|---|
-| `.env` 候选顺序错 | 候选表把 `~/.trimum/.env`（只剩 `OPENAI_*` 的老 stub）排在仓库 `.env` **之前**，旧实现**只取第一个存在的候选** ⇒ `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY` 一个都没注入（父进程环境里也没有时）；`codex -p qwen` 只得到 `ERROR: Missing environment variable: JIAOWOISAN_API_KEY.` | 低→高优先级依次加载 + 仓库根 `.env` 权威 + 进程原有变量优先；并在起 codex **之前**校验 profile → provider → `env_key` 是否存在，缺了直接给人话报错 |
-| PS 5.1 把 codex 的 stderr 当致命错误 | 原生命令写 stderr 的每行被包成 ErrorRecord，配上脚本里的 `$ErrorActionPreference = 'Stop'` ⇒ codex 一启动（总会写 `Reading additional input from stdin...`）就抛错中止，`-Exec` 路径其实一次都没跑成 | 在 `& $codex` 前把偏好放回 `Continue`；成败看 `$LASTEXITCODE` |
-
-**署名改正**：Codex provider `sjtu-jiaowoisan` → **`sjtu-jiaowusuan`**（2026-09-22 定名：先误改为 `jiaowosuan`，经确认最终用 `jiaowusuan`）；
-改 `~/.codex/config.toml` 2 处 + `~/.codex/qwen.config.toml` 1 处，
-备份 `~/.codex/backups/config.toml.20260922-072948.bak` / `qwen.config.toml.20260922-072948.bak`。
-
-**复验（2026-09-22 07:33，`codex-cli 0.152.0`）**：先**清空进程里的 key**，
-再跑 `.\scripts\codex-model.ps1 qwen -Exec "只回复两个字：可以"` →
-`provider: sjtu-jiaowusuan` / 回复「可以」/ 退出码 **0**，且脚本自报「注入 33 个变量，.env: ~/.trimum/.env ; D:\trimum\.env」
-⇒ key 确实是从仓库 `.env` 注入的。
-（昨天那份证据取自 **0.151.0-alpha.7.2**；本机已升 **0.152.0**，profile 机制未变，已重新验证。）
-
-**未做（留给裁决）**：环境变量 `JIAOWOISAN_API_KEY` 本轮**没改名** —— 它同时被 `src/`（`llm_router.py` /
-`doctor.py` / `health.py` / `security_config.py`）、`tests/`、`scripts/llm_env_dropin.sh` 和真机 drop-in 引用，
-盲改会让真机 daemon 起不来。选项见 `TODO.md` 的「🤖 Codex 模型分工」小节。
-
----
-## 2026-09-21 Codex 侧模型分工与「限流降级」调研（✅ 已落地；提交 `de619c5`）
-
-**需求**：简单任务用交我算免费的 Qwen、难任务用 deepseek-flash，并希望「像 trimum 一样限流后自动降级」。
-
-**结论**：Codex **自身没有**「限流 → 换 provider」的开关（全二进制扫 `*fallback*` 只有 CodeModeHost / TokenBudget /
-models-manager 内部回落 / session 模型不可用回落四种，与限流无关）；能立刻做的是**任务级 profile 切换**（本轮已落地），
-要自动降级只能**在 Codex 前面加一层本地路由代理**（`docs/CODEX-MODEL-POLICY.md` §4，**待裁决**）。
-
-**实测事实**：
-
-| 事实 | 证据 |
-|---|---|
-| `wire_api` 只接受 `responses` | 故意写 `bogus` → 报错 "unknown variant `bogus`, expected `responses`" |
-| 交我算 `/api/v1/responses` 可用 | 最小请求 **HTTP 200**（`object:"response"`、`model:"qwen3.8-27b"`、24 tokens；响应带 `_litellm_tpm_reserved_model` ⇒ 后端是 LiteLLM 网关） |
-| `codex exec -p qwen` 端到端通 | `model: qwen3.8-27b` / `provider: sjtu-jiaowusuan` / 回复「可以」/ 退出码 **0**（跑两次） |
-| profile 不能写在 `config.toml` | 0.151 要求独立文件 `~/.codex/<name>.config.toml`（`sjtu-min.config.toml` 是先例） |
-| 次数才是瓶颈 | 一次 `codex exec`（2 字回复）用掉 **14~15k tokens**；交我算 10 次/分 ⇒ 长会话必撞 429，**Qwen 只适合单次小任务** |
-
-**改动**：`scripts/codex-model.ps1`（新：按任务选 profile + 把 trimum `.env` 灌进进程环境；存 UTF-8 **with BOM** ——
-PS 5.1 用 `-File` 跑无 BOM 的 UTF-8 会按 GBK 解、中文直接把脚本解析弄挂）、`docs/CODEX-MODEL-POLICY.md`（新）、
-`TODO.md`（新增「🤖 Codex 模型分工」一节 + 给 19 条待办打 `【Qwen】` / `【DS】` 标签）。
-仓库外：新建 `~/.codex/qwen.config.toml` 与 `~/.codex/ds.config.toml`；`~/.codex/config.toml` 加过 `[profiles.*]` 被 0.151 拒绝，已回滚
-（备份 `~/.codex/backups/config.toml.20260921-230249.bak`）。**未改任何 `src/` 与 `tests/`。**
-
-**收尾核对（2026-09-21 23:07）**：真机 `trm status` → `source: rpc` / `http: disabled` / `ipc socket: ok`（pid 27582，uptime 27m）；
-`/opt/trimum/src` 与本地 `src` 逐文件哈希：**105/105 在位，唯一差异是 `env_file.py` 少一个测试用 `reset_loaded()`**（daemon 不调用）；
-全量测试 **1554 passed / 2 failed / 10 skipped**（两条仍是宿主基线）；`server` = `origin/server`，工作区干净。
-
----
-
-## 2026-09-21 真机切开关（TCP 收口落地）+ LLM 路由 / 限流 / 回退（✅ 真机已验；提交 `9e34ddc`）
-
-**这一轮干了两件事，都在真机上验收过。**
-
-### 1) TCP 收口（沙箱前置片 S0）：从「脚本就绪」到「生产已切」
-
-| 步骤 | 结果 |
-|---|---|
-| 整树同步 | `sudo bash /tmp/sync_opt_tree.sh --restart` ✅ 部署树 `/opt/trimum/src` **62 → 73 个模块**；备份 `/var/backups/trimum/src-20260921-224003`；重启后 `trm status` 正常 |
-| 切开关 | `sudo bash /tmp/switch_ipconly.sh --apply` ✅ **PASS=10 WARN=0 FAIL=0**（证据 `/tmp/switch-ipconly-*.log`） |
-| 验收口径 | `trm status` → `http: disabled` + `ipc socket: ok` + `source: rpc`；`ss -ltnp \| grep 8321` **无输出**；daemon 只持有 workflow driver 的临时端口 |
-
-**踩的坑（已进脚本与文档）**：第一次 `--apply` 只做了一半 —— 输出被 `head -32` 截断，写端吃到 **SIGPIPE**
-被打死，结果 **drop-in 写了但 `daemon-reload`/`restart` 没跑**（等于什么都没生效）。重跑改成
-**`setsid bash … > /tmp/apply.out 2>&1 </dev/null` 脱离会话**执行、再读文件看结论。
-更早那条：`fs.protected_regular=2` 下 **root 也不能 O_CREAT 覆盖 `/tmp` 里属主是别人的普通文件**
-（`/tmp/.trm-walk.py` 权限不够的真因），所以预演产物一律进「每次运行新建的 mktemp 目录」（§9.3.9）。
-
-一键退：`sudo bash /tmp/switch_ipconly.sh --rollback`；整树退：`sudo bash /tmp/sync_opt_tree.sh --rollback`。
-
-### 2) LLM 路由 / 限流 / 回退：从「5 个调用点各干各的」到「一处策略」
-
-**事实修正（实测，不再靠猜）**：
-- 交我算 `GET /api/v1/models` = `minimax, qwen, claw, deepseek-chat, deepseek-reasoner, minimax-m2.7, qwen3.8-27b`
-  → 用户口径的「QWEN3.6-27B」真实 id 是 **`qwen3.8-27b`**。
-- DeepSeek 官方只有 **`deepseek-flash` / `deepseek-v4-pro`** 两档 —— **`deepseek-chat` 已下架**，
-  而项目旧默认值写的正是它（本轮改成 `deepseek-flash`）。
-
-**分工（真机实测路由表）**：
-
-```
-policy / planner / transform / experience : 主 qwen3.8-27b @交我算（9 次/分，免费）  备 deepseek-flash
-agent（运行时会话 / 多步编排 / 流式）       : 主 deepseek-flash（要能力）            备 qwen3.8-27b
-```
-
-**代码（新/改；提交 `9e34ddc`）**
-
-| 文件 | 作用 |
-|---|---|
-| `src/trimum_core/llm_router.py`（新） | 唯一策略处：`resolve_targets`（选谁）/ 令牌桶（等多久）/ 失败分类 + 冷却（换谁）。**不碰 HTTP**，调用点自己发请求 |
-| `src/trimum_core/env_file.py`（新） | `.env` 加载器（此前**全仓没有任何代码读 .env**，install_fn 写进去也没人读）；按 key 叠加、已有环境变量优先 |
-| `scripts/llm_env_dropin.sh`（新） | 真机：给 trmd 加 `EnvironmentFile=-/opt/trimum/.env`；`--check / --apply / --smoke / --rollback`，验证只看键名不看键值 |
-| `llm_policy` / `planner_agent` / `transform_agent` / `experience_learner` / `agent_loop` | 5 个调用点全部改走路由（各自的降级路径一个没丢） |
-| `security_config.DEFAULT_SECURITY_YAML` | `llm:` 段 → 主 Qwen + `fallback:` 子段 deepseek-flash |
-| `tests/test_llm_router.py`(新) / `tests/test_env_file.py`(新) | 27 项 + 6 项；`tests/conftest.py` 加**两个**隔离 fixture（重置路由状态 + 快照/还原 `os.environ`）|
-| `docs/LLM-ROUTING.md`（新） | 交接文档：分工表 / env 键全表 / 限流与冷却表 / 降级表 / 运维命令 / 待办 |
-
-**真机证据（2026-09-21 22:41）**：`/opt/trimum/.env`(0600 root:guzhujushi) 与 `~/.trimum/.env`(0600) 各 18 键；
-daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`（读 `/proc/PID/environ` 键名）；
-网络冒烟 **`OK 走的 target：primary:qwen3.8-27b@models.sjtu.edu.cn 回复：可用`**；
-`trm doctor` → `LLM API connectivity: https://models.sjtu.edu.cn/api/v1` + 三个 key env 全 OK。
-
-**顺带修的老 bug**：`planner_agent` 里 `TrimumError/TRMErrorCode` **从没被 import**（那几条分支跑到就 NameError）；
-`agent_loop._chat_completion` 之前只认 `DEEPSEEK_API_KEY`（不看配置里的 `api_key`/`api_key_env`）。
-
-**跑测结果**：全量 **1547 passed / 2 failed / 10 skipped**；两条失败都是**环境基线**，非本改动引入
-（① 本机沙箱禁网 → 真调 LLM 的那条用例连接被拒；② `test_depends_on` 的 `python.exe` 不在 PATH ——
-放行网络后 ① 通过，② 与本次改动无关）。另有一条既有健壮性 bug 未修（不在本轮范围）：
-`learning_engine.load()` 用 stdlib logger 传 structlog 风格 kwargs（`profiles=`）→ 特定顺序下 TypeError。
-
-**提交前回归：修掉一处 `.env` 带出来的用例间污染。** `env_file.ensure_loaded()` 只在 CLI/daemon/client 入口调用，
-且是**模块级只跑一次** —— 只要全量跑里有一个用例跑了 `cli.main()`，开发机真实的 `~/.trimum/.env` 与仓库根 `.env`
-就会留在 `os.environ` 里，**后面所有用例都读到开发机的密钥与模型配置**。全量跑炸两条（**隔离跑都过**）：
-`test_transform_agent::test_request_contains_correct_payload`（构造参数的 `http://test.local` 被 `.env` 的
-`TRIMUM_LLM_BASE_URL` 顶掉）、`test_other_dispatchers::test_env_list_sorted`（首行变 `163_EMAIL=...`）；
-修完又暴露 `test_cli_commands::test_health_json_includes_api_key_presence`（断言「删掉 `GROQ_API_KEY` 就该缺席」，
-而 `.env` 里有它 —— 这是用例假定「环境 = `os.environ`」的旧口径，产品行为没错）。
-处理：`tests/conftest.py` 新增 `isolate_process_env`（按用例快照/还原 `os.environ` + `env_file.reset_loaded()`）、
-`env_file.reset_loaded()`、health 用例显式屏蔽 `.env`。全量回到 **1554 passed / 2 failed / 10 skipped**，
-两条失败仍是宿主基线（PATH 缺 `python.exe` + 本机沙箱断网），与本轮改动无关。
-
-**下一步**：① **真机跑 S2 的 4 条命令对照**（`docs/SANDBOX-PLAN.md` §10.6，不需要 `sudo`，**本人跑**）；
-② 【DS】S3 seccomp 三档（`readonly` / `workspace-write` / `strict`）。
-LLM 侧剩余待办：跨进程限流 / token 维度计量 / `Retry-After` / `trm doctor` 显示路由表 / 成本账本（见 `docs/LLM-ROUTING.md` §8）。
-
----
-## 2026-09-21 S1 试装复盘 + socket 收口（✅ 代码与脚本已改；生产单元仍原样）
-
-**⚠️ 21:09 事故（同日第三轮）**：`sync_opt_socket_patch.sh` 把仓库 **HEAD 的 `api_server.py`** 装进了
-`/opt/trimum/src`，而部署树比仓库旧一大截 —— 没有 `workflow_runtime.py`，于是 daemon 一启动就
-`ModuleNotFoundError: No module named 'trimum_core.workflow_runtime'`，systemd 每 5s 重启一次（`NRestarts=29`）。
-冒烟**正确**判 FAIL 并自动回滚了单元，但**回滚只撤单元、不撤 `src`**，所以循环不止。
-两条护栏已落地：① 同步文件集 5 → **4**（去掉 `api_server.py`，代价只有 `await ipc.start()` 这条加固，等整树同步到 HEAD 再补）；
-② 装之前先做**导入预演**（`PYTHONPATH=/tmp/.socket-patch-rehearsal` 里 `import trimum_core.main`，并断言 `trimum_core.__file__` 真来自预演目录），不通就一个字都不碰生产。
-恢复：`scripts/trmd_hotfix_restore.sh`。详见 `docs/SANDBOX-PLAN.md` §9.3.6。
-
-> 用户口径：*「刚刚回滚了，IPC socket 不存在，之前用 Socket 跑的时候一直出 bug 才暂时用 http 代替，现在改成 Socket 吧，你先看看吧」*
-> —— 「先看看」的结论与落地都在 `docs/SANDBOX-PLAN.md` §9.3。
-
-**两次 `--apply`（20:40 / 20:50）都失败并自动回滚；真因不是加固，是冒烟抢跑。**
-`smoke()` 只等 `systemctl is-active`，而 uvicorn 还要几百毫秒才 bind、IPC socket 更晚才建；断言跑在就绪之前 →
-`[FAIL] IPC socket 不存在` → 回滚。证据：`/tmp/.trm-status.out`（root，20:50）= `[OFFLINE] daemon is not running`
-（那一刻 RPC 与 HTTP 都不通），而同一时刻 daemon 日志是 `unix_socket_listening /run/trimum/trimum.sock`；
-journal 显示 20:50:01 起、20:50:02 停，只隔 1 秒。
-
-**「IPC socket 不存在」是回滚后的正常现象**：drop-in 撤掉后 daemon 回到 `/run/user/1000/trimum.sock`
-（现在是活的：connect 探测返回 `{"status":"ok","version":"0.5.0"}`），`/run/trimum/` 只剩一个 `RuntimeDirectory` 建的空目录。
-
-**socket 历史 bug 坐实三条**（daemon 日志逐行可指）：① 父目录不存在 → bind `ENOENT` → 只 `warning` 一声静默咽掉（daemon 仍报 `active`）；
-② 双实例互踩（`unix_socket_in_use` + journal 的 `restart counter` 涨到 **2134**，全是 `TCP 8321 已被占用`）；
-③ 客户端按 `exists()` 挑候选 → 选中 SIGKILL 残留的 stale 文件 → 静默退回 HTTP。
-
-**已改**：`config.py`（`TRIMUM_SOCKET` 契约 + `socket_candidates()` / `discover_socket()`）、`trimum_client.py`（按「能连通」挑）、
-`ipc_handler.py`（缺父目录自动建；bind 失败 → `logger.error` + stderr + `socket_start_error`）、`api_server.py`（`await ipc.start()`，
-不再让 `create_task` 吞失败）、`cli/_utils.py`（`rpc_call` 走候选表）、`scripts/harden_trmd_unit.sh`（`TRIMUM_SOCKET` 取代
-`XDG_RUNTIME_DIR` 劫持 + 就绪门 + 失败留证 + 默认 `@debug` / 默认不加只读）。
-测试：`tests/test_socket_path_consistency.py` **11 → 20**（本地 18 passed / 2 skipped）。
-
-**未做**（当轮口径；同日第四轮已补上，见下节）：TCP 收口（裁决 1）要先补 RPC 面（`health` 带 pid、
-`security.tokens/learning/learn`），顺序见 §9.3.5；生产单元仍未加固；**未安装任何包**。
-
-## 2026-09-21 TCP 收口：先把 socket 侧的腿补齐（✅ 代码已改；生产单元仍未切）
-
-> 用户口径：*「成功，写TCP吧」*（S1 恢复脚本跑通之后）。落地顺序取自 `docs/SANDBOX-PLAN.md` §9.3.5，
-> 改法 / 测试 / 真机切换顺序见 §9.3.7。
-
-**四步全部落地。**这四条都是「关 TCP 之前必须先有」的东西，少一条就等于关掉的是 daemon 而不是 TCP：
-
-| # | 改动 | 文件 |
-|---|---|---|
-| 1 | `health` 由 daemon **自报** `pid` / `uptime` / `http` / `ipc`（HTTP 与 IPC 共用一份 `_health_payload()`）；`trm status` 先认 `health.pid`，再退 pid 文件，最后才是 psutil 扫监听端口 | `api_server.py` / `cli/commands/status.py` |
-| 2 | 新增 RPC `security.tokens` / `security.learning` / `security.learn`；实现抽成模块级 `_jit_tokens()` / `_learning_status()` / `_run_learning()`，**HTTP 与 IPC 共用**；`trm security tokens / learning / learn` 改 **RPC 优先、HTTP 兜底** | `api_server.py` / `cli/commands/security.py` |
-| 3 | 新开关 `core.http_enabled`（默认 `true`）+ `TRIMUM_HTTP` 覆盖（`0`/`false`/`no`/`off` 关，其余一律当开）。关掉时 **不启 uvicorn**，由 `main._serve_without_http()` 自己驱 `app.router.lifespan_context(app)`（与 uvicorn 内部**同一段 lifespan**）；端口预检也只在开 HTTP 时跑 | `config.py` / `main.py` |
-| 4 | 关掉 HTTP 时 socket bind 失败 → `IpcUnavailableError` 从 startup 抛出 → `trmd` 以 `exit 3` 中止；**开着 HTTP 时仍只记 `error`**（那时用户还有路走，不该拦启动） | `ipc_handler.py` / `api_server.py` / `main.py` |
-
-顺带：`IpcHandler.listening` 成了 `health.ipc` 的来源 ——「socket 到底起没起来」从此是 `trm status` 上的一行。
-
-**测试**：新增 `tests/test_ipc_only_mode.py` **14 项**；`test_api_server_startup.py::TestHealthVersion`（health 不再只有
-version）与 `test_cli_commands.py`（RPC 优先 + pid 来自 health）同步改。全量 **1519 passed / 2 failed / 10 skipped**
-（2 项 = 既有宿主基线：PATH 缺 `python.exe`、LLM 断网；与开工前逐条同名同数）。
-
-**真机验证（隔离环境，2026-09-21 第四轮）**：`scripts/accept_ipc_only.sh` —— 不碰生产 daemon、不碰
-`~/.trimum`、不用 sudo，用整棵 HEAD `src` 起一个 `http_enabled: false` 的 daemon，**15 PASS / 0 FAIL**
-（status 走 RPC 且 http=false/ipc=true/pid 对得上；`security learning|tokens|learn` 在 HTTP 关闭下全通；
-本进程没有任何 HTTP 监听；socket 起不来 → `exit 3`；SIGTERM 干净收摊；`TRIMUM_HTTP=1` 可反向打开）。
-
-**真机抓到两件事**（详见 `docs/SANDBOX-PLAN.md` §9.3.8）：
-① **真 bug 已修**：致命路径用 `sys.exit(3)` 会挂住（`timeout 90` 只能 SIGKILL，退出码 124 而不是 3）——
-  真因是 `ContextManager` 的 **aiosqlite 非 daemon 线程**，startup 失败时 lifespan 的 `__aexit__` 不会跑、
-  连接没人关，解释器停在 `threading._shutdown()`（faulthandler 栈为证）。改用
-  `abort_startup(..., hard=True)`（flush + `logging.shutdown()` + `os._exit(3)`），并加子进程回归测试。
-  同类风险 uvicorn 路径也有，未动，记进 `TODO.md`。
-② **开发树 `~/trimum/src` 也落后 HEAD 一大截**（缺 `SecurityRuntime`）—— 只覆盖「本轮改的几个文件」装不上，
-  与 §9.3.6 的部署树问题同源 ⇒ 两棵树都要整体同步；导入预演那条护栏确实有用。
-
-**未做**：真机切换（`http_enabled` 默认仍 `true`，生产单元没动）；两棵树整体同步；S2～S5。**未安装任何包。**
-
-## 2026-09-21 编码智能体调研：ECC 适合吗？（✅ 已完成，**只调研不改代码**）
-
-> 用户提问：① ECC 如何做成一个 coding Agent；② 参考 `~/.trimum/agents/` 别的 Agent 的文件格式；③ 还有没有其他可直接复用的开源项目；④ **先想 ECC 适合吗**。
-> 产出：`docs/CODING-AGENT-REUSE-RESEARCH.md`。事实层材料 `tmp/research/coding-agents/`（19 个仓库快照 + aider 源码 30 件 + 两份事实草稿，均已 gitignore）。
-
-**结论：ECC 不适合做成 coding Agent。** 它没有可复用的执行体 —— 68 个 `agents/*.md` 是提示词、292 个技能是文本、
-hooks 是「宿主事件 + node 命令」，**ECC 自己就是 Claude Code / Codex 的插件包**（`.claude-plugin/plugin.json`、`.codex-plugin/plugin.json` 都在树里）。
-三条路径逐条算过账（该文 §2）：包成 trimum 子 Agent → **空壳**（`AgentManifest` 里只有 `name`/`description` 对得上，
-`entry`/`capabilities`/`permissions`/`events`/`risk_level` 全无对应，且 `system_prompt_path` 在代码里**零消费者**）；
-当内容注入 → **唯一成立的用法**（正对 E7 步骤 3）；接它的代码 → 只换来 Node + Rust 依赖。
-
-**三处数字修正（原文档虚高，勿再引用）**：`SKILL.md`「903」是重复计数 → 真实 **292**（另有 `docs/` 译本 518 + 宿主目录副本 93）；
-「30+ 宿主」是**另一个项目 rulesync** 的自述，ECC 自述 **7 个 harness**；`docs/` 2,141 个文件大半是译本。
-star:watcher = 194.8，与同类同区间（superpowers 267.8 / rulesync 728.0 / anthropics-skills 157.3）→ **「刷星」这条不成立**，如实记录。
-
-**另一件已经做完的事**：ECC 的核心分发机制 trimum 早已实现 —— `skill_sync.py` + `hosts.py` 的 **14 个已知宿主**（覆盖 ECC 全部宿主目录）
-+ 探测 + 符号链接/junction，代码注释写着 *"the wider set of ECC-style harnesses"*。**这块不用再学第二遍，差的只是内容。**
-
-**可直接复用的清单（很短）**：`python-unidiff`（统一差异解析，MIT、活跃、只 parse 不 apply → 可直接依赖）；
-`grep-ast`（代码感知检索；366★、约 16.5 个月未推、带 tree-sitter 两个依赖）；其余**抄设计**（aider / gptme / cline / crush / opencode）。
-不建议接：Roo-Code（已 archived）、continue（自称 read-only）、python-patch（4 年 8 个月未动 + 无许可）、SWE-agent（官方指向 mini-swe-agent）、
-codex / goose（README 无部件级信息）、bubblewrap / nsjail（Linux 内核特性，Windows 无对应）。
-
-**对 E7 的建议（待裁决）**：参考对象由 ECC 换成 **aider**（13 种编辑格式、`max_reflections=3` 的错误回灌、
-`search_replace.py:438-439` 唯一性检查被注释掉的设计张力、`auto_commit` 早于 `confirm_ask` 的红线冲突）；`TODO.md` E7 条目已同步改口径。**本轮未改任何代码。**
-
----
-## 2026-09-21 穿插项步骤 A：剧本自动触发策略（✅ 已完成）
-
-> 计划：`TODO.md`「🔧 穿插项实施计划」步骤 A。问题源头：P0 把「L4 → 总线 → 剧本」接通了，
-> 但 16 条内置剧本 `config.enabled=False` + `register_builtin(enabled=False)` 双重压死 ——
-> **一条剧本都没武装**，真机上仍然不会自动响应。
-
-**查代码得到的关键事实**：剧本步骤是「命令 + 散文」混合的 —— 命令式步骤（`cat /etc/ld.so.preload`）
-走网关，散文式步骤（「比对上次 hash 基线」/「kill 对应 PID」）**派子 Agent**。子 Agent 会干什么
-不由剧本决定，**所以「只读剧本」不等于「只读运行」**，自动触发必须按步骤放行。
-
-**裁决三条**
-
-| 裁决 | 落地 |
-|---|---|
-| 取证类 8 条武装（prelink / ebpf / kernel / crypto / ssh / cron / systemd / memfd） | 数据位 `auto_trigger: True` → `config.enabled` 跟着它 |
-| 处置类 8 条不武装（revshell / ransomware / btrfs / persistence / supply-chain / prompt-injection / audit-integrity / pipe-download） | `auto_trigger: False`：处置要人点，不做「半自动处置」（会制造「已经响应了」的错觉） |
-| 自动触发不派子 Agent | 事件运行里非取证步骤 `skipped`（`task.node.skipped`，`reason=auto_run_blocked:<kind>`）；人工 `run` 不受限 |
-
-**判据**（`threat_workflows.step_kind()`）：`auto`（**只读取证白名单命令**，白名单外一律不自动跑）/
-`review`（要判断的散文）/ `action`（处置：散文含处置动词，或命令不在白名单 / 带 `-delete`·`>`）；
-**看不懂的散文一律当 `action`**（保守）。红线：`enabled` 只决定「事件要不要跑」，**不能**放宽步骤闸门。
-
-**改动面**：`threat_workflows.py`（16 条数据位 + 三分类 + 编译时把 `step_kind`/`auto_run` 写进节点 config）、
-`workflow_runtime.py`（`register_builtin(enabled=None)` / `register_all(builtin_enabled=None)` 改按剧本自己的位；
-运行上下文补 `triggered_by`）、`workflow_engine.py`（`_auto_run_block()` 闸门，`auto_run` 缺省 True）。
-
-**测试**：新增 `tests/test_playbook_auto_trigger.py`（40 项：三分类参数化 / 数据位与步骤性质双向一致 /
-武装剧本无处置步骤 / 节点带闸门 / 事件运行只跑取证 / 处置剧本事件不唤醒 / 人工运行不受限 / 强制全关全开）；
-改 3 处旧断言（`test_workflow_runtime.py` 两条 + `test_api_server_startup.py` 一条 —— 它们锁的正是旧口径），
-`test_gateway_layer4.py` 的端到端步骤改成取证命令。全量 **1365 passed / 5 failed / 8 skipped**（5 项 = 既有基线）。
-
----
-
-## 2026-09-21 穿插项步骤 B：总线硬化（✅ 已完成）
-
-> 计划：`TODO.md`「🔧 穿插项实施计划」步骤 B。问题源头：2026-09-20 的只读总线审计 ——
-> `_safe_call` 静默吞订阅者异常（`TRM-9005` 全库无人 raise）、`EventIndex` 没接进 `publish`、
-> `LiveConsole.subscribe_events` 订阅与比对不匹配（进度永远不亮）。
-
-| 缺口 | 落地 |
-|---|---|
-| 订阅者异常静默 | 记 `WARNING` 日志（订阅者名 + 事件类型 + 堆栈）+ `dispatch_failures` 计数 + `last_failure` 快照 + 广播 `event.eventbus.dispatch_failed`（它自己再失败只记不播，防转圈） |
-| `TRM-9005` 没人 raise | 严格模式（`TRIMUM_BUS_STRICT=1` 或 `EventBus(strict=True)`）抛 `TrimumError(TRM-9005)`，由 `await bus.wait_for_handlers()` 收集（`publish` 是 fire-and-forget，异常得有地方收）；默认关 |
-| `EventIndex` 没接线 | `publish` 走首段分桶索引；通配匹配实现收敛到 `event_index.matches()` 一处（`EventBus._matches` / `EventIndex._matches` 都转发它）。**workflow 触发器口径仍故意分开**（剥 `event.`/`task.` 前缀 + `fnmatch`），两条都由测试钉住 |
-| `LiveConsole` 不亮 | 改按**段**匹配（`task.node.started` / `task.workflow.started` 都算 `started`）；同一步骤的重复事件去重（直接调用与事件订阅会撞车）；**补订 `security.*`** —— 告警分支以前从没被喂到过 |
-| SDK 侧错用法 | `src/agent-sdk/trimum_agent.py`：`publish("tool.executing", {...})` → `emit_event("tool.executing", "agent-sdk", {...})`；异常从 `pass` 改成记日志 |
-
-**观测面**（排障用）：`bus.stats()`（patterns / subscribers / history / in_flight / dispatch_failures / strict）
-与 `await bus.wait_for_handlers(timeout=...)`。
-
-**测试**：新增 `tests/test_event_bus.py`（103 项：通配口径三处一致 + 索引与旧「整表扫描」逐条等价 +
-失败可观测 / 严格模式 / 退订同步索引 / `stats`）+ `tests/test_live_console.py`（7 项：进度按段点亮 / 重复去重 /
-告警两种前缀 / 退订停订 / 无总线只告警）。全量 **1475 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线）。
-文档：`docs/ARCH.md` 新增「事件总线（`event_bus.py`，2026-09-21 硬化）」一节；`docs/ERROR-CODE-SPEC.md` 的
-`TRM-9005` 补接线说明。
-
----
-
-## 2026-09-21 S1：daemon 系统级加固（脚本就绪 + 冒烟 + 自动回滚，**未 apply**）
-
-> 裁决已定（见下表），S1 是沙箱前置片的第一片。本轮**未安装任何包、未重启任何服务、未改动运行中的单元**；
-> 生产 daemon 还是原来的零加固状态，等你跑 `sudo bash /tmp/harden_trmd_unit.sh --apply`。
-> 产物：`scripts/harden_trmd_unit.sh` + `docs/SANDBOX-PLAN.md` §6.6/§6.7/§9（口径、helper 设计、裁决）。
-
-### 六条裁决（2026-09-21）
-
-| # | 问题 | 裁决 |
-|---|---|---|
-| 1 | eBPF 监控要不要提权 | **要，走 `CAP_BPF` + root helper**（daemon 不加能力，也不把 eBPF 摘出方案） |
-| 2 | 要不要放开非特权 user namespace | **不全局放开**，将来需要时**定向**给 `bwrap` 写 AppArmor profile |
-| 3 | Docker 档放哪 | **Phase 5**（不可信第三方 Agent 包），不进 E7 主干 |
-| 4 | daemon 非特权 vs 加特权 helper | **加特权 helper**，daemon 本身仍非特权 |
-| 5 | 沙箱是否提到 E7 之前 | **是** |
-| 6 | E7 首发是否允许自动改盘 + 跑测试 | **默认只出差异 + 跑只读验证**，写盘要确认，`--yes` 才自动落盘 |
-
-另：E7 入口定为 **`trm exec --code`**（不新开 `trm code`）；`skill.yaml` 与 `SKILL.md` **不合并**（同批裁决记在 `docs/CODING-AGENT-PLAN.md` §8.1）。
-
-### 实做中推翻的三处原设想（都是真机实测逼出来的）
-
-| 原设想 | 实际采用 | 理由（一手事实） |
-|---|---|---|
-| `ProtectSystem=strict` + `ReadWritePaths` 白名单 | **`ProtectSystem=full`**，不列白名单 | daemon 要在**任意工作区**写盘，白名单**列不全**（列漏 = 运行时才炸）；`full` 盖住 `/usr`/`/boot`/`/efi`/**`/etc`** 的持久化面，工作区粒度交给 S2 的 Landlock |
-| `ProtectHome=read-only` | `ProtectHome=no`（显式写出） | `~/.trimum` 与工作区都在 `$HOME` —— 这是**明确放弃**的边界，写进 drop-in 当记录 |
-| `SystemCallFilter=@system-service` | **黑名单**（`~`） | 实测 systemd 255 的 `@system-service`（展开 375 条）**不含** `seccomp(2)` 与 `landlock_*`(444/445/446)，且这三个**任何分组里都没有** —— 白名单会**把 S2/S3 自己要装的沙箱挡在门外** |
-| `PrivateDevices=yes` | **不开** | 它会建一个**不带 `/dev/shm`** 的 `/dev` → Python `multiprocessing` / 共享内存类工具会挂；对非 root daemon 的收益本来就近于零 |
-
-### 额外两个实测发现（一条改了设计、一条新增待裁决）
-
-1. **daemon 的 IPC socket 之前根本没起来**：默认路径 `/run/user/<uid>/trimum.sock` 下没有文件（系统单元里 `XDG_RUNTIME_DIR` 为空），
-   `trm status` 一直显示 **`source: http`**。S1 用 `RuntimeDirectory=trimum` + `Environment=XDG_RUNTIME_DIR=/run/trimum`
-   把 socket 落到 `/run/trimum/trimum.sock`（目录 0750 / socket 0700）。
-   配套代码改动（唯一一处）：`trimum_client.socket_candidates()` 增加 `/run/trimum/trimum.sock` + 3 个测试 ——
-   否则 daemon 绑了 A、客户端去连 B，仍旧静默降级成 HTTP。
-2. **HTTP 端口是尚未收口的授权面**：`127.0.0.1:8321` 对**同机任何用户**开放（loopback 不做 uid 检查），背后是完整的工具执行 API。
-   systemd 的只读路径指令**管不了 IPC**（文档原文：这类选项「do not affect the ability for programs to connect to」），
-   要收口只能从监听面动手 → 列为新增待裁决（`docs/SANDBOX-PLAN.md` §9.2-1，建议只留 unix socket）。
-
-### 加固脚本怎么用（`scripts/harden_trmd_unit.sh`，已传真机 `/tmp/`）
-
-```bash
-sudo bash /tmp/harden_trmd_unit.sh            # dry-run：打印现状 + 将要写入的 drop-in（默认行为）
-sudo bash /tmp/harden_trmd_unit.sh --apply    # 备份 → 写 drop-in → daemon-reload → 重启 → 冒烟 → 失败自动回滚
-sudo bash /tmp/harden_trmd_unit.sh --verify   # 只跑冒烟复查
-sudo bash /tmp/harden_trmd_unit.sh --rollback # 还原最近一次备份
-```
-
-drop-in 走 `/etc/systemd/system/trmd.service.d/10-hardening.conf`（**不改原单元**），
-备份落在 `/var/backups/trimum/harden-<时间戳>/`（含 `unit-before.txt` 与一键 `rollback.sh`）。
-
-**冒烟断言**（任一 FAIL 自动回滚）：`systemctl is-active`；`ProtectSystem=full`；`NoNewPrivileges`/`RestrictNamespaces`/`PrivateTmp`=yes；
-`CapabilityBoundingSet` 空；**进程内实测** `/proc/<pid>/status` 的 `NoNewPrivs: 1` 与 `Seccomp: 2`；
-`/proc/<pid>/mountinfo` 里 `/usr` 与 `/etc` 是 `ro` 而 `/home` 不是；**`mountinfo` 条目数 > 宿主基线 47**（证明命名空间真建了）；
-`/run/trimum/trimum.sock` 存在；以服务用户跑 `trm status` / `trm tool list` 通过；日志无 `unix_socket_start_failed`；
-syscall 探针（同一套黑名单下 `landlock_*`/`seccomp`/`prctl` 不被挡、`bpf`/`ptrace`/`mount` 被挡）。
-
-### 真机验证（本轮已跑，全部只读）
-
-| 检查 | 结果 |
-|---|---|
-| 脚本语法 `bash -n`（3 个 + 本脚本） | 全 OK |
-| dry-run | 跑通：现状段正确报出 `mountinfo=47`（= 没有命名空间）、当前评分 **9.2 UNSAFE** |
-| `--stage` 渲染 | drop-in 全文正确（含 `ProtectSystem=full`、黑名单、`RuntimeDirectory=trimum`） |
-| 黑名单实际拦截效果（用户级复现同一套过滤器） | `bpf`/`ptrace`/`mount`/`init_module`/`kexec_load`/`userfaultfd`/`io_uring_setup`/`process_vm_readv`/`swapon`/`add_key` → **全部 EPERM**；`landlock_create_ruleset`(14)/`landlock_restrict_self`(77)/`seccomp`(22)/`prctl`(22) **未被误伤** |
-| `--allow-debug` 变体 | `ptrace` 恢复 `errno=0`，`bpf` 仍 `EPERM`（开关有效） |
-| 客户端测试 | `tests/test_socket_path_consistency.py` **11 passed** |
-
-> **未做（要 `sudo` 密码，只能你自己跑）**：`--apply` 安装 + 冒烟；`check_sandbox_caps_root.sh`（系统级能力核对）。
-
----
-
-## 2026-09-21 沙箱前置片：把内核级边界提到 E7 之前（调研 + 真机实测 + 脚本，✅ 方向已定）
-
-> 裁决落地：原「**沙箱是否提到编码智能体之前**」**已定为「是」** —— 编码智能体会大量写盘、跑测试，
-> 没有内核级边界就不敢让它自己动手。本轮**只写文档与脚本，未改代码、未装任何包、未重启任何服务**。
-> 产物：`docs/SANDBOX-PLAN.md`（10 节）、`scripts/setup_ubuntu_toolchain.sh`、`scripts/check_sandbox_caps{,_root}.sh`。
-> 原始材料：`tmp/research/sandbox/`（143 份一手材料 + `draft-C-sandbox.md` 651 行）。
-
-### 四个问题的答案
-
-| 问题 | 答案 |
-|---|---|
-| 主流沙箱怎么做 | **三层收敛**：① **策略层**（谁能做什么 —— K8s Pod Security Standards 的 Restricted 档要求 `seccompProfile: RuntimeDefault`、`capabilities.drop: [ALL]`、`allowPrivilegeEscalation: false`，且明确标注 **Linux-only**）；② **内核层**（Landlock LSM / seccomp-bpf / AppArmor / namespace / cgroup v2）；③ **边界层**（换运行时拿更强边界：OCI 容器 → gVisor `runsc` → microVM Firecracker）。**接口收敛在 OCI runtime-spec**（namespace / seccomp / cgroup / maskedPaths 都是可移植字段）；所谓「沙箱」多数 = 内核层机制组合 + 一份默认 profile（Docker 默认 seccomp 是 `SCMP_ACT_ERRNO` 白名单，300+ syscall 里默认挡掉约 44 个） |
-| 需不需要 Docker | **不进主干**：① 粒度不匹配 —— 要的是**每次工具调用**的边界，Docker 给的是**整容器**的边界（每次 spawn 一个容器太慢）；② 会成**第二条执行通道**，与「一切动作经 `ToolGateway`」红线冲突；③ 真机已装（29.8.1）但**本地 0 个镜像**，用一次就要拉网。**留作 Phase 5**：隔离不可信第三方 Agent 包 |
-| 真机能不能做 | **能，而且不需要 root**：Landlock **ABI=4** 已实测可拦（40 行 ctypes PoC）；seccomp 走自带 `libseccomp 2.5.5`（ctypes 可加载）；资源边界走 systemd 用户级 cgroup 委派 |
-| 还需装什么 | 沙箱主干（Landlock + seccomp + systemd 用户级 + cgroup）**几乎零新依赖**；要装的是「把 C/BPF 侧做扎实」与「写脚本 / 排障」那批（清单见 `docs/SANDBOX-PLAN.md` §7.1，core 档 13 项真机已装 3 项、待装 10 项） |
-
-### 真机实测（Ubuntu 24.04.1 / kernel 6.8.0-41-generic / systemd 255 / 8 核 7.4G / 854G 可用）
-
-| 结论 | 依据 |
-|---|---|
-| Landlock **非特权可拦** | 纯 ctypes 三个 syscall（444/445/446）+ `prctl(PR_SET_NO_NEW_PRIVS)`：`/` 只读 + 一个目录全权限 → 允许路径可写、**写 `$HOME` 得 `EACCES`**、只读路径可读不可写、**跨 `execve` 继承**（子进程也被拒）、只能收紧不可逆 |
-| systemd 用户级**真生效** | `NoNewPrivileges`（`NoNewPrivs: 1`）、`SystemCallFilter`（`Seccomp: 2`、`Seccomp_filters: 3`）、`MemoryMax` / `CPUQuota`（单元内 `memory.max=33554432`）、`PrivateUsers=true`（userns inode 变化、`CapEff: 0`） |
-| systemd 用户级**静默 no-op**（决定性） | `ProtectSystem=strict` / `ProtectHome=read-only` / `PrivateTmp=yes`：三类单元（单独 / 组合 / 加 `PrivateUsers=true`）的 `/proc/self/mountinfo` **条目数全是 47 = 宿主** —— **根本没建 mount namespace**；`$HOME` 照写成功、宿主能看到单元写进 `/tmp` 的文件 |
-| 非特权 userns 被禁 | `kernel.apparmor_restrict_unprivileged_userns=1` → `unshare --user/-m/-n` 与 `bwrap`（`setting up uid map: Permission denied`）全拒 → bubblewrap / rootless 容器 / podman / nsjail 当前**都不可用** |
-| eBPF 非特权不可用 | `kernel.unprivileged_bpf_disabled=2` → `security.ebpf_alert` 在 daemon 当前运行方式（`User=guzhujushi`）下**不可能工作**，**校正** `docs/SECURITY-DEFENSE-PLAN.md` 把 eBPF 当常规手段的前提 |
-| cgroup v2 统一层级 | 用户 slice 委派 `cpu memory pids`；普通用户**不能**直写 `/sys/fs/cgroup` |
-| daemon 现状 | `/etc/systemd/system/trmd.service` **零加固**（只有 `User=guzhujushi` + `WorkingDirectory=/opt/trimum`）；`/run/trimum` 不存在 → RPC 走 HTTP 回退 |
-
-**踩坑（已写进纪律）**：第一轮用 `systemd-run --user -p ...`（**不带 `--wait`**）测沙箱，因竞态误判成「拦住了」。
-**唯一可信口径是 `systemd-run --wait --pipe`。**
-
-### 三个脚本（未装任何包；真机 `sudo` 需要密码，root 那个只能本人跑）
-
-| 脚本 | 需要 sudo | 真机状态 |
-|---|---|---|
-| `scripts/setup_ubuntu_toolchain.sh` | 是（默认 dry-run；`--apply` 才装；`--tier` 选 core / ops / optional / all） | 已传 `/tmp/`（sha256 与本地逐字一致）；dry-run 跑通：**tier=core 13 项已装 3、待装 10** |
-| `scripts/check_sandbox_caps.sh` | 否 | 已跑通 **PASS=8 WARN=6 FAIL=0** |
-| `scripts/check_sandbox_caps_root.sh` | 是 | **本轮核实：上一轮其实没传上去**，本轮已补传（sha256 与本地一致）；**未跑** —— 真机 `sudo` 需要密码 |
-
-### 设计要点（`docs/SANDBOX-PLAN.md` §6 / §8）
-
-- 新增**内核层**（Layer K），与既有四层网关**串联不并列**：内核层只做「施加 + 如实记录」，不做决策；**fail-closed**（沙箱没装上就不许执行）。
-- 六个 spawn 点必须收口到新封装 `sandbox_exec`：`tool_dispatchers.py:641,389,502,507,525,530` + `agent_launcher.py:132`。
-- 三档档案 `readonly` / `workspace-write`（默认）/ `strict`，声明在 `agent.json5` 的 `sandbox` 段（既有设计已有 `seccomp_profile` / `extra_syscalls` / `extra_block`，加 `fs_read` / `fs_write` 即可）；`AuditRecord.sandbox` 字段已存在（`models.py:749`）。
-- **Windows 降级**：明确报 `unsupported`，绝不允许「不知道就放行」。
-- 分片：**S1** daemon 加固 → **S2** 施加点收口（Landlock）→ **S3** seccomp 三档 → **S4** 子 Agent 走 systemd transient → **S5** 可选档（等裁决）。
-
-### 待裁决四条 —— **已于同日全部裁决**（见上一节「S1：daemon 系统级加固」）
-
-1. eBPF 提权 → **CAP_BPF + root helper**；2. 非特权 userns → **不全局放开**，定向给 `bwrap` 写 profile；
-3. Docker 档 → **Phase 5**；4. daemon → **保持非特权 + 加特权 helper**。
-新增待裁决三条见 `docs/SANDBOX-PLAN.md` §9.2（HTTP 端口收口 / `@debug` 取舍 / `ReadOnlyPaths` 是否保留）。
-
----
-
-## 2026-09-21 E7 规格与设计：自研编码智能体（草案，待裁决）
-
-> 提交：`36fedb7`（server 分支）。立项依据：`TODO.md`「🌐 生态战略」E7 项；本轮**只写文档，不改代码**。
-> 产物：`docs/CODING-AGENT-PLAN.md`（规格 + 设计 + 五步分片计划）。
-> 同轮修正一处口径冲突：`docs/ECOSYSTEM-STRATEGY.md` §5 的 **E7** 原写作「身份与多用户」，
-> 那份内容已由 E5 第三片（能力清单运行期交集）+ E6（官方 Agent 证书）+ `docs/MULTI-USER-BOUNDARY.md` 落地，
-> 故 E7 让位给「自研编码智能体」（修订说明写进该文档）。
-
-### 结论：缺的不是引擎，是编码专用的三块拼图
-
-| 缺口 | 现状（查代码得到） | 要补 |
-|---|---|---|
-| 编辑原语 | `file.write` 只能整文件覆盖 / 追加（`mode=w` / `a`）；全库无 `difflib`、无补丁应用 | 锚点替换 + 统一差异应用 + 会话级快照与回滚 |
-| 验证闭环 | 没有「跑测试 / 构建 / 检查并解析结果」的一等抽象，循环只拿到原始标准输出 | 结构化「红 / 绿 + 失败清单」回灌循环 |
-| 技能与规则运行时 | `SKILL.md` 只被分发到别的宿主；`skill.yaml`（旧）与 Agent Skills（新）两套互不相干 | 命中才注入上下文 + 工具事件上的检查（钩子） |
-
-外加第四块：`agent_runtime` 的 spawn 仍是空壳、`task.assigned` 至今没有生产者 ——子 Agent 委派做实。
-
-### 参考对象 ECC 的事实（不是印象）
-
-快照 2026-09-20（262,999★，MIT）：仓库 5,026 条目、`SKILL.md` **903** 个、`rules/` 144 个文件、
-斜杠命令 94、宿主适配目录 `.claude-plugin` / `.codex` / `.opencode` / `.cursor` / `.kiro` / `.agents` 等、文档 2,141 个。
-**关键判断：ECC 没有自己的模型循环**（循环与工具执行由宿主提供），它卖的是内容分层 + 工具事件钩子 + 安装适配 + 学习记忆。
-抄：按需加载省上下文 / 工具事件上的检查 / 跨宿主记忆交接 / 内容与运行时分离；
-不抄：903 个技能的内容农场、Node 适配层、钩子以特权脚本裸跑（trimum 的等价物是总线订阅 + 经网关的动作）。
-
-### 红线（拟，写进后续代码与测试）
-
-一切经 `ToolGateway`（不新增旁路）／改动必须能回滚（无差异不算成功）／保护路径直接拒／
-不自动提交版本库／测试不过不许声称完成／子 Agent 取权限交集且受限预算／技能是数据不是代码／没有模型就说没有。
-
-### 五步分片（每片独立可验收）
-
-1. 编辑原语与会话留痕（`patch_ops.py`，含 `--dry-run` 差异预览与回滚）
-2. 验证闭环（`verifier.py`，含「被网关拒时结论必须是 unknown 而非 green」）
-3. 技能与规则运行时（`instruction_loader.py` + 总线式钩子，首批三条流程：测试驱动 / 代码审阅 / 排障）
-4. 子 Agent 委派做实（spawn + `task.assigned` + 权限交集 + 预算 + 审计）
-5. 命令行入口与真机验收（`trm code`，命令面 78 → 79；`scripts/accept_e7.py` 五组）
-
-**裁决（更新）**：① 沙箱（Landlock / Seccomp）是否提到编码智能体之前 —— **已定为「是」**，见本文「2026-09-21 沙箱前置片」与 `docs/SANDBOX-PLAN.md`（新增四条待裁决在该文 §9）；
-② 首发是否允许自动改盘 + 自动跑测试 —— **仍未定**（草案建议：默认出差异 + 跑只读验证，写盘要确认，`--yes` 才自动落盘）。
-
----
-
-## 2026-09-21 穿插项步骤 C：`WorkflowListener` 接线（✅ 已完成）
-
-> 计划：`TODO.md`「🔧 穿插项实施计划」步骤 C。问题源头：W1 遗留 —— `WorkflowListener` 从未被实例化，
-> `event.transform.completed` 没有生产者，`workflow.trigger` 没有生产者，整条「意图驱动」链是摆设。
-
-### 做了什么
-
-| 位置 | 改动 |
-|---|---|
-| `workflow_listener.py` | 新增 `async def submit(instruction) -> TransformResult`：变换 Agent 翻译 → `emit_event("transform.completed", ...)` 发回**同一条总线**（不搞旁路），成为该事件的唯一生产者 |
-| 同上 | 删掉拼错的死订阅（`task.task.completed` / `task.task.failed` —— 前缀多了一个 `task.`）+ 两个孤儿处理函数 + `_pending_sub_tasks`；订阅表只剩真类型 |
-| 同上 | **红线**：`_request_confirm()` 从「没有确认回调就默认放行」改为**拒绝**（`listener.no_confirm_callback_denied`）—— 没装确认通道不能悄悄变成自动批准 |
-| `api_server.py` | 启动时装配（失败只记 `workflow_listener_start_failed`，不带崩 daemon）、停机先于 workflow 运行时收；状态挂 `ServerState.workflow_listener` |
-| `workflow_runtime.py` | 新增公开属性 `gateway`（listener 复用**同一**网关，不新建第二条执行通道） |
-| `cli/commands/workflow.py` | 新增 `trm workflow submit "<指令>"`（`--root` / `--timeout` / `--yes`），命令面 77 → **78**；非交互必须 `--yes` 才自动确认中匹配 |
-
-### 顺手修的两个真 bug（测试跑出来的，不是猜的）
-
-| bug | 后果 | 修法 |
-|---|---|---|
-| 日志器用错：`logging.getLogger(...)` 被当 structlog 用 | 每次 `log.info("x", k=v)` 都抛 `TypeError`，又被总线当时静默的 `_safe_call` 吞掉 —— 这个文件等于从不记日志 | 改用 `logger.get_logger` |
-| `_execute_shell()` 的 `ExecuteRequest(tool_type=..., command=..., raw_input=...)` 字段名全错 | 真字段是 `tool` / `args` / `raw_command`，pydantic 默认忽略多余字段 → 命令**静默变空** | 按真字段构造（`args=[shell_cmd]` + `raw_command`），并补 `SourceType` |
-
-另：`PlannerAgent` 默认剧本目录是 `Path.home()/.trimum/workflows`（**不看 `TRIMUM_HOME`**，会踩沙箱 / 多用户），
-daemon 与 CLI 都显式传 `trimum_path("workflows")`；低匹配转 Planner 那条路（`planner.task_created` → `workflow.trigger`）随之真正有人听。
-
-### 三段式（写进测试）
-
-| confidence | 行为 |
-|---|---|
-| ≥ 0.7 高 | 发 `workflow.trigger`（`decision=high`）→ 运行时唤起写了该 trigger 的剧本 |
-| 0.4 ~ 0.7 中 | 有回调且同意 → `decision=confirmed` 触发；无回调 → **不发**；拒绝 → **不发** |
-| < 0.4 低 | 转 Planner（`decision=planner`）；没有 Planner 时只留 `transform.completed`，不假装触发 |
-| `output_type=shell` | 直接走 `ToolGateway`（`args=[命令]` + `raw_command`），被拒时另发 `shell.denied` |
-
-**测试**：新增 `tests/test_workflow_listener.py`（12 项，含**端到端**：一句自然语言 → 变换 → `workflow.trigger`
-→ 文件剧本真的跑起来，节点 ok 且网关收到命令）+ `test_api_server_startup.py` 一条（daemon 装配 Listener）
-+ `test_cli.py` 一条（`workflow submit` 解析出 handler）。
-全量 **1489 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线）。文档：`docs/ARCH.md`、
-`docs/WORKFLOW-EXECUTION-PLAN.md`、`docs/SECURITY-DEFENSE-PLAN.md`（触发归属表）。
-
----
-
-## E5 第三片（✅ 步骤 1 卸载 + 步骤 2 发布方闭环 + 步骤 3 多用户边界，2026-09-21）
-
-> 计划与红线：`TODO.md`「🚚 E5 第三片实施计划」；口径：`docs/ECOSYSTEM-STRATEGY.md` §7.6、
-> 模块与红线：`docs/ARCH.md`「官方分发渠道（E5）」。
-> 提交：步骤 1 `d7aced2`（`trm install --remove`）、步骤 2 `fcecbfe`（`trm pkg index`）、步骤 3（纯文档，见下表）。
-
-**做了什么**：`trm install --remove <name>` —— 与 `--list` 对称，不新增顶层命令（命令面仍是 76）。
-两个动作成对：删掉 **ledger 指名的**落地目录 + 划掉登记行，不留「目录没了但还登记着」的半截状态。
-
-**两条红线（越界就一个字节都不删，报 `TRM-4009`）**
-
-| 红线 | 为什么 | 怎么判 |
-|---|---|---|
-| 登记路径越界即拒 | `installed.json5` 是可手改的文本，「登记里的 path」不作数 | 只有恰好等于 `<TRIMUM_HOME>/<TYPE_ROOTS[type]>/<name>` 才动手（比「落在类型根下」更严） |
-| 内置 agent 名字即拒 | `install_package(force=True)` 可能覆盖过内置 agent 目录，登记里没记「装之前 dest 在不在」 | 命中 `discover_bundled_agents()` 的 agent 包即拒并提示手工处理；**只管 agent**，同名 tool 可卸 |
-
-**确认口径**（沿用 `trm env install`）：交互式问一句；非交互必须 `--yes`（`ask_confirm` 在非 TTY 直接答 no，
-不挂住），否则 abort → 退出码 1；`--dry-run` 恒不执行，但**红线照查**（干跑说「可以删」之后真删却被拒，比不干跑更糟）；
-`--remove` 与 `--file` 互斥；`--yes` / `--dry-run` 只作用于包渠道，不影响无参数的旧向导路径。
-
-**边界与联动**：卸载**不看** `trust`（不是授权动作），但删掉降级安装的包之后 `untrusted_names()`
-（`capability.py` 运行期读的就是这张表）同步不再含它；名字没登记过 → `TRM-4011` + 退出码 1（连删两次，
-第二次明确报错，不静默 0）；登记目录已不在 → 当**过期登记**划账并回报 `path_missing`，不崩在 `rmtree` 上；
-不碰 `certs/` / `audit/` / `memory/`（agent 证书就是包目录里的 `cert.json`，随目录一起走）。
-错误码**复用 `TRM-4011`，不新增**。
-
-**测试**：`tests/test_pkg_install.py` 28 → **42**（`TestRemove` 14 项：越界 ledger 两种 / 内置 agent 拒删 /
-同名 tool 可卸 / 干跑不动盘不动账 / 幂等连删 / 非交互 abort / `--file` 互斥 / 缺名字 / 过期登记 / 运行期联动）。
-全量 **1315 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线：沙箱写 `~/.trimum` 被拒 ×4 + LLM 断网 ×1，无回归）。
-
-### 步骤 2 — 发布方闭环（`trm pkg index`）
-
-**做了什么**：`trm pkg index <dir> -o index.json5 --signer-cert … --key …` —— 发布方闭环的最后一步：
-扫目录里的 `.trmpkg` → 生成 `trmindex/1` document → 用签名者签 → 落盘（命令面 76 → **77**，
-新码在 `pkg_index.entries_from_directory()`，CLI 只做接线）。四条口径：
-
-| 口径 | 为什么 |
-|---|---|
-| 只收录**验得过**的包，一个不过就整体失败并逐条列原因、**不写索引** | 「悄悄少一个包」比「报错」危险得多 |
-| 字段取自**校验过的 manifest**，不是文件名 | 文件叫什么 ≠ 包里写的是什么 |
-| `url` **相对索引位置**（`/` 分隔，支持子目录） | 索引与包同目录即可离线安装（`resolve_url` 解析） |
-| **写完自检**：刚签出来的索引就地验一遍（签名 + 证书链） | 否则「签名」只是自我安慰 |
-
-`--force` 才能覆盖已存在的索引；**改一个包就要重签索引**（条目里的 `sha256` 是索引对包的承诺）。
-
-**验收（按计划原样达成）**：`trm pkg index dist/` → `TRIMUM_PKG_INDEX=dist/index.json5 trm install <name>`
-一条链跑通 —— `tests/test_pkg_install.py::TestInstallFromIndex::test_an_index_built_by_the_cli_installs_end_to_end`
-（发布方用 CLI 造索引 → 使用者用该索引装包 → 落地并登记）。
-
-**官网服务端仍不做**（域名 / 托管 / CI 属产品决策）：本步骤交付的是**可离线复现的发布闭环 + 运维手册**
-`docs/PACKAGE-CHANNEL-OPS.md`（造根 → 建签名者 → 打包 → 建索引 → 上线 → **轮换根**（换根 = 旧包全部作废）→
-内网镜像（`--index` 指过去，镜像不需要被信任）→ 出问题对照表 → 边界）。
-
-**测试**：新增 11 项（`tests/test_cli_pkg.py::TestIndex` 10：条目承诺 / 改 url 验不过 / manifest 说了算 /
-子目录相对 url / 验不过的包拒收 / 空目录拒收 / `--force` / 缺签名材料 / 跨根签名者 / 人读输出；
-外加上述端到端 1 项）。全量 **1326 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线，无回归）。
-
-### 步骤 3 — 多用户边界（调研 + 设计，**不改代码**）
-
-**交付**：`docs/MULTI-USER-BOUNDARY.md`（现状对照表 / 三个问题各带方案 / 六条不变量 / 实现顺序与风险）；
-`docs/ECOSYSTEM-STRATEGY.md` §7.2 改为定稿指针并新增 §7.8；`docs/ARCH.md` 与 `AGENTS.md` 文档地图同步。
-
-**复核结论：现有设计没有硬伤，因此不动代码。** 「每用户一份」在这个仓库里是**结构上成立**的 ——
-每个关注点都只有一个改点，不是散落的路径拼接：
-
-| 关注点 | 唯一改点 | 多用户下会怎样 |
-|---|---|---|
-| 用户数据根 | `paths.trimum_home()`（`TRIMUM_HOME` 可覆盖） | 家目录天然每用户一份 ✓ |
-| 身份私钥 | `identity.py`（POSIX 0600） | POSIX 够用；**Windows 上 `chmod` 不产生 ACL** |
-| 配置 / 策略 | `config.py` 的 XDG 路径（`--config /etc/trimum/config.yaml` 已能用） | 缺「系统默认 → 用户覆盖」的合并规则 |
-| 审计 | `audit_store.default_audit_path()` | **`AuditEvent` 没有 `user_id`**：分不清是谁做的 |
-| 运行时 socket | `config.default_socket_path()`（按 uid） | **已经 per-uid**，这层不用重做（好先例） |
-
-三个问题的方案（明细见文档 §2 / §3 / §4）：
-
-1. **`/etc/trimum/` 只放公开物**：官方信任根 / 系统策略基线 / 系统配置基线 / 可选共享包；带私钥或带个人数据的
-   一律只能进用户层。查找顺序 = `~/.trimum/<type>/` → `/etc/trimum/<type>/` → 内置，同名以**用户层为准**；
-   公共层只读（用户进程不写），共享安装需要第二张账 `/etc/trimum/config/installed.json5`。**迁移成本低**：
-   新增 `paths.system_home()` + 三处查找改成有序列表，**写入路径一个都不动**。
-2. **审计 `user_id` + `machine_id` 三步**：加字段（纯增、向后兼容）→ 允许配置指向共享审计文件（默认仍写自己
-   的）→ 系统模式下用 `SO_PEERCRED` / 命名管道 SID 交叉校验。**不整体搬去 `/var/log`** —— 那会破坏
-   「审计是旁路、写失败不影响执行」这条既有取舍。
-3. **私钥保护三档**：A 现状 + 告警 / B 文件权限收紧（Windows 用 ACL）/ C keyring·DPAPI。建议先 **B**、
-   **C 作可选后端**；红线不变（私钥不进公共层 / 仓库 / 日志）。
-
-**为什么不改代码**：计划写的是「除非发现现有设计有硬伤，否则不动代码」。逐条查下来，socket 已按 uid 分目录、
-`agents/<name>/cert.json` 已把「来源 + 证书 + 版本 + 登记」捆在最小单位、`installed.json5` 每用户一份够用 ——
-没有一条是「现在就必须拆」的。多用户真正缺的是**产品决策**（账号体系 / 团队共享）与**系统公共层**，
-两者都不该在没有需求时先写实现。
-
-**测试**：本轮只加文档，全量仍 **1326 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线，逐条相同，无回归）。
-
-### 提交与分支
-
-> 分支纪律见 `AGENTS.md`：**日常只推 `server`**，`main` / `ubuntu` / `arch-linux` 只在收尾阶段同步。
-
-| 内容 | server |
-|---|---|
-| E5 第三片 步骤 1（`trm install --remove` + `TestRemove` + 文档 §7.6） | `d7aced2` |
-| E5 第三片 步骤 2（`trm pkg index` + `TestIndex` + `docs/PACKAGE-CHANNEL-OPS.md` + 文档 §7.7） | `fcecbfe` |
-| E5 第三片 步骤 3（多用户边界：调研 + 设计，**不改代码**；`docs/MULTI-USER-BOUNDARY.md` + 生态战略 §7.2/§7.8 + ARCH / AGENTS 指向） | `8646fe7` |
-| 穿插项 步骤 A（剧本自动触发策略：取证 8 条武装 / 处置 8 条不武装 / 自动触发不派子 Agent） | `d5d4b02` |
-| 穿插项 步骤 B（总线硬化：索引接线 / 失败可观测 / 严格模式 / 订阅修正） | `dd3c0a2` |
-| 穿插项 步骤 C（`WorkflowListener` 接线：`submit()` 当生产者 + daemon 装配 + `trm workflow submit`）+ 两个真 bug | `f51b86d` |
-
----
-
-## EventBus 通信审计（2026-09-20，只读分析）
-
-> 用户诉求原文：「请阅读一下 docs 文件夹里的文件，分析有关 EventBus 的通信，还有哪些没完成」。
-> 方法：通读 `docs/` 里与事件相关的文档（`SECURITY-DEFENSE-PLAN.md` §11、`security-agent-implementation-plan.md` §2/§3、
-> `TARL-SPEC.md` §7、`SYSTEM-MONITOR.md`、`ERROR-CODE-SPEC.md`、`WORKFLOW-EXECUTION-PLAN.md`），
-> 再对 `src/` 全量扫**生产者**（`emit_event` / `emit_task` / `SystemEvent(event_type=...)`）与**订阅者**（`subscribe`）逐条对照。
-> **本轮只读，未改任何代码**；完整清单与优先级落在 `TODO.md`「EventBus 通信缺口」（避免两处各写一份互相漂移）。
-
-### 一句话结论
-
-总线骨架是通的（pub/sub + `*` 通配 + 100 条环形历史 + replay），**缺的是生产端** —— daemon 里真正在跑的订阅者只有
-`SecMonitor` / `WorkflowEventDriver` / W1 `WorkflowRuntime`，而多个关键事件「有订阅没生产」。
-
-### P0：安全响应链未接线（拦得住，但不会响应 / 记录 / 通知）
-
-| 事实 | 证据 |
-|---|---|
-| L4 命中威胁只 `logger.warning` + 返回 denied，**不发 `security.monitor_result`、不调 SecExecutor** | `tool_gateway.py:715` |
-| `security.monitor_result` 唯一生产者 `SecMonitor._dispatch()` 只被 `_on_executing()` 调用，而 `agent.executing` **全库无生产者** | `sec_monitor.py:418 / 457 / 487` |
-| payload 契约不符：生产端嵌套 `{"threat": {...}, "original_event": {...}}`，16 条内置剧本条件是扁平 `payload.get('threat_name')` | 实测 `builtin_workflows()` 的 condition |
-| **后果** | 16 条威胁响应剧本永不自动触发（只能手动 `trm workflow run --event`）；`security.blocked` / `security.alert` 从不出现；`SecExecutor` 从未真正执行 |
-
-### 其余缺环（速览，明细见 TODO）
-
-- **零生产零消费**：`security.ebpf_alert` / `security.fuse_triggered` / `security.audit_breach`（子系统未开工）、`workflow.threat_response`（文档称「已有事件」，代码里没有）。
-- **有生产没消费**：`planner.*`、`agent.status_changed`（`agent_runtime` 只在测试里被实例化）。
-- **有订阅没生产**：`agent.executing` / `.executed`（SecMonitor 死订阅）、`memory.*`（MemoryBridge 未实例化）、`system.alert`（SystemMonitor 未实例化）、`event.transform.completed`（WorkflowListener 未实例化）。
-- **总线自身**：`_safe_call` 静默吞异常 + `TRM-9005` 从未 raise；`event_index.EventIndex` 没接进 `EventBus`；`LiveConsole.subscribe_events` 订阅 `task.*` 却全等比对 `task.started`（永远不亮）；SDK `trimum_agent.py:167` 的 `publish("tool.executing", {...})` 签名与事件名都错（异常被吞）。
-- **文档过期**：`docs/SYSTEM-MONITOR.md` 的示例用 `event_bus.emit()`（该 API 不存在）；旧 STATUS 表里 `TASK_ASSIGNED` 标 ✅，但 `task.assigned` 从未落地。
-
-> **修复进度（2026-09-21 回填）**：上列「总线自身」四项由穿插项**步骤 B** 全部落地；
-> 「有订阅没生产」里的 `event.transform.completed`、「有生产没消费」里的 `planner.*`、以及无处安放的 `workflow.trigger`，
-> 由穿插项**步骤 C** 接线（`WorkflowListener.submit()` 当生产者 + daemon 装配 + `trm workflow submit`）。
-> 仍未动的：`memory.*`（MemoryBridge 未实例化）、`system.alert` / `system.heartbeat`（SystemMonitor 未实例化）、
-> `agent.status_changed`、`task.assigned`、三个未开工子系统。
-
-### 优先级判断
-
-**P0 安全链接线 > E5 官方分发渠道**：安全响应是 trimum 的招牌能力，「拦截」能跑而「响应 / 审计 / 通知」是空的，
-等于 16 条剧本 + `SecExecutor` 全是摆设；分发渠道再顺，发的也是链条断的产品。改动点只有 3 处（统一 payload 契约 /
-L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线硬化是它的配套（`_safe_call` 静默是排障黑洞）。
-
----
-
-## E4 广接入（✅ 已完成，2026-09-20）
-
-> 计划与设计：`docs/E4-PLAN.md`；明细见文末「E4 广接入：生态导入器（2026-09-20）」。
-> 提交：计划 `fdee6d5` / S1+S2+S5 `be5198d` / S3 `861126e` / S4 `05bb1ee` / S6 文档 `be604e8` / S7 验收 `b5b2121`。
-> 遗留「`to_workflow_definition()` 不搬运 `instruction`」→ 已由 **W1** 修掉（见文末「W1 Workflow 执行语义」）。
-
----
-
+# STATUS — 当前进度
+
+> 工作流（2026-09-22 起）：本文件 = **常驻区（就地小改）+ 追加日志（只增不改）**。
+> - 顶部「当前状态 / 任务清单 / 决策记录 / 下一步」为**常驻区**，随进展就地小改。
+> - 底部「## 日志」按日期**从旧到新**；新进展**只追加到文件最末尾**，不回填、不通读全文。
+> - 日常只需读「当前状态」+ 最新一条日志即可定位；历史细节按需翻对应日期条目。
+
+## 当前状态（就地更新，只改这几行）
+
+- **阶段**：Phase 3 收尾已完成（P0/P1 阻断项清零，真机 Ubuntu 验证通过）。主线转 **E7 自研编码智能体** + **沙箱**（E7 前置，S1/S2/S3 已落地）。
+- **分支**：`server`，**已与 `origin/server` 同步**（`efe2885` ask --image + `01819e9` memory 于 2026-09-22 22:11 推送；本轮文档提交紧随其后）；`main` / `ubuntu` / `arch-linux` 里程碑收尾时同步（推送前先开代理 `127.0.0.1:7993`）。
+- **测试基线**：本地 **1664 passed / 6 failed / 23 skipped**（09-22 `trm memory import/export` 之后；6 条失败 = 既有宿主基线，零回归）。
+- **沙箱**：S1 系统级加固（真机已 `apply` 在位）/ S2 施加点收口（`sandbox_exec`，7 个 spawn 点，fail-closed）/ S3 seccomp 三档（真机验收 35/0）；**TCP 已收口**（`trm status` → `http: disabled` + `ipc socket: ok`，全机 8321 无监听）。
+- **下一步**：E7 待裁决两条（沙箱是否提前 / 首发是否允许自动改盘+自动跑测试）后开工；沙箱剩真机 4 条命令对照（`docs/SANDBOX-PLAN.md` §10.6，本人 sudo）+ 开发树整树同步。详见「下一步」与 `TODO.md`；本轮已按「模型分工」把待办切成 【Qwen】/【DS】/【本人】 三列（Qwen 任务附提示词）。
 ## 任务清单
 
 ### Phase 0 — 基础环境建设 ✅
@@ -1040,9 +135,34 @@ L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线
 | 2026-09-02 | Pydantic AI Harness 对比调研 | `docs/PYDANTIC-AI-COMPARISON.md` — 定位不同，不是竞品；发现 6 项 trimum Phase 3 差距 |
 | 2026-09-02 | REFERENCE-PROJECTS 审计 | `docs/REFERENCE-AUDIT.md` — 7 项目逐项对照，发现 35% 借鉴点未落地，新增 7 项差距（G3-G9）|
 | 2026-09-02 | Phase 5-7 规划扩展 | `docs/DEVELOPMENT-ROADMAP.md` 重写 — Phase 5 记忆+工具链 / Phase 6 ISO+包管理 / Phase 7 前端+生态市场 |
+| 2026-09-22 | `TODO.md` 只留未闭环待办 + 红线；已完成历史进 `STATUS.md`（追加式日志，只增不改） | 两文件曾各自维护「已完成」表，重复且互相漂移 |
+| 2026-09-22 | Codex 侧模型分工：【Qwen】交我算（免费，单次小任务）/【DS】deepseek-flash（复杂件）/【本人】需 sudo 或产品决策 | 交我算 10 次/分，Codex 一个 turn 十几次调用必撞 429；跑法与证据见 `docs/CODEX-MODEL-POLICY.md` |
+| 2026-09-22 | E7 参考对象由 ECC 改为 **aider** | ECC 不是运行时（自己就是宿主插件，格式对不上 trimum 子 Agent）；可直接复用的只有 `python-unidiff` / `grep-ast` |
 
 ---
 
+## 下一步（优先级排序）
+
+> 2026-09-20 二次重写：E4 / W1 闭环 + EventBus 审计之后，按「哪个缺口让已有能力变成摆设」重排。
+> 更早的 2026-09-01 旧清单里多数项已完成或已废弃 —— SafeMind 红蓝对抗（仓库内无 `safe_lab.py` / `red_team.py`，从未动工）、
+> OpenCLI 桥接（已弃用）、CLI 流式输出（已实现）、`tmp/` 清理（已完成）、`src/trimum-mvp/`（已删除）、
+> 「296/297 pass 修 AuditEvent 导出」（已被本地 1156 passed 取代）。
+
+1. ✅ **P0 安全响应链接线**（2026-09-20 审计新立，**2026-09-21 闭环**）—— L4 只拦不报 → 现在「扫描 → 广播（扁平载荷）→ SecExecutor（审计/通知/阻断）→ 网关处置（deny/kill/freeze/isolate → 拒绝，confirm → 确认）→ 剧本被 `security.monitor_result` 驱动」一条链全通，且**任何入口**的网关都过 L4。四个提交（统一契约 `087a476` → L4 走 `inspect()` `d5393a6` → 装配/处置/签名 `dbc411e` → 定 `workflow.trigger` 归属 `f6ecfe4`）见本文件「2026-09-21 P0 步骤 1/3 ~ 3/3」三条日志
+2. 🟠 **E5 官方分发渠道**（分发面已闭环，剩第三片）—— 第一片 `9b40be2`（`.trmpkg` 包格式 + 校验器）；第二片 `2aec23b` → `4e29b4e`（`trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + E6 遗留的证书 `capabilities` 运行期交集）。剩：`trm install --remove`（卸载 + 注销登记）、官网服务端与目录托管（`DEFAULT_INDEX_URL` 仍是占位）、多用户边界（`docs/ECOSYSTEM-STRATEGY.md` §7.2）；**第三片三步骤已完工**（步骤 1 卸载 `d7aced2` / 步骤 2 发布方闭环 / 步骤 3 多用户边界，见本文件 2026-09-21 同名日志），剩余项见 `TODO.md`「P2 杂项」
+3. ✅ **总线硬化**（2026-09-21 完成，穿插项步骤 B，见上）—— `_safe_call` 不再吞异常（计数 + 广播 `event.eventbus.dispatch_failed` + 严格模式抛 `TRM-9005`）；`EventIndex` 接进 `EventBus.publish`；`LiveConsole.subscribe_events` 改按段匹配并补订 `security.*`；SDK 侧 `publish(...)` 误用改 `emit_event(...)`
+4. ✅ **W1 遗留：`WorkflowListener` / TARL 三段式接线**（2026-09-21 完成，穿插项步骤 C）—— `submit()` 成了 `event.transform.completed` 的唯一生产者，daemon 启动即装配，CLI 入口 `trm workflow submit`；确认缺位由「默认放行」改成**拒绝**；另修了两个真 bug（日志器当 structlog 用 / `ExecuteRequest` 字段名全错）。**仍留**：运行记录只在内存（环形 200 条，重启即丢）、内置剧本只有落盘式开关、确认通道目前只有 CLI
+5. 🟡 **桌面/WebSocket 确认通道**（P2）—— `SecurityAgent.confirm()` 目前只有 CLI 交付手段
+6. 🟡 **CLI 小缺口三连** —— `trm security revoke <token_id>` / `trm ask -i` 的中断处理（`ask.py` 无 `KeyboardInterrupt` / `EOFError`）/ `trm memory import|export`
+7. 🟡 **引擎侧两个半成品** —— `src/agent-sdk` 端到端测试与打包验证（`tests/` 无覆盖）；Policy Engine 正则→LLM 混合（`LlmPolicyEngine` 骨架未接线）；`transform_agent` 的 confidence 三级分流
+8. 🟢 **SonarQube 重扫** / **daemon 部署形态二选一**（`trmd.service` root 或用户态路径）
+9. ⏸️ **未开工子系统**（别误判为 bug）—— eBPF 告警 `security.ebpf_alert`、性能熔断 `security.fuse_triggered`、审计断链检测 `security.audit_breach`（`SecAudit.verify_chain()` 已实现但无人调用）
+10. 🅿️ **E7 自研编码智能体** —— 规格与设计已出（`docs/CODING-AGENT-PLAN.md`，2026-09-21），**待裁决两条**（沙箱是否提前 / 首发是否允许自动改盘 + 自动跑测试）后按五步分片落地。前置调研已完成（`docs/CODING-AGENT-REUSE-RESEARCH.md`，2026-09-21）：**ECC 不适合做成 coding Agent**（它不是运行时，自己就是宿主插件；格式对不上 trimum 子 Agent），**参考对象建议改为 aider**，可直接复用的只有 `python-unidiff` / `grep-ast`；调研原始件 `tmp/research/ecosystem/ecc-*` + `tmp/research/coding-agents/`
+
+---
+
+
+## 日志（追加区：按日期从旧到新，只增不改 —— 新条目加到文件最末尾）
 ## 今日进度（2026-09-01）
 
 | 完成项 | 状态 | 备注 |
@@ -1067,26 +187,6 @@ L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线
 | **开源调研分析文档** | ✅ | `docs/ECOSYSTEM-COMPARISON.md` — SemaClaw/skelm/Sandcastle 完整分析 |
 | **README.md 生态位+致谢段** | ✅ | 新增「生态位置」+「开源参考与致谢」两个段 |
 | **代码审查（Codex SIGKILL）** | ❌ | 90s 超时被杀，需 split scope 重试 |
-
----
-
-## 下一步（优先级排序）
-
-> 2026-09-20 二次重写：E4 / W1 闭环 + EventBus 审计之后，按「哪个缺口让已有能力变成摆设」重排。
-> 更早的 2026-09-01 旧清单里多数项已完成或已废弃 —— SafeMind 红蓝对抗（仓库内无 `safe_lab.py` / `red_team.py`，从未动工）、
-> OpenCLI 桥接（已弃用）、CLI 流式输出（已实现）、`tmp/` 清理（已完成）、`src/trimum-mvp/`（已删除）、
-> 「296/297 pass 修 AuditEvent 导出」（已被本地 1156 passed 取代）。
-
-1. ✅ **P0 安全响应链接线**（2026-09-20 审计新立，**2026-09-21 闭环**）—— L4 只拦不报 → 现在「扫描 → 广播（扁平载荷）→ SecExecutor（审计/通知/阻断）→ 网关处置（deny/kill/freeze/isolate → 拒绝，confirm → 确认）→ 剧本被 `security.monitor_result` 驱动」一条链全通，且**任何入口**的网关都过 L4。四个提交（统一契约 `087a476` → L4 走 `inspect()` `d5393a6` → 装配/处置/签名 `dbc411e` → 定 `workflow.trigger` 归属 `f6ecfe4`）见 `TODO.md`「EventBus 通信缺口」
-2. 🟠 **E5 官方分发渠道**（分发面已闭环，剩第三片）—— 第一片 `9b40be2`（`.trmpkg` 包格式 + 校验器）；第二片 `2aec23b` → `4e29b4e`（`trm pkg` CLI + 真实内置根 + `trmindex/1` 签名目录索引 + `trm install` 接线 + E6 遗留的证书 `capabilities` 运行期交集）。剩：`trm install --remove`（卸载 + 注销登记）、官网服务端与目录托管（`DEFAULT_INDEX_URL` 仍是占位）、多用户边界（`docs/ECOSYSTEM-STRATEGY.md` §7.2）；**逐条实施计划（红线 + 测试清单）见 `TODO.md`「🚚 E5 第三片实施计划」**
-3. ✅ **总线硬化**（2026-09-21 完成，穿插项步骤 B，见上）—— `_safe_call` 不再吞异常（计数 + 广播 `event.eventbus.dispatch_failed` + 严格模式抛 `TRM-9005`）；`EventIndex` 接进 `EventBus.publish`；`LiveConsole.subscribe_events` 改按段匹配并补订 `security.*`；SDK 侧 `publish(...)` 误用改 `emit_event(...)`
-4. ✅ **W1 遗留：`WorkflowListener` / TARL 三段式接线**（2026-09-21 完成，穿插项步骤 C）—— `submit()` 成了 `event.transform.completed` 的唯一生产者，daemon 启动即装配，CLI 入口 `trm workflow submit`；确认缺位由「默认放行」改成**拒绝**；另修了两个真 bug（日志器当 structlog 用 / `ExecuteRequest` 字段名全错）。**仍留**：运行记录只在内存（环形 200 条，重启即丢）、内置剧本只有落盘式开关、确认通道目前只有 CLI
-5. 🟡 **桌面/WebSocket 确认通道**（P2）—— `SecurityAgent.confirm()` 目前只有 CLI 交付手段
-6. 🟡 **CLI 小缺口三连** —— `trm security revoke <token_id>` / `trm ask -i` 的中断处理（`ask.py` 无 `KeyboardInterrupt` / `EOFError`）/ `trm memory import|export`
-7. 🟡 **引擎侧两个半成品** —— `src/agent-sdk` 端到端测试与打包验证（`tests/` 无覆盖）；Policy Engine 正则→LLM 混合（`LlmPolicyEngine` 骨架未接线）；`transform_agent` 的 confidence 三级分流
-8. 🟢 **SonarQube 重扫** / **daemon 部署形态二选一**（`trmd.service` root 或用户态路径）
-9. ⏸️ **未开工子系统**（别误判为 bug）—— eBPF 告警 `security.ebpf_alert`、性能熔断 `security.fuse_triggered`、审计断链检测 `security.audit_breach`（`SecAudit.verify_chain()` 已实现但无人调用）
-10. 🅿️ **E7 自研编码智能体** —— 规格与设计已出（`docs/CODING-AGENT-PLAN.md`，2026-09-21），**待裁决两条**（沙箱是否提前 / 首发是否允许自动改盘 + 自动跑测试）后按五步分片落地。前置调研已完成（`docs/CODING-AGENT-REUSE-RESEARCH.md`，2026-09-21）：**ECC 不适合做成 coding Agent**（它不是运行时，自己就是宿主插件；格式对不上 trimum 子 Agent），**参考对象建议改为 aider**，可直接复用的只有 `python-unidiff` / `grep-ast`；调研原始件 `tmp/research/ecosystem/ecc-*` + `tmp/research/coding-agents/`
 
 ---
 
@@ -1824,67 +924,6 @@ ECC 作为第三个灵感源入库（只借格式与分发思路，不引入其�
 
 四分支 cherry-pick 后 `git diff --name-status <target>..server` 均为空，已推送。
 
-## 收口小项（2026-09-20 晚，M4.5 之后）
-
-### `trm env install` 真机验证（E3 遗留）
-
-真机（guzhujushi，apt 2.7.14，25 条 catalog）实测四条路径：
-
-1. `trm env install neovim --dry-run` → 计划正确（`sudo apt-get install -y neovim`），exit 0；
-2. `trm env install ripgrep`（已装）→ `already installed: ripgrep` / `nothing to install`，exit 0
-   （幂等、不弹确认、不执行命令）；
-3. **修掉的缺陷一**：stdin 是「开着但没内容」的管道时（FIFO、`ssh host 'trm env install x'`、CI）
-   `_confirm()` 只挡 `EOFError`，`input()` **永久阻塞** —— 实测挂死。修法与 `trm mcp call` 同一处：
-   先看 `sys.stdin.isatty()`，无人值守只认 `--yes`。修后同一场景 **1 秒**返回 exit=1
-   （`aborted (use --yes for non-interactive runs)`）；
-4. **修掉的缺陷二**：非 root 无密码时只打印 `[exit=1] sudo apt-get install -y neovim`，
-   没有原因 → 现在补一行 stderr 末行（实测 `sudo: 需要密码`）。
-
-顺带：`ToolGateway._prompt_confirm()`（Layer 1 终端确认）有同一处挂死风险 —— 改成非 TTY
-一律 **fail closed**，并在 stderr 说明「请走 JIT 令牌 / 策略白名单」；开着的确认会把整条 agent
-流程卡死在一个等人输入的行上。
-
-- 测试：`test_env_toolchain.py` 34 → **37**、`test_tool_gateway_security_rule.py` +2；本地全量 **925 passed** /
-  5 failed / 7 skipped（失败名单与基线一致）。
-- 仍待用户执行：`sudo bash /tmp/trm_env_install_real.sh`（root 下的真执行路径，全是已装包、幂等）。
-- 同类最后一处也已修：`install_fn.py` 安装向导的 `prompt()`（见下）。
-
-### 非交互挂死的最后一处：`trm install` 向导（2026-09-20）
-
-`install_fn.install()` 的 `prompt()` 只挡 `EOFError` → 管道开着但不给数据时永久阻塞（本轮先复现再修）。
-拆出 `_interactive()` / `_read_yes_no()`：**非 TTY 不提问**，LLM key / 开机自启 / 立即启动三个可选步骤
-一律跳过并打一行「非交互模式，跳过」；`_read_yes_no` 顺带补挡 `OSError`。
-
-- 新增 `tests/test_install_fn.py`（**14 项**）：`isatty` 三态、默认值回落、EOF / 中断 / IO 错误、
-  「管道里 `input()` 绝不被调用」（真挂死即测试失败）、交互态答 n 不碰 systemctl、答 y 经 getpass 写 `.env`。
-- 实测：管道场景 **1.1s 退出**（修前挂死）；本地全量 **940 passed** / 5 failed / 7 skipped
-  （失败名单与基线逐条一致，+14 即新增用例）。
-- `docs/OPERATIONS.md` 新增「同一类挂死的三处」汇总表（env / mcp / 网关 Layer 1 / install 向导）。
-
-### 浏览器工具备选 `bb-browser` 评估（调研，无代码变更）
-
-结论：**维持自研 CDP 工具，不引入依赖**。四条硬理由：本体是 Node/TS（与「去 Node」冲突）；
-MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计」矛盾）；`site` 适配器在**页面上下文
-`eval` 第三方 JS**，绕开 `ToolGateway` / 策略 / 审计；上游 4 个月无 push（最后 push 2026-05-29）。
-
-值得借鉴的两点已落文档：适配器自带 `example / domain`、`snapshot -i` 的 `@N` 稳定元素编号
-（`docs/TOOL-DEVELOPER-GUIDE.md` §11 + `TODO.md`）。完整报告：`docs/BB-BROWSER-EVALUATION.md`。
-
-### 真机核验与待办（2026-09-20 21:33）
-
-- 开发树 `/home/guzhujushi/trimum` 已用新 tar 同步（`src/trimum_core/install_fn.py` = `2ce5e92e…`、
-  `mcp_registry.py` = `2d86a39d…`，与本地 HEAD 一致；`tests/test_install_fn.py` 落树）。
-  全量 `pytest tests -q` → **939 passed / 11 failed / 2 skipped**，失败名单与真机基线**逐条相同**
-  （`test_skill_integration` 7 + `test_tool_file_loading` 1 + `test_other_dispatchers` 1 +
-  `test_depends_on` 1 + `test_llm_integration` 1）→ **无回归**。
-- **待用户执行两条 sudo**：
-  1. `sudo bash /tmp/sync_opt_tree.sh` —— 把本轮修复同步进部署树 `/opt/trimum`
-     （开发树已单独同步过，所以**不需要** `--fix-home`）；
-  2. `sudo bash /tmp/trm_env_install_real.sh` —— `trm env install` 的 root 真执行路径（全是已装包、幂等）。
-- **临时物已清**：真机 `/tmp` 147 → 46 项（只留上面两个脚本 + `trimum-sync.tar` + 缓存备份
-  `mcp-tools.json.bak-20260920`；systemd / snap 私有目录不动）；本地删掉 `tmp/m45/` 整目录与
-  `tmp/commit-msg*.txt`。清理脚本一次一用，不入库。
-
 ## M4.5 远端工具聚合（2026-09-20）
 
 > E2 差距表第 ③ 项（`docs/MCP-INTEGRATION-PLAN.md` §2.2）：让远端工具以 `<server>__<tool>`
@@ -1980,6 +1019,75 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 | 无人值守确认不挂死 + 安装失败报原因 | `d34054a` | `07d43a3` | `0494adb` | `4ed51b1` |
 | `trm install` 向导非交互跳过可选步骤 | `bd00990` | `303f9ee` | `a8a16be` | `2ce3f3d` |
 
+
+---
+
+## 收口小项（2026-09-20 晚，M4.5 之后）
+
+### `trm env install` 真机验证（E3 遗留）
+
+真机（guzhujushi，apt 2.7.14，25 条 catalog）实测四条路径：
+
+1. `trm env install neovim --dry-run` → 计划正确（`sudo apt-get install -y neovim`），exit 0；
+2. `trm env install ripgrep`（已装）→ `already installed: ripgrep` / `nothing to install`，exit 0
+   （幂等、不弹确认、不执行命令）；
+3. **修掉的缺陷一**：stdin 是「开着但没内容」的管道时（FIFO、`ssh host 'trm env install x'`、CI）
+   `_confirm()` 只挡 `EOFError`，`input()` **永久阻塞** —— 实测挂死。修法与 `trm mcp call` 同一处：
+   先看 `sys.stdin.isatty()`，无人值守只认 `--yes`。修后同一场景 **1 秒**返回 exit=1
+   （`aborted (use --yes for non-interactive runs)`）；
+4. **修掉的缺陷二**：非 root 无密码时只打印 `[exit=1] sudo apt-get install -y neovim`，
+   没有原因 → 现在补一行 stderr 末行（实测 `sudo: 需要密码`）。
+
+顺带：`ToolGateway._prompt_confirm()`（Layer 1 终端确认）有同一处挂死风险 —— 改成非 TTY
+一律 **fail closed**，并在 stderr 说明「请走 JIT 令牌 / 策略白名单」；开着的确认会把整条 agent
+流程卡死在一个等人输入的行上。
+
+- 测试：`test_env_toolchain.py` 34 → **37**、`test_tool_gateway_security_rule.py` +2；本地全量 **925 passed** /
+  5 failed / 7 skipped（失败名单与基线一致）。
+- 仍待用户执行：`sudo bash /tmp/trm_env_install_real.sh`（root 下的真执行路径，全是已装包、幂等）。
+- 同类最后一处也已修：`install_fn.py` 安装向导的 `prompt()`（见下）。
+
+### 非交互挂死的最后一处：`trm install` 向导（2026-09-20）
+
+`install_fn.install()` 的 `prompt()` 只挡 `EOFError` → 管道开着但不给数据时永久阻塞（本轮先复现再修）。
+拆出 `_interactive()` / `_read_yes_no()`：**非 TTY 不提问**，LLM key / 开机自启 / 立即启动三个可选步骤
+一律跳过并打一行「非交互模式，跳过」；`_read_yes_no` 顺带补挡 `OSError`。
+
+- 新增 `tests/test_install_fn.py`（**14 项**）：`isatty` 三态、默认值回落、EOF / 中断 / IO 错误、
+  「管道里 `input()` 绝不被调用」（真挂死即测试失败）、交互态答 n 不碰 systemctl、答 y 经 getpass 写 `.env`。
+- 实测：管道场景 **1.1s 退出**（修前挂死）；本地全量 **940 passed** / 5 failed / 7 skipped
+  （失败名单与基线逐条一致，+14 即新增用例）。
+- `docs/OPERATIONS.md` 新增「同一类挂死的三处」汇总表（env / mcp / 网关 Layer 1 / install 向导）。
+
+### 浏览器工具备选 `bb-browser` 评估（调研，无代码变更）
+
+结论：**维持自研 CDP 工具，不引入依赖**。四条硬理由：本体是 Node/TS（与「去 Node」冲突）；
+MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计」矛盾）；`site` 适配器在**页面上下文
+`eval` 第三方 JS**，绕开 `ToolGateway` / 策略 / 审计；上游 4 个月无 push（最后 push 2026-05-29）。
+
+值得借鉴的两点已落文档：适配器自带 `example / domain`、`snapshot -i` 的 `@N` 稳定元素编号
+（`docs/TOOL-DEVELOPER-GUIDE.md` §11 + `TODO.md`）。完整报告：`docs/BB-BROWSER-EVALUATION.md`。
+
+### 真机核验与待办（2026-09-20 21:33）
+
+- 开发树 `/home/guzhujushi/trimum` 已用新 tar 同步（`src/trimum_core/install_fn.py` = `2ce5e92e…`、
+  `mcp_registry.py` = `2d86a39d…`，与本地 HEAD 一致；`tests/test_install_fn.py` 落树）。
+  全量 `pytest tests -q` → **939 passed / 11 failed / 2 skipped**，失败名单与真机基线**逐条相同**
+  （`test_skill_integration` 7 + `test_tool_file_loading` 1 + `test_other_dispatchers` 1 +
+  `test_depends_on` 1 + `test_llm_integration` 1）→ **无回归**。
+- **待用户执行两条 sudo**：
+  1. `sudo bash /tmp/sync_opt_tree.sh` —— 把本轮修复同步进部署树 `/opt/trimum`
+     （开发树已单独同步过，所以**不需要** `--fix-home`）；
+  2. `sudo bash /tmp/trm_env_install_real.sh` —— `trm env install` 的 root 真执行路径（全是已装包、幂等）。
+- **临时物已清**：真机 `/tmp` 147 → 46 项（只留上面两个脚本 + `trimum-sync.tar` + 缓存备份
+  `mcp-tools.json.bak-20260920`；systemd / snap 私有目录不动）；本地删掉 `tmp/m45/` 整目录与
+  `tmp/commit-msg*.txt`。清理脚本一次一用，不入库。
+
+## E4 广接入（✅ 已完成，2026-09-20）
+
+> 计划与设计：`docs/E4-PLAN.md`；明细见文末「E4 广接入：生态导入器（2026-09-20）」。
+> 提交：计划 `fdee6d5` / S1+S2+S5 `be5198d` / S3 `861126e` / S4 `05bb1ee` / S6 文档 `be604e8` / S7 验收 `b5b2121`。
+> 遗留「`to_workflow_definition()` 不搬运 `instruction`」→ 已由 **W1** 修掉（见文末「W1 Workflow 执行语义」）。
 
 ---
 
@@ -2174,6 +1282,50 @@ MCP server 源码不在公开仓库（与它自己 `PRIVACY.md` 的「可审计�
 - 内置剧本的启用开关只有 `trm workflow enable <id>`（落盘法），没有「原地开关」。
 - daemon 只暴露只读端点；`POST /api/workflows/{id}/trigger` 这类执行入口**故意没开**（避免无鉴权执行面）。
 - 散文式步骤需要装了 Agent 脚本的 driver 才能真正跑（`trm-agent`），否则节点明确失败。
+
+---
+
+## EventBus 通信审计（2026-09-20，只读分析）
+
+> 用户诉求原文：「请阅读一下 docs 文件夹里的文件，分析有关 EventBus 的通信，还有哪些没完成」。
+> 方法：通读 `docs/` 里与事件相关的文档（`SECURITY-DEFENSE-PLAN.md` §11、`security-agent-implementation-plan.md` §2/§3、
+> `TARL-SPEC.md` §7、`SYSTEM-MONITOR.md`、`ERROR-CODE-SPEC.md`、`WORKFLOW-EXECUTION-PLAN.md`），
+> 再对 `src/` 全量扫**生产者**（`emit_event` / `emit_task` / `SystemEvent(event_type=...)`）与**订阅者**（`subscribe`）逐条对照。
+> **本轮只读，未改任何代码**；完整清单与优先级落在 `TODO.md`「EventBus 通信缺口」（避免两处各写一份互相漂移）。
+
+### 一句话结论
+
+总线骨架是通的（pub/sub + `*` 通配 + 100 条环形历史 + replay），**缺的是生产端** —— daemon 里真正在跑的订阅者只有
+`SecMonitor` / `WorkflowEventDriver` / W1 `WorkflowRuntime`，而多个关键事件「有订阅没生产」。
+
+### P0：安全响应链未接线（拦得住，但不会响应 / 记录 / 通知）
+
+| 事实 | 证据 |
+|---|---|
+| L4 命中威胁只 `logger.warning` + 返回 denied，**不发 `security.monitor_result`、不调 SecExecutor** | `tool_gateway.py:715` |
+| `security.monitor_result` 唯一生产者 `SecMonitor._dispatch()` 只被 `_on_executing()` 调用，而 `agent.executing` **全库无生产者** | `sec_monitor.py:418 / 457 / 487` |
+| payload 契约不符：生产端嵌套 `{"threat": {...}, "original_event": {...}}`，16 条内置剧本条件是扁平 `payload.get('threat_name')` | 实测 `builtin_workflows()` 的 condition |
+| **后果** | 16 条威胁响应剧本永不自动触发（只能手动 `trm workflow run --event`）；`security.blocked` / `security.alert` 从不出现；`SecExecutor` 从未真正执行 |
+
+### 其余缺环（速览，明细见 TODO）
+
+- **零生产零消费**：`security.ebpf_alert` / `security.fuse_triggered` / `security.audit_breach`（子系统未开工）、`workflow.threat_response`（文档称「已有事件」，代码里没有）。
+- **有生产没消费**：`planner.*`、`agent.status_changed`（`agent_runtime` 只在测试里被实例化）。
+- **有订阅没生产**：`agent.executing` / `.executed`（SecMonitor 死订阅）、`memory.*`（MemoryBridge 未实例化）、`system.alert`（SystemMonitor 未实例化）、`event.transform.completed`（WorkflowListener 未实例化）。
+- **总线自身**：`_safe_call` 静默吞异常 + `TRM-9005` 从未 raise；`event_index.EventIndex` 没接进 `EventBus`；`LiveConsole.subscribe_events` 订阅 `task.*` 却全等比对 `task.started`（永远不亮）；SDK `trimum_agent.py:167` 的 `publish("tool.executing", {...})` 签名与事件名都错（异常被吞）。
+- **文档过期**：`docs/SYSTEM-MONITOR.md` 的示例用 `event_bus.emit()`（该 API 不存在）；旧 STATUS 表里 `TASK_ASSIGNED` 标 ✅，但 `task.assigned` 从未落地。
+
+> **修复进度（2026-09-21 回填）**：上列「总线自身」四项由穿插项**步骤 B** 全部落地；
+> 「有订阅没生产」里的 `event.transform.completed`、「有生产没消费」里的 `planner.*`、以及无处安放的 `workflow.trigger`，
+> 由穿插项**步骤 C** 接线（`WorkflowListener.submit()` 当生产者 + daemon 装配 + `trm workflow submit`）。
+> 仍未动的：`memory.*`（MemoryBridge 未实例化）、`system.alert` / `system.heartbeat`（SystemMonitor 未实例化）、
+> `agent.status_changed`、`task.assigned`、三个未开工子系统。
+
+### 优先级判断
+
+**P0 安全链接线 > E5 官方分发渠道**：安全响应是 trimum 的招牌能力，「拦截」能跑而「响应 / 审计 / 通知」是空的，
+等于 16 条剧本 + `SecExecutor` 全是摆设；分发渠道再顺，发的也是链条断的产品。改动点只有 3 处（统一 payload 契约 /
+L4 走 `_dispatch` / 定 `workflow.trigger` 归属），工作量可控。总线硬化是它的配套（`_safe_call` 静默是排障黑洞）。
 
 ---
 
@@ -2470,3 +1622,883 @@ workflow，同一次威胁就会被两条链各跑一遍。
 （`DEFAULT_INDEX_URL = https://trimum.dev/packages/index.json5` 仍是占位；发布流程可先用 `trm pkg create`
 + 本地索引跑通）、多用户边界（`/etc/trimum` vs `~/.trimum`，`docs/ECOSYSTEM-STRATEGY.md` §7.2）、
 `requires` 只探测不解决（缺依赖仅警告）。
+
+## E5 第三片（✅ 步骤 1 卸载 + 步骤 2 发布方闭环 + 步骤 3 多用户边界，2026-09-21）
+
+> 计划与红线：`TODO.md`「🚚 E5 第三片实施计划」；口径：`docs/ECOSYSTEM-STRATEGY.md` §7.6、
+> 模块与红线：`docs/ARCH.md`「官方分发渠道（E5）」。
+> 提交：步骤 1 `d7aced2`（`trm install --remove`）、步骤 2 `fcecbfe`（`trm pkg index`）、步骤 3（纯文档，见下表）。
+
+**做了什么**：`trm install --remove <name>` —— 与 `--list` 对称，不新增顶层命令（命令面仍是 76）。
+两个动作成对：删掉 **ledger 指名的**落地目录 + 划掉登记行，不留「目录没了但还登记着」的半截状态。
+
+**两条红线（越界就一个字节都不删，报 `TRM-4009`）**
+
+| 红线 | 为什么 | 怎么判 |
+|---|---|---|
+| 登记路径越界即拒 | `installed.json5` 是可手改的文本，「登记里的 path」不作数 | 只有恰好等于 `<TRIMUM_HOME>/<TYPE_ROOTS[type]>/<name>` 才动手（比「落在类型根下」更严） |
+| 内置 agent 名字即拒 | `install_package(force=True)` 可能覆盖过内置 agent 目录，登记里没记「装之前 dest 在不在」 | 命中 `discover_bundled_agents()` 的 agent 包即拒并提示手工处理；**只管 agent**，同名 tool 可卸 |
+
+**确认口径**（沿用 `trm env install`）：交互式问一句；非交互必须 `--yes`（`ask_confirm` 在非 TTY 直接答 no，
+不挂住），否则 abort → 退出码 1；`--dry-run` 恒不执行，但**红线照查**（干跑说「可以删」之后真删却被拒，比不干跑更糟）；
+`--remove` 与 `--file` 互斥；`--yes` / `--dry-run` 只作用于包渠道，不影响无参数的旧向导路径。
+
+**边界与联动**：卸载**不看** `trust`（不是授权动作），但删掉降级安装的包之后 `untrusted_names()`
+（`capability.py` 运行期读的就是这张表）同步不再含它；名字没登记过 → `TRM-4011` + 退出码 1（连删两次，
+第二次明确报错，不静默 0）；登记目录已不在 → 当**过期登记**划账并回报 `path_missing`，不崩在 `rmtree` 上；
+不碰 `certs/` / `audit/` / `memory/`（agent 证书就是包目录里的 `cert.json`，随目录一起走）。
+错误码**复用 `TRM-4011`，不新增**。
+
+**测试**：`tests/test_pkg_install.py` 28 → **42**（`TestRemove` 14 项：越界 ledger 两种 / 内置 agent 拒删 /
+同名 tool 可卸 / 干跑不动盘不动账 / 幂等连删 / 非交互 abort / `--file` 互斥 / 缺名字 / 过期登记 / 运行期联动）。
+全量 **1315 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线：沙箱写 `~/.trimum` 被拒 ×4 + LLM 断网 ×1，无回归）。
+
+### 步骤 2 — 发布方闭环（`trm pkg index`）
+
+**做了什么**：`trm pkg index <dir> -o index.json5 --signer-cert … --key …` —— 发布方闭环的最后一步：
+扫目录里的 `.trmpkg` → 生成 `trmindex/1` document → 用签名者签 → 落盘（命令面 76 → **77**，
+新码在 `pkg_index.entries_from_directory()`，CLI 只做接线）。四条口径：
+
+| 口径 | 为什么 |
+|---|---|
+| 只收录**验得过**的包，一个不过就整体失败并逐条列原因、**不写索引** | 「悄悄少一个包」比「报错」危险得多 |
+| 字段取自**校验过的 manifest**，不是文件名 | 文件叫什么 ≠ 包里写的是什么 |
+| `url` **相对索引位置**（`/` 分隔，支持子目录） | 索引与包同目录即可离线安装（`resolve_url` 解析） |
+| **写完自检**：刚签出来的索引就地验一遍（签名 + 证书链） | 否则「签名」只是自我安慰 |
+
+`--force` 才能覆盖已存在的索引；**改一个包就要重签索引**（条目里的 `sha256` 是索引对包的承诺）。
+
+**验收（按计划原样达成）**：`trm pkg index dist/` → `TRIMUM_PKG_INDEX=dist/index.json5 trm install <name>`
+一条链跑通 —— `tests/test_pkg_install.py::TestInstallFromIndex::test_an_index_built_by_the_cli_installs_end_to_end`
+（发布方用 CLI 造索引 → 使用者用该索引装包 → 落地并登记）。
+
+**官网服务端仍不做**（域名 / 托管 / CI 属产品决策）：本步骤交付的是**可离线复现的发布闭环 + 运维手册**
+`docs/PACKAGE-CHANNEL-OPS.md`（造根 → 建签名者 → 打包 → 建索引 → 上线 → **轮换根**（换根 = 旧包全部作废）→
+内网镜像（`--index` 指过去，镜像不需要被信任）→ 出问题对照表 → 边界）。
+
+**测试**：新增 11 项（`tests/test_cli_pkg.py::TestIndex` 10：条目承诺 / 改 url 验不过 / manifest 说了算 /
+子目录相对 url / 验不过的包拒收 / 空目录拒收 / `--force` / 缺签名材料 / 跨根签名者 / 人读输出；
+外加上述端到端 1 项）。全量 **1326 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线，无回归）。
+
+### 步骤 3 — 多用户边界（调研 + 设计，**不改代码**）
+
+**交付**：`docs/MULTI-USER-BOUNDARY.md`（现状对照表 / 三个问题各带方案 / 六条不变量 / 实现顺序与风险）；
+`docs/ECOSYSTEM-STRATEGY.md` §7.2 改为定稿指针并新增 §7.8；`docs/ARCH.md` 与 `AGENTS.md` 文档地图同步。
+
+**复核结论：现有设计没有硬伤，因此不动代码。** 「每用户一份」在这个仓库里是**结构上成立**的 ——
+每个关注点都只有一个改点，不是散落的路径拼接：
+
+| 关注点 | 唯一改点 | 多用户下会怎样 |
+|---|---|---|
+| 用户数据根 | `paths.trimum_home()`（`TRIMUM_HOME` 可覆盖） | 家目录天然每用户一份 ✓ |
+| 身份私钥 | `identity.py`（POSIX 0600） | POSIX 够用；**Windows 上 `chmod` 不产生 ACL** |
+| 配置 / 策略 | `config.py` 的 XDG 路径（`--config /etc/trimum/config.yaml` 已能用） | 缺「系统默认 → 用户覆盖」的合并规则 |
+| 审计 | `audit_store.default_audit_path()` | **`AuditEvent` 没有 `user_id`**：分不清是谁做的 |
+| 运行时 socket | `config.default_socket_path()`（按 uid） | **已经 per-uid**，这层不用重做（好先例） |
+
+三个问题的方案（明细见文档 §2 / §3 / §4）：
+
+1. **`/etc/trimum/` 只放公开物**：官方信任根 / 系统策略基线 / 系统配置基线 / 可选共享包；带私钥或带个人数据的
+   一律只能进用户层。查找顺序 = `~/.trimum/<type>/` → `/etc/trimum/<type>/` → 内置，同名以**用户层为准**；
+   公共层只读（用户进程不写），共享安装需要第二张账 `/etc/trimum/config/installed.json5`。**迁移成本低**：
+   新增 `paths.system_home()` + 三处查找改成有序列表，**写入路径一个都不动**。
+2. **审计 `user_id` + `machine_id` 三步**：加字段（纯增、向后兼容）→ 允许配置指向共享审计文件（默认仍写自己
+   的）→ 系统模式下用 `SO_PEERCRED` / 命名管道 SID 交叉校验。**不整体搬去 `/var/log`** —— 那会破坏
+   「审计是旁路、写失败不影响执行」这条既有取舍。
+3. **私钥保护三档**：A 现状 + 告警 / B 文件权限收紧（Windows 用 ACL）/ C keyring·DPAPI。建议先 **B**、
+   **C 作可选后端**；红线不变（私钥不进公共层 / 仓库 / 日志）。
+
+**为什么不改代码**：计划写的是「除非发现现有设计有硬伤，否则不动代码」。逐条查下来，socket 已按 uid 分目录、
+`agents/<name>/cert.json` 已把「来源 + 证书 + 版本 + 登记」捆在最小单位、`installed.json5` 每用户一份够用 ——
+没有一条是「现在就必须拆」的。多用户真正缺的是**产品决策**（账号体系 / 团队共享）与**系统公共层**，
+两者都不该在没有需求时先写实现。
+
+**测试**：本轮只加文档，全量仍 **1326 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线，逐条相同，无回归）。
+
+### 提交与分支
+
+> 分支纪律见 `AGENTS.md`：**日常只推 `server`**，`main` / `ubuntu` / `arch-linux` 只在收尾阶段同步。
+
+| 内容 | server |
+|---|---|
+| E5 第三片 步骤 1（`trm install --remove` + `TestRemove` + 文档 §7.6） | `d7aced2` |
+| E5 第三片 步骤 2（`trm pkg index` + `TestIndex` + `docs/PACKAGE-CHANNEL-OPS.md` + 文档 §7.7） | `fcecbfe` |
+| E5 第三片 步骤 3（多用户边界：调研 + 设计，**不改代码**；`docs/MULTI-USER-BOUNDARY.md` + 生态战略 §7.2/§7.8 + ARCH / AGENTS 指向） | `8646fe7` |
+| 穿插项 步骤 A（剧本自动触发策略：取证 8 条武装 / 处置 8 条不武装 / 自动触发不派子 Agent） | `d5d4b02` |
+| 穿插项 步骤 B（总线硬化：索引接线 / 失败可观测 / 严格模式 / 订阅修正） | `dd3c0a2` |
+| 穿插项 步骤 C（`WorkflowListener` 接线：`submit()` 当生产者 + daemon 装配 + `trm workflow submit`）+ 两个真 bug | `f51b86d` |
+
+---
+
+## 2026-09-21 穿插项步骤 A：剧本自动触发策略（✅ 已完成）
+
+> 计划：`TODO.md`「🔧 穿插项实施计划」步骤 A。问题源头：P0 把「L4 → 总线 → 剧本」接通了，
+> 但 16 条内置剧本 `config.enabled=False` + `register_builtin(enabled=False)` 双重压死 ——
+> **一条剧本都没武装**，真机上仍然不会自动响应。
+
+**查代码得到的关键事实**：剧本步骤是「命令 + 散文」混合的 —— 命令式步骤（`cat /etc/ld.so.preload`）
+走网关，散文式步骤（「比对上次 hash 基线」/「kill 对应 PID」）**派子 Agent**。子 Agent 会干什么
+不由剧本决定，**所以「只读剧本」不等于「只读运行」**，自动触发必须按步骤放行。
+
+**裁决三条**
+
+| 裁决 | 落地 |
+|---|---|
+| 取证类 8 条武装（prelink / ebpf / kernel / crypto / ssh / cron / systemd / memfd） | 数据位 `auto_trigger: True` → `config.enabled` 跟着它 |
+| 处置类 8 条不武装（revshell / ransomware / btrfs / persistence / supply-chain / prompt-injection / audit-integrity / pipe-download） | `auto_trigger: False`：处置要人点，不做「半自动处置」（会制造「已经响应了」的错觉） |
+| 自动触发不派子 Agent | 事件运行里非取证步骤 `skipped`（`task.node.skipped`，`reason=auto_run_blocked:<kind>`）；人工 `run` 不受限 |
+
+**判据**（`threat_workflows.step_kind()`）：`auto`（**只读取证白名单命令**，白名单外一律不自动跑）/
+`review`（要判断的散文）/ `action`（处置：散文含处置动词，或命令不在白名单 / 带 `-delete`·`>`）；
+**看不懂的散文一律当 `action`**（保守）。红线：`enabled` 只决定「事件要不要跑」，**不能**放宽步骤闸门。
+
+**改动面**：`threat_workflows.py`（16 条数据位 + 三分类 + 编译时把 `step_kind`/`auto_run` 写进节点 config）、
+`workflow_runtime.py`（`register_builtin(enabled=None)` / `register_all(builtin_enabled=None)` 改按剧本自己的位；
+运行上下文补 `triggered_by`）、`workflow_engine.py`（`_auto_run_block()` 闸门，`auto_run` 缺省 True）。
+
+**测试**：新增 `tests/test_playbook_auto_trigger.py`（40 项：三分类参数化 / 数据位与步骤性质双向一致 /
+武装剧本无处置步骤 / 节点带闸门 / 事件运行只跑取证 / 处置剧本事件不唤醒 / 人工运行不受限 / 强制全关全开）；
+改 3 处旧断言（`test_workflow_runtime.py` 两条 + `test_api_server_startup.py` 一条 —— 它们锁的正是旧口径），
+`test_gateway_layer4.py` 的端到端步骤改成取证命令。全量 **1365 passed / 5 failed / 8 skipped**（5 项 = 既有基线）。
+
+---
+
+## 2026-09-21 穿插项步骤 B：总线硬化（✅ 已完成）
+
+> 计划：`TODO.md`「🔧 穿插项实施计划」步骤 B。问题源头：2026-09-20 的只读总线审计 ——
+> `_safe_call` 静默吞订阅者异常（`TRM-9005` 全库无人 raise）、`EventIndex` 没接进 `publish`、
+> `LiveConsole.subscribe_events` 订阅与比对不匹配（进度永远不亮）。
+
+| 缺口 | 落地 |
+|---|---|
+| 订阅者异常静默 | 记 `WARNING` 日志（订阅者名 + 事件类型 + 堆栈）+ `dispatch_failures` 计数 + `last_failure` 快照 + 广播 `event.eventbus.dispatch_failed`（它自己再失败只记不播，防转圈） |
+| `TRM-9005` 没人 raise | 严格模式（`TRIMUM_BUS_STRICT=1` 或 `EventBus(strict=True)`）抛 `TrimumError(TRM-9005)`，由 `await bus.wait_for_handlers()` 收集（`publish` 是 fire-and-forget，异常得有地方收）；默认关 |
+| `EventIndex` 没接线 | `publish` 走首段分桶索引；通配匹配实现收敛到 `event_index.matches()` 一处（`EventBus._matches` / `EventIndex._matches` 都转发它）。**workflow 触发器口径仍故意分开**（剥 `event.`/`task.` 前缀 + `fnmatch`），两条都由测试钉住 |
+| `LiveConsole` 不亮 | 改按**段**匹配（`task.node.started` / `task.workflow.started` 都算 `started`）；同一步骤的重复事件去重（直接调用与事件订阅会撞车）；**补订 `security.*`** —— 告警分支以前从没被喂到过 |
+| SDK 侧错用法 | `src/agent-sdk/trimum_agent.py`：`publish("tool.executing", {...})` → `emit_event("tool.executing", "agent-sdk", {...})`；异常从 `pass` 改成记日志 |
+
+**观测面**（排障用）：`bus.stats()`（patterns / subscribers / history / in_flight / dispatch_failures / strict）
+与 `await bus.wait_for_handlers(timeout=...)`。
+
+**测试**：新增 `tests/test_event_bus.py`（103 项：通配口径三处一致 + 索引与旧「整表扫描」逐条等价 +
+失败可观测 / 严格模式 / 退订同步索引 / `stats`）+ `tests/test_live_console.py`（7 项：进度按段点亮 / 重复去重 /
+告警两种前缀 / 退订停订 / 无总线只告警）。全量 **1475 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线）。
+文档：`docs/ARCH.md` 新增「事件总线（`event_bus.py`，2026-09-21 硬化）」一节；`docs/ERROR-CODE-SPEC.md` 的
+`TRM-9005` 补接线说明。
+
+---
+
+## 2026-09-21 穿插项步骤 C：`WorkflowListener` 接线（✅ 已完成）
+
+> 计划：`TODO.md`「🔧 穿插项实施计划」步骤 C。问题源头：W1 遗留 —— `WorkflowListener` 从未被实例化，
+> `event.transform.completed` 没有生产者，`workflow.trigger` 没有生产者，整条「意图驱动」链是摆设。
+
+### 做了什么
+
+| 位置 | 改动 |
+|---|---|
+| `workflow_listener.py` | 新增 `async def submit(instruction) -> TransformResult`：变换 Agent 翻译 → `emit_event("transform.completed", ...)` 发回**同一条总线**（不搞旁路），成为该事件的唯一生产者 |
+| 同上 | 删掉拼错的死订阅（`task.task.completed` / `task.task.failed` —— 前缀多了一个 `task.`）+ 两个孤儿处理函数 + `_pending_sub_tasks`；订阅表只剩真类型 |
+| 同上 | **红线**：`_request_confirm()` 从「没有确认回调就默认放行」改为**拒绝**（`listener.no_confirm_callback_denied`）—— 没装确认通道不能悄悄变成自动批准 |
+| `api_server.py` | 启动时装配（失败只记 `workflow_listener_start_failed`，不带崩 daemon）、停机先于 workflow 运行时收；状态挂 `ServerState.workflow_listener` |
+| `workflow_runtime.py` | 新增公开属性 `gateway`（listener 复用**同一**网关，不新建第二条执行通道） |
+| `cli/commands/workflow.py` | 新增 `trm workflow submit "<指令>"`（`--root` / `--timeout` / `--yes`），命令面 77 → **78**；非交互必须 `--yes` 才自动确认中匹配 |
+
+### 顺手修的两个真 bug（测试跑出来的，不是猜的）
+
+| bug | 后果 | 修法 |
+|---|---|---|
+| 日志器用错：`logging.getLogger(...)` 被当 structlog 用 | 每次 `log.info("x", k=v)` 都抛 `TypeError`，又被总线当时静默的 `_safe_call` 吞掉 —— 这个文件等于从不记日志 | 改用 `logger.get_logger` |
+| `_execute_shell()` 的 `ExecuteRequest(tool_type=..., command=..., raw_input=...)` 字段名全错 | 真字段是 `tool` / `args` / `raw_command`，pydantic 默认忽略多余字段 → 命令**静默变空** | 按真字段构造（`args=[shell_cmd]` + `raw_command`），并补 `SourceType` |
+
+另：`PlannerAgent` 默认剧本目录是 `Path.home()/.trimum/workflows`（**不看 `TRIMUM_HOME`**，会踩沙箱 / 多用户），
+daemon 与 CLI 都显式传 `trimum_path("workflows")`；低匹配转 Planner 那条路（`planner.task_created` → `workflow.trigger`）随之真正有人听。
+
+### 三段式（写进测试）
+
+| confidence | 行为 |
+|---|---|
+| ≥ 0.7 高 | 发 `workflow.trigger`（`decision=high`）→ 运行时唤起写了该 trigger 的剧本 |
+| 0.4 ~ 0.7 中 | 有回调且同意 → `decision=confirmed` 触发；无回调 → **不发**；拒绝 → **不发** |
+| < 0.4 低 | 转 Planner（`decision=planner`）；没有 Planner 时只留 `transform.completed`，不假装触发 |
+| `output_type=shell` | 直接走 `ToolGateway`（`args=[命令]` + `raw_command`），被拒时另发 `shell.denied` |
+
+**测试**：新增 `tests/test_workflow_listener.py`（12 项，含**端到端**：一句自然语言 → 变换 → `workflow.trigger`
+→ 文件剧本真的跑起来，节点 ok 且网关收到命令）+ `test_api_server_startup.py` 一条（daemon 装配 Listener）
++ `test_cli.py` 一条（`workflow submit` 解析出 handler）。
+全量 **1489 passed / 5 failed / 8 skipped**（5 项 = 既有宿主基线）。文档：`docs/ARCH.md`、
+`docs/WORKFLOW-EXECUTION-PLAN.md`、`docs/SECURITY-DEFENSE-PLAN.md`（触发归属表）。
+
+---
+
+## 2026-09-21 E7 规格与设计：自研编码智能体（草案，待裁决）
+
+> 提交：`36fedb7`（server 分支）。立项依据：`TODO.md`「🌐 生态战略」E7 项；本轮**只写文档，不改代码**。
+> 产物：`docs/CODING-AGENT-PLAN.md`（规格 + 设计 + 五步分片计划）。
+> 同轮修正一处口径冲突：`docs/ECOSYSTEM-STRATEGY.md` §5 的 **E7** 原写作「身份与多用户」，
+> 那份内容已由 E5 第三片（能力清单运行期交集）+ E6（官方 Agent 证书）+ `docs/MULTI-USER-BOUNDARY.md` 落地，
+> 故 E7 让位给「自研编码智能体」（修订说明写进该文档）。
+
+### 结论：缺的不是引擎，是编码专用的三块拼图
+
+| 缺口 | 现状（查代码得到） | 要补 |
+|---|---|---|
+| 编辑原语 | `file.write` 只能整文件覆盖 / 追加（`mode=w` / `a`）；全库无 `difflib`、无补丁应用 | 锚点替换 + 统一差异应用 + 会话级快照与回滚 |
+| 验证闭环 | 没有「跑测试 / 构建 / 检查并解析结果」的一等抽象，循环只拿到原始标准输出 | 结构化「红 / 绿 + 失败清单」回灌循环 |
+| 技能与规则运行时 | `SKILL.md` 只被分发到别的宿主；`skill.yaml`（旧）与 Agent Skills（新）两套互不相干 | 命中才注入上下文 + 工具事件上的检查（钩子） |
+
+外加第四块：`agent_runtime` 的 spawn 仍是空壳、`task.assigned` 至今没有生产者 ——子 Agent 委派做实。
+
+### 参考对象 ECC 的事实（不是印象）
+
+快照 2026-09-20（262,999★，MIT）：仓库 5,026 条目、`SKILL.md` **903** 个、`rules/` 144 个文件、
+斜杠命令 94、宿主适配目录 `.claude-plugin` / `.codex` / `.opencode` / `.cursor` / `.kiro` / `.agents` 等、文档 2,141 个。
+**关键判断：ECC 没有自己的模型循环**（循环与工具执行由宿主提供），它卖的是内容分层 + 工具事件钩子 + 安装适配 + 学习记忆。
+抄：按需加载省上下文 / 工具事件上的检查 / 跨宿主记忆交接 / 内容与运行时分离；
+不抄：903 个技能的内容农场、Node 适配层、钩子以特权脚本裸跑（trimum 的等价物是总线订阅 + 经网关的动作）。
+
+### 红线（拟，写进后续代码与测试）
+
+一切经 `ToolGateway`（不新增旁路）／改动必须能回滚（无差异不算成功）／保护路径直接拒／
+不自动提交版本库／测试不过不许声称完成／子 Agent 取权限交集且受限预算／技能是数据不是代码／没有模型就说没有。
+
+### 五步分片（每片独立可验收）
+
+1. 编辑原语与会话留痕（`patch_ops.py`，含 `--dry-run` 差异预览与回滚）
+2. 验证闭环（`verifier.py`，含「被网关拒时结论必须是 unknown 而非 green」）
+3. 技能与规则运行时（`instruction_loader.py` + 总线式钩子，首批三条流程：测试驱动 / 代码审阅 / 排障）
+4. 子 Agent 委派做实（spawn + `task.assigned` + 权限交集 + 预算 + 审计）
+5. 命令行入口与真机验收（`trm code`，命令面 78 → 79；`scripts/accept_e7.py` 五组）
+
+**裁决（更新）**：① 沙箱（Landlock / Seccomp）是否提到编码智能体之前 —— **已定为「是」**，见本文「2026-09-21 沙箱前置片」与 `docs/SANDBOX-PLAN.md`（新增四条待裁决在该文 §9）；
+② 首发是否允许自动改盘 + 自动跑测试 —— **仍未定**（草案建议：默认出差异 + 跑只读验证，写盘要确认，`--yes` 才自动落盘）。
+
+---
+
+## 2026-09-21 编码智能体调研：ECC 适合吗？（✅ 已完成，**只调研不改代码**）
+
+> 用户提问：① ECC 如何做成一个 coding Agent；② 参考 `~/.trimum/agents/` 别的 Agent 的文件格式；③ 还有没有其他可直接复用的开源项目；④ **先想 ECC 适合吗**。
+> 产出：`docs/CODING-AGENT-REUSE-RESEARCH.md`。事实层材料 `tmp/research/coding-agents/`（19 个仓库快照 + aider 源码 30 件 + 两份事实草稿，均已 gitignore）。
+
+**结论：ECC 不适合做成 coding Agent。** 它没有可复用的执行体 —— 68 个 `agents/*.md` 是提示词、292 个技能是文本、
+hooks 是「宿主事件 + node 命令」，**ECC 自己就是 Claude Code / Codex 的插件包**（`.claude-plugin/plugin.json`、`.codex-plugin/plugin.json` 都在树里）。
+三条路径逐条算过账（该文 §2）：包成 trimum 子 Agent → **空壳**（`AgentManifest` 里只有 `name`/`description` 对得上，
+`entry`/`capabilities`/`permissions`/`events`/`risk_level` 全无对应，且 `system_prompt_path` 在代码里**零消费者**）；
+当内容注入 → **唯一成立的用法**（正对 E7 步骤 3）；接它的代码 → 只换来 Node + Rust 依赖。
+
+**三处数字修正（原文档虚高，勿再引用）**：`SKILL.md`「903」是重复计数 → 真实 **292**（另有 `docs/` 译本 518 + 宿主目录副本 93）；
+「30+ 宿主」是**另一个项目 rulesync** 的自述，ECC 自述 **7 个 harness**；`docs/` 2,141 个文件大半是译本。
+star:watcher = 194.8，与同类同区间（superpowers 267.8 / rulesync 728.0 / anthropics-skills 157.3）→ **「刷星」这条不成立**，如实记录。
+
+**另一件已经做完的事**：ECC 的核心分发机制 trimum 早已实现 —— `skill_sync.py` + `hosts.py` 的 **14 个已知宿主**（覆盖 ECC 全部宿主目录）
++ 探测 + 符号链接/junction，代码注释写着 *"the wider set of ECC-style harnesses"*。**这块不用再学第二遍，差的只是内容。**
+
+**可直接复用的清单（很短）**：`python-unidiff`（统一差异解析，MIT、活跃、只 parse 不 apply → 可直接依赖）；
+`grep-ast`（代码感知检索；366★、约 16.5 个月未推、带 tree-sitter 两个依赖）；其余**抄设计**（aider / gptme / cline / crush / opencode）。
+不建议接：Roo-Code（已 archived）、continue（自称 read-only）、python-patch（4 年 8 个月未动 + 无许可）、SWE-agent（官方指向 mini-swe-agent）、
+codex / goose（README 无部件级信息）、bubblewrap / nsjail（Linux 内核特性，Windows 无对应）。
+
+**对 E7 的建议（待裁决）**：参考对象由 ECC 换成 **aider**（13 种编辑格式、`max_reflections=3` 的错误回灌、
+`search_replace.py:438-439` 唯一性检查被注释掉的设计张力、`auto_commit` 早于 `confirm_ask` 的红线冲突）；`TODO.md` E7 条目已同步改口径。**本轮未改任何代码。**
+
+---
+## 2026-09-21 沙箱前置片：把内核级边界提到 E7 之前（调研 + 真机实测 + 脚本，✅ 方向已定）
+
+> 裁决落地：原「**沙箱是否提到编码智能体之前**」**已定为「是」** —— 编码智能体会大量写盘、跑测试，
+> 没有内核级边界就不敢让它自己动手。本轮**只写文档与脚本，未改代码、未装任何包、未重启任何服务**。
+> 产物：`docs/SANDBOX-PLAN.md`（10 节）、`scripts/setup_ubuntu_toolchain.sh`、`scripts/check_sandbox_caps{,_root}.sh`。
+> 原始材料：`tmp/research/sandbox/`（143 份一手材料 + `draft-C-sandbox.md` 651 行）。
+
+### 四个问题的答案
+
+| 问题 | 答案 |
+|---|---|
+| 主流沙箱怎么做 | **三层收敛**：① **策略层**（谁能做什么 —— K8s Pod Security Standards 的 Restricted 档要求 `seccompProfile: RuntimeDefault`、`capabilities.drop: [ALL]`、`allowPrivilegeEscalation: false`，且明确标注 **Linux-only**）；② **内核层**（Landlock LSM / seccomp-bpf / AppArmor / namespace / cgroup v2）；③ **边界层**（换运行时拿更强边界：OCI 容器 → gVisor `runsc` → microVM Firecracker）。**接口收敛在 OCI runtime-spec**（namespace / seccomp / cgroup / maskedPaths 都是可移植字段）；所谓「沙箱」多数 = 内核层机制组合 + 一份默认 profile（Docker 默认 seccomp 是 `SCMP_ACT_ERRNO` 白名单，300+ syscall 里默认挡掉约 44 个） |
+| 需不需要 Docker | **不进主干**：① 粒度不匹配 —— 要的是**每次工具调用**的边界，Docker 给的是**整容器**的边界（每次 spawn 一个容器太慢）；② 会成**第二条执行通道**，与「一切动作经 `ToolGateway`」红线冲突；③ 真机已装（29.8.1）但**本地 0 个镜像**，用一次就要拉网。**留作 Phase 5**：隔离不可信第三方 Agent 包 |
+| 真机能不能做 | **能，而且不需要 root**：Landlock **ABI=4** 已实测可拦（40 行 ctypes PoC）；seccomp 走自带 `libseccomp 2.5.5`（ctypes 可加载）；资源边界走 systemd 用户级 cgroup 委派 |
+| 还需装什么 | 沙箱主干（Landlock + seccomp + systemd 用户级 + cgroup）**几乎零新依赖**；要装的是「把 C/BPF 侧做扎实」与「写脚本 / 排障」那批（清单见 `docs/SANDBOX-PLAN.md` §7.1，core 档 13 项真机已装 3 项、待装 10 项） |
+
+### 真机实测（Ubuntu 24.04.1 / kernel 6.8.0-41-generic / systemd 255 / 8 核 7.4G / 854G 可用）
+
+| 结论 | 依据 |
+|---|---|
+| Landlock **非特权可拦** | 纯 ctypes 三个 syscall（444/445/446）+ `prctl(PR_SET_NO_NEW_PRIVS)`：`/` 只读 + 一个目录全权限 → 允许路径可写、**写 `$HOME` 得 `EACCES`**、只读路径可读不可写、**跨 `execve` 继承**（子进程也被拒）、只能收紧不可逆 |
+| systemd 用户级**真生效** | `NoNewPrivileges`（`NoNewPrivs: 1`）、`SystemCallFilter`（`Seccomp: 2`、`Seccomp_filters: 3`）、`MemoryMax` / `CPUQuota`（单元内 `memory.max=33554432`）、`PrivateUsers=true`（userns inode 变化、`CapEff: 0`） |
+| systemd 用户级**静默 no-op**（决定性） | `ProtectSystem=strict` / `ProtectHome=read-only` / `PrivateTmp=yes`：三类单元（单独 / 组合 / 加 `PrivateUsers=true`）的 `/proc/self/mountinfo` **条目数全是 47 = 宿主** —— **根本没建 mount namespace**；`$HOME` 照写成功、宿主能看到单元写进 `/tmp` 的文件 |
+| 非特权 userns 被禁 | `kernel.apparmor_restrict_unprivileged_userns=1` → `unshare --user/-m/-n` 与 `bwrap`（`setting up uid map: Permission denied`）全拒 → bubblewrap / rootless 容器 / podman / nsjail 当前**都不可用** |
+| eBPF 非特权不可用 | `kernel.unprivileged_bpf_disabled=2` → `security.ebpf_alert` 在 daemon 当前运行方式（`User=guzhujushi`）下**不可能工作**，**校正** `docs/SECURITY-DEFENSE-PLAN.md` 把 eBPF 当常规手段的前提 |
+| cgroup v2 统一层级 | 用户 slice 委派 `cpu memory pids`；普通用户**不能**直写 `/sys/fs/cgroup` |
+| daemon 现状 | `/etc/systemd/system/trmd.service` **零加固**（只有 `User=guzhujushi` + `WorkingDirectory=/opt/trimum`）；`/run/trimum` 不存在 → RPC 走 HTTP 回退 |
+
+**踩坑（已写进纪律）**：第一轮用 `systemd-run --user -p ...`（**不带 `--wait`**）测沙箱，因竞态误判成「拦住了」。
+**唯一可信口径是 `systemd-run --wait --pipe`。**
+
+### 三个脚本（未装任何包；真机 `sudo` 需要密码，root 那个只能本人跑）
+
+| 脚本 | 需要 sudo | 真机状态 |
+|---|---|---|
+| `scripts/setup_ubuntu_toolchain.sh` | 是（默认 dry-run；`--apply` 才装；`--tier` 选 core / ops / optional / all） | 已传 `/tmp/`（sha256 与本地逐字一致）；dry-run 跑通：**tier=core 13 项已装 3、待装 10** |
+| `scripts/check_sandbox_caps.sh` | 否 | 已跑通 **PASS=8 WARN=6 FAIL=0** |
+| `scripts/check_sandbox_caps_root.sh` | 是 | **本轮核实：上一轮其实没传上去**，本轮已补传（sha256 与本地一致）；**未跑** —— 真机 `sudo` 需要密码 |
+
+### 设计要点（`docs/SANDBOX-PLAN.md` §6 / §8）
+
+- 新增**内核层**（Layer K），与既有四层网关**串联不并列**：内核层只做「施加 + 如实记录」，不做决策；**fail-closed**（沙箱没装上就不许执行）。
+- 六个 spawn 点必须收口到新封装 `sandbox_exec`：`tool_dispatchers.py:641,389,502,507,525,530` + `agent_launcher.py:132`。
+- 三档档案 `readonly` / `workspace-write`（默认）/ `strict`，声明在 `agent.json5` 的 `sandbox` 段（既有设计已有 `seccomp_profile` / `extra_syscalls` / `extra_block`，加 `fs_read` / `fs_write` 即可）；`AuditRecord.sandbox` 字段已存在（`models.py:749`）。
+- **Windows 降级**：明确报 `unsupported`，绝不允许「不知道就放行」。
+- 分片：**S1** daemon 加固 → **S2** 施加点收口（Landlock）→ **S3** seccomp 三档 → **S4** 子 Agent 走 systemd transient → **S5** 可选档（等裁决）。
+
+### 待裁决四条 —— **已于同日全部裁决**（见上一节「S1：daemon 系统级加固」）
+
+1. eBPF 提权 → **CAP_BPF + root helper**；2. 非特权 userns → **不全局放开**，定向给 `bwrap` 写 profile；
+3. Docker 档 → **Phase 5**；4. daemon → **保持非特权 + 加特权 helper**。
+新增待裁决三条见 `docs/SANDBOX-PLAN.md` §9.2（HTTP 端口收口 / `@debug` 取舍 / `ReadOnlyPaths` 是否保留）。
+
+---
+
+## 2026-09-21 S1：daemon 系统级加固（脚本就绪 + 冒烟 + 自动回滚，**未 apply**）
+
+> 裁决已定（见下表），S1 是沙箱前置片的第一片。本轮**未安装任何包、未重启任何服务、未改动运行中的单元**；
+> 生产 daemon 还是原来的零加固状态，等你跑 `sudo bash /tmp/harden_trmd_unit.sh --apply`。
+> 产物：`scripts/harden_trmd_unit.sh` + `docs/SANDBOX-PLAN.md` §6.6/§6.7/§9（口径、helper 设计、裁决）。
+
+### 六条裁决（2026-09-21）
+
+| # | 问题 | 裁决 |
+|---|---|---|
+| 1 | eBPF 监控要不要提权 | **要，走 `CAP_BPF` + root helper**（daemon 不加能力，也不把 eBPF 摘出方案） |
+| 2 | 要不要放开非特权 user namespace | **不全局放开**，将来需要时**定向**给 `bwrap` 写 AppArmor profile |
+| 3 | Docker 档放哪 | **Phase 5**（不可信第三方 Agent 包），不进 E7 主干 |
+| 4 | daemon 非特权 vs 加特权 helper | **加特权 helper**，daemon 本身仍非特权 |
+| 5 | 沙箱是否提到 E7 之前 | **是** |
+| 6 | E7 首发是否允许自动改盘 + 跑测试 | **默认只出差异 + 跑只读验证**，写盘要确认，`--yes` 才自动落盘 |
+
+另：E7 入口定为 **`trm exec --code`**（不新开 `trm code`）；`skill.yaml` 与 `SKILL.md` **不合并**（同批裁决记在 `docs/CODING-AGENT-PLAN.md` §8.1）。
+
+### 实做中推翻的三处原设想（都是真机实测逼出来的）
+
+| 原设想 | 实际采用 | 理由（一手事实） |
+|---|---|---|
+| `ProtectSystem=strict` + `ReadWritePaths` 白名单 | **`ProtectSystem=full`**，不列白名单 | daemon 要在**任意工作区**写盘，白名单**列不全**（列漏 = 运行时才炸）；`full` 盖住 `/usr`/`/boot`/`/efi`/**`/etc`** 的持久化面，工作区粒度交给 S2 的 Landlock |
+| `ProtectHome=read-only` | `ProtectHome=no`（显式写出） | `~/.trimum` 与工作区都在 `$HOME` —— 这是**明确放弃**的边界，写进 drop-in 当记录 |
+| `SystemCallFilter=@system-service` | **黑名单**（`~`） | 实测 systemd 255 的 `@system-service`（展开 375 条）**不含** `seccomp(2)` 与 `landlock_*`(444/445/446)，且这三个**任何分组里都没有** —— 白名单会**把 S2/S3 自己要装的沙箱挡在门外** |
+| `PrivateDevices=yes` | **不开** | 它会建一个**不带 `/dev/shm`** 的 `/dev` → Python `multiprocessing` / 共享内存类工具会挂；对非 root daemon 的收益本来就近于零 |
+
+### 额外两个实测发现（一条改了设计、一条新增待裁决）
+
+1. **daemon 的 IPC socket 之前根本没起来**：默认路径 `/run/user/<uid>/trimum.sock` 下没有文件（系统单元里 `XDG_RUNTIME_DIR` 为空），
+   `trm status` 一直显示 **`source: http`**。S1 用 `RuntimeDirectory=trimum` + `Environment=XDG_RUNTIME_DIR=/run/trimum`
+   把 socket 落到 `/run/trimum/trimum.sock`（目录 0750 / socket 0700）。
+   配套代码改动（唯一一处）：`trimum_client.socket_candidates()` 增加 `/run/trimum/trimum.sock` + 3 个测试 ——
+   否则 daemon 绑了 A、客户端去连 B，仍旧静默降级成 HTTP。
+2. **HTTP 端口是尚未收口的授权面**：`127.0.0.1:8321` 对**同机任何用户**开放（loopback 不做 uid 检查），背后是完整的工具执行 API。
+   systemd 的只读路径指令**管不了 IPC**（文档原文：这类选项「do not affect the ability for programs to connect to」），
+   要收口只能从监听面动手 → 列为新增待裁决（`docs/SANDBOX-PLAN.md` §9.2-1，建议只留 unix socket）。
+
+### 加固脚本怎么用（`scripts/harden_trmd_unit.sh`，已传真机 `/tmp/`）
+
+```bash
+sudo bash /tmp/harden_trmd_unit.sh            # dry-run：打印现状 + 将要写入的 drop-in（默认行为）
+sudo bash /tmp/harden_trmd_unit.sh --apply    # 备份 → 写 drop-in → daemon-reload → 重启 → 冒烟 → 失败自动回滚
+sudo bash /tmp/harden_trmd_unit.sh --verify   # 只跑冒烟复查
+sudo bash /tmp/harden_trmd_unit.sh --rollback # 还原最近一次备份
+```
+
+drop-in 走 `/etc/systemd/system/trmd.service.d/10-hardening.conf`（**不改原单元**），
+备份落在 `/var/backups/trimum/harden-<时间戳>/`（含 `unit-before.txt` 与一键 `rollback.sh`）。
+
+**冒烟断言**（任一 FAIL 自动回滚）：`systemctl is-active`；`ProtectSystem=full`；`NoNewPrivileges`/`RestrictNamespaces`/`PrivateTmp`=yes；
+`CapabilityBoundingSet` 空；**进程内实测** `/proc/<pid>/status` 的 `NoNewPrivs: 1` 与 `Seccomp: 2`；
+`/proc/<pid>/mountinfo` 里 `/usr` 与 `/etc` 是 `ro` 而 `/home` 不是；**`mountinfo` 条目数 > 宿主基线 47**（证明命名空间真建了）；
+`/run/trimum/trimum.sock` 存在；以服务用户跑 `trm status` / `trm tool list` 通过；日志无 `unix_socket_start_failed`；
+syscall 探针（同一套黑名单下 `landlock_*`/`seccomp`/`prctl` 不被挡、`bpf`/`ptrace`/`mount` 被挡）。
+
+### 真机验证（本轮已跑，全部只读）
+
+| 检查 | 结果 |
+|---|---|
+| 脚本语法 `bash -n`（3 个 + 本脚本） | 全 OK |
+| dry-run | 跑通：现状段正确报出 `mountinfo=47`（= 没有命名空间）、当前评分 **9.2 UNSAFE** |
+| `--stage` 渲染 | drop-in 全文正确（含 `ProtectSystem=full`、黑名单、`RuntimeDirectory=trimum`） |
+| 黑名单实际拦截效果（用户级复现同一套过滤器） | `bpf`/`ptrace`/`mount`/`init_module`/`kexec_load`/`userfaultfd`/`io_uring_setup`/`process_vm_readv`/`swapon`/`add_key` → **全部 EPERM**；`landlock_create_ruleset`(14)/`landlock_restrict_self`(77)/`seccomp`(22)/`prctl`(22) **未被误伤** |
+| `--allow-debug` 变体 | `ptrace` 恢复 `errno=0`，`bpf` 仍 `EPERM`（开关有效） |
+| 客户端测试 | `tests/test_socket_path_consistency.py` **11 passed** |
+
+> **未做（要 `sudo` 密码，只能你自己跑）**：`--apply` 安装 + 冒烟；`check_sandbox_caps_root.sh`（系统级能力核对）。
+
+---
+
+## 2026-09-21 S1 试装复盘 + socket 收口（✅ 代码与脚本已改；生产单元仍原样）
+
+**⚠️ 21:09 事故（同日第三轮）**：`sync_opt_socket_patch.sh` 把仓库 **HEAD 的 `api_server.py`** 装进了
+`/opt/trimum/src`，而部署树比仓库旧一大截 —— 没有 `workflow_runtime.py`，于是 daemon 一启动就
+`ModuleNotFoundError: No module named 'trimum_core.workflow_runtime'`，systemd 每 5s 重启一次（`NRestarts=29`）。
+冒烟**正确**判 FAIL 并自动回滚了单元，但**回滚只撤单元、不撤 `src`**，所以循环不止。
+两条护栏已落地：① 同步文件集 5 → **4**（去掉 `api_server.py`，代价只有 `await ipc.start()` 这条加固，等整树同步到 HEAD 再补）；
+② 装之前先做**导入预演**（`PYTHONPATH=/tmp/.socket-patch-rehearsal` 里 `import trimum_core.main`，并断言 `trimum_core.__file__` 真来自预演目录），不通就一个字都不碰生产。
+恢复：`scripts/trmd_hotfix_restore.sh`。详见 `docs/SANDBOX-PLAN.md` §9.3.6。
+
+> 用户口径：*「刚刚回滚了，IPC socket 不存在，之前用 Socket 跑的时候一直出 bug 才暂时用 http 代替，现在改成 Socket 吧，你先看看吧」*
+> —— 「先看看」的结论与落地都在 `docs/SANDBOX-PLAN.md` §9.3。
+
+**两次 `--apply`（20:40 / 20:50）都失败并自动回滚；真因不是加固，是冒烟抢跑。**
+`smoke()` 只等 `systemctl is-active`，而 uvicorn 还要几百毫秒才 bind、IPC socket 更晚才建；断言跑在就绪之前 →
+`[FAIL] IPC socket 不存在` → 回滚。证据：`/tmp/.trm-status.out`（root，20:50）= `[OFFLINE] daemon is not running`
+（那一刻 RPC 与 HTTP 都不通），而同一时刻 daemon 日志是 `unix_socket_listening /run/trimum/trimum.sock`；
+journal 显示 20:50:01 起、20:50:02 停，只隔 1 秒。
+
+**「IPC socket 不存在」是回滚后的正常现象**：drop-in 撤掉后 daemon 回到 `/run/user/1000/trimum.sock`
+（现在是活的：connect 探测返回 `{"status":"ok","version":"0.5.0"}`），`/run/trimum/` 只剩一个 `RuntimeDirectory` 建的空目录。
+
+**socket 历史 bug 坐实三条**（daemon 日志逐行可指）：① 父目录不存在 → bind `ENOENT` → 只 `warning` 一声静默咽掉（daemon 仍报 `active`）；
+② 双实例互踩（`unix_socket_in_use` + journal 的 `restart counter` 涨到 **2134**，全是 `TCP 8321 已被占用`）；
+③ 客户端按 `exists()` 挑候选 → 选中 SIGKILL 残留的 stale 文件 → 静默退回 HTTP。
+
+**已改**：`config.py`（`TRIMUM_SOCKET` 契约 + `socket_candidates()` / `discover_socket()`）、`trimum_client.py`（按「能连通」挑）、
+`ipc_handler.py`（缺父目录自动建；bind 失败 → `logger.error` + stderr + `socket_start_error`）、`api_server.py`（`await ipc.start()`，
+不再让 `create_task` 吞失败）、`cli/_utils.py`（`rpc_call` 走候选表）、`scripts/harden_trmd_unit.sh`（`TRIMUM_SOCKET` 取代
+`XDG_RUNTIME_DIR` 劫持 + 就绪门 + 失败留证 + 默认 `@debug` / 默认不加只读）。
+测试：`tests/test_socket_path_consistency.py` **11 → 20**（本地 18 passed / 2 skipped）。
+
+**未做**（当轮口径；同日第四轮已补上，见下节）：TCP 收口（裁决 1）要先补 RPC 面（`health` 带 pid、
+`security.tokens/learning/learn`），顺序见 §9.3.5；生产单元仍未加固；**未安装任何包**。
+
+## 2026-09-21 TCP 收口：先把 socket 侧的腿补齐（✅ 代码已改；生产单元仍未切）
+
+> 用户口径：*「成功，写TCP吧」*（S1 恢复脚本跑通之后）。落地顺序取自 `docs/SANDBOX-PLAN.md` §9.3.5，
+> 改法 / 测试 / 真机切换顺序见 §9.3.7。
+
+**四步全部落地。**这四条都是「关 TCP 之前必须先有」的东西，少一条就等于关掉的是 daemon 而不是 TCP：
+
+| # | 改动 | 文件 |
+|---|---|---|
+| 1 | `health` 由 daemon **自报** `pid` / `uptime` / `http` / `ipc`（HTTP 与 IPC 共用一份 `_health_payload()`）；`trm status` 先认 `health.pid`，再退 pid 文件，最后才是 psutil 扫监听端口 | `api_server.py` / `cli/commands/status.py` |
+| 2 | 新增 RPC `security.tokens` / `security.learning` / `security.learn`；实现抽成模块级 `_jit_tokens()` / `_learning_status()` / `_run_learning()`，**HTTP 与 IPC 共用**；`trm security tokens / learning / learn` 改 **RPC 优先、HTTP 兜底** | `api_server.py` / `cli/commands/security.py` |
+| 3 | 新开关 `core.http_enabled`（默认 `true`）+ `TRIMUM_HTTP` 覆盖（`0`/`false`/`no`/`off` 关，其余一律当开）。关掉时 **不启 uvicorn**，由 `main._serve_without_http()` 自己驱 `app.router.lifespan_context(app)`（与 uvicorn 内部**同一段 lifespan**）；端口预检也只在开 HTTP 时跑 | `config.py` / `main.py` |
+| 4 | 关掉 HTTP 时 socket bind 失败 → `IpcUnavailableError` 从 startup 抛出 → `trmd` 以 `exit 3` 中止；**开着 HTTP 时仍只记 `error`**（那时用户还有路走，不该拦启动） | `ipc_handler.py` / `api_server.py` / `main.py` |
+
+顺带：`IpcHandler.listening` 成了 `health.ipc` 的来源 ——「socket 到底起没起来」从此是 `trm status` 上的一行。
+
+**测试**：新增 `tests/test_ipc_only_mode.py` **14 项**；`test_api_server_startup.py::TestHealthVersion`（health 不再只有
+version）与 `test_cli_commands.py`（RPC 优先 + pid 来自 health）同步改。全量 **1519 passed / 2 failed / 10 skipped**
+（2 项 = 既有宿主基线：PATH 缺 `python.exe`、LLM 断网；与开工前逐条同名同数）。
+
+**真机验证（隔离环境，2026-09-21 第四轮）**：`scripts/accept_ipc_only.sh` —— 不碰生产 daemon、不碰
+`~/.trimum`、不用 sudo，用整棵 HEAD `src` 起一个 `http_enabled: false` 的 daemon，**15 PASS / 0 FAIL**
+（status 走 RPC 且 http=false/ipc=true/pid 对得上；`security learning|tokens|learn` 在 HTTP 关闭下全通；
+本进程没有任何 HTTP 监听；socket 起不来 → `exit 3`；SIGTERM 干净收摊；`TRIMUM_HTTP=1` 可反向打开）。
+
+**真机抓到两件事**（详见 `docs/SANDBOX-PLAN.md` §9.3.8）：
+① **真 bug 已修**：致命路径用 `sys.exit(3)` 会挂住（`timeout 90` 只能 SIGKILL，退出码 124 而不是 3）——
+  真因是 `ContextManager` 的 **aiosqlite 非 daemon 线程**，startup 失败时 lifespan 的 `__aexit__` 不会跑、
+  连接没人关，解释器停在 `threading._shutdown()`（faulthandler 栈为证）。改用
+  `abort_startup(..., hard=True)`（flush + `logging.shutdown()` + `os._exit(3)`），并加子进程回归测试。
+  同类风险 uvicorn 路径也有，未动，记进 `TODO.md`。
+② **开发树 `~/trimum/src` 也落后 HEAD 一大截**（缺 `SecurityRuntime`）—— 只覆盖「本轮改的几个文件」装不上，
+  与 §9.3.6 的部署树问题同源 ⇒ 两棵树都要整体同步；导入预演那条护栏确实有用。
+
+**未做**：真机切换（`http_enabled` 默认仍 `true`，生产单元没动）；两棵树整体同步；S2～S5。**未安装任何包。**
+
+## 2026-09-21 真机切开关（TCP 收口落地）+ LLM 路由 / 限流 / 回退（✅ 真机已验；提交 `9e34ddc`）
+
+**这一轮干了两件事，都在真机上验收过。**
+
+### 1) TCP 收口（沙箱前置片 S0）：从「脚本就绪」到「生产已切」
+
+| 步骤 | 结果 |
+|---|---|
+| 整树同步 | `sudo bash /tmp/sync_opt_tree.sh --restart` ✅ 部署树 `/opt/trimum/src` **62 → 73 个模块**；备份 `/var/backups/trimum/src-20260921-224003`；重启后 `trm status` 正常 |
+| 切开关 | `sudo bash /tmp/switch_ipconly.sh --apply` ✅ **PASS=10 WARN=0 FAIL=0**（证据 `/tmp/switch-ipconly-*.log`） |
+| 验收口径 | `trm status` → `http: disabled` + `ipc socket: ok` + `source: rpc`；`ss -ltnp \| grep 8321` **无输出**；daemon 只持有 workflow driver 的临时端口 |
+
+**踩的坑（已进脚本与文档）**：第一次 `--apply` 只做了一半 —— 输出被 `head -32` 截断，写端吃到 **SIGPIPE**
+被打死，结果 **drop-in 写了但 `daemon-reload`/`restart` 没跑**（等于什么都没生效）。重跑改成
+**`setsid bash … > /tmp/apply.out 2>&1 </dev/null` 脱离会话**执行、再读文件看结论。
+更早那条：`fs.protected_regular=2` 下 **root 也不能 O_CREAT 覆盖 `/tmp` 里属主是别人的普通文件**
+（`/tmp/.trm-walk.py` 权限不够的真因），所以预演产物一律进「每次运行新建的 mktemp 目录」（§9.3.9）。
+
+一键退：`sudo bash /tmp/switch_ipconly.sh --rollback`；整树退：`sudo bash /tmp/sync_opt_tree.sh --rollback`。
+
+### 2) LLM 路由 / 限流 / 回退：从「5 个调用点各干各的」到「一处策略」
+
+**事实修正（实测，不再靠猜）**：
+- 交我算 `GET /api/v1/models` = `minimax, qwen, claw, deepseek-chat, deepseek-reasoner, minimax-m2.7, qwen3.8-27b`
+  → 用户口径的「QWEN3.6-27B」真实 id 是 **`qwen3.8-27b`**。
+- DeepSeek 官方只有 **`deepseek-flash` / `deepseek-v4-pro`** 两档 —— **`deepseek-chat` 已下架**，
+  而项目旧默认值写的正是它（本轮改成 `deepseek-flash`）。
+
+**分工（真机实测路由表）**：
+
+```
+policy / planner / transform / experience : 主 qwen3.8-27b @交我算（9 次/分，免费）  备 deepseek-flash
+agent（运行时会话 / 多步编排 / 流式）       : 主 deepseek-flash（要能力）            备 qwen3.8-27b
+```
+
+**代码（新/改；提交 `9e34ddc`）**
+
+| 文件 | 作用 |
+|---|---|
+| `src/trimum_core/llm_router.py`（新） | 唯一策略处：`resolve_targets`（选谁）/ 令牌桶（等多久）/ 失败分类 + 冷却（换谁）。**不碰 HTTP**，调用点自己发请求 |
+| `src/trimum_core/env_file.py`（新） | `.env` 加载器（此前**全仓没有任何代码读 .env**，install_fn 写进去也没人读）；按 key 叠加、已有环境变量优先 |
+| `scripts/llm_env_dropin.sh`（新） | 真机：给 trmd 加 `EnvironmentFile=-/opt/trimum/.env`；`--check / --apply / --smoke / --rollback`，验证只看键名不看键值 |
+| `llm_policy` / `planner_agent` / `transform_agent` / `experience_learner` / `agent_loop` | 5 个调用点全部改走路由（各自的降级路径一个没丢） |
+| `security_config.DEFAULT_SECURITY_YAML` | `llm:` 段 → 主 Qwen + `fallback:` 子段 deepseek-flash |
+| `tests/test_llm_router.py`(新) / `tests/test_env_file.py`(新) | 27 项 + 6 项；`tests/conftest.py` 加**两个**隔离 fixture（重置路由状态 + 快照/还原 `os.environ`）|
+| `docs/LLM-ROUTING.md`（新） | 交接文档：分工表 / env 键全表 / 限流与冷却表 / 降级表 / 运维命令 / 待办 |
+
+**真机证据（2026-09-21 22:41）**：`/opt/trimum/.env`(0600 root:guzhujushi) 与 `~/.trimum/.env`(0600) 各 18 键；
+daemon 环境里有 `TRIMUM_LLM_*` / `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY`（读 `/proc/PID/environ` 键名）；
+网络冒烟 **`OK 走的 target：primary:qwen3.8-27b@models.sjtu.edu.cn 回复：可用`**；
+`trm doctor` → `LLM API connectivity: https://models.sjtu.edu.cn/api/v1` + 三个 key env 全 OK。
+
+**顺带修的老 bug**：`planner_agent` 里 `TrimumError/TRMErrorCode` **从没被 import**（那几条分支跑到就 NameError）；
+`agent_loop._chat_completion` 之前只认 `DEEPSEEK_API_KEY`（不看配置里的 `api_key`/`api_key_env`）。
+
+**跑测结果**：全量 **1547 passed / 2 failed / 10 skipped**；两条失败都是**环境基线**，非本改动引入
+（① 本机沙箱禁网 → 真调 LLM 的那条用例连接被拒；② `test_depends_on` 的 `python.exe` 不在 PATH ——
+放行网络后 ① 通过，② 与本次改动无关）。另有一条既有健壮性 bug 未修（不在本轮范围）：
+`learning_engine.load()` 用 stdlib logger 传 structlog 风格 kwargs（`profiles=`）→ 特定顺序下 TypeError。
+
+**提交前回归：修掉一处 `.env` 带出来的用例间污染。** `env_file.ensure_loaded()` 只在 CLI/daemon/client 入口调用，
+且是**模块级只跑一次** —— 只要全量跑里有一个用例跑了 `cli.main()`，开发机真实的 `~/.trimum/.env` 与仓库根 `.env`
+就会留在 `os.environ` 里，**后面所有用例都读到开发机的密钥与模型配置**。全量跑炸两条（**隔离跑都过**）：
+`test_transform_agent::test_request_contains_correct_payload`（构造参数的 `http://test.local` 被 `.env` 的
+`TRIMUM_LLM_BASE_URL` 顶掉）、`test_other_dispatchers::test_env_list_sorted`（首行变 `163_EMAIL=...`）；
+修完又暴露 `test_cli_commands::test_health_json_includes_api_key_presence`（断言「删掉 `GROQ_API_KEY` 就该缺席」，
+而 `.env` 里有它 —— 这是用例假定「环境 = `os.environ`」的旧口径，产品行为没错）。
+处理：`tests/conftest.py` 新增 `isolate_process_env`（按用例快照/还原 `os.environ` + `env_file.reset_loaded()`）、
+`env_file.reset_loaded()`、health 用例显式屏蔽 `.env`。全量回到 **1554 passed / 2 failed / 10 skipped**，
+两条失败仍是宿主基线（PATH 缺 `python.exe` + 本机沙箱断网），与本轮改动无关。
+
+**下一步**：① **真机跑 S2 的 4 条命令对照**（`docs/SANDBOX-PLAN.md` §10.6，不需要 `sudo`，**本人跑**）；
+② 【DS】S3 seccomp 三档（`readonly` / `workspace-write` / `strict`）。
+LLM 侧剩余待办：跨进程限流 / token 维度计量 / `Retry-After` / `trm doctor` 显示路由表 / 成本账本（见 `docs/LLM-ROUTING.md` §8）。
+
+---
+## 2026-09-21 Codex 侧模型分工与「限流降级」调研（✅ 已落地；提交 `de619c5`）
+
+**需求**：简单任务用交我算免费的 Qwen、难任务用 deepseek-flash，并希望「像 trimum 一样限流后自动降级」。
+
+**结论**：Codex **自身没有**「限流 → 换 provider」的开关（全二进制扫 `*fallback*` 只有 CodeModeHost / TokenBudget /
+models-manager 内部回落 / session 模型不可用回落四种，与限流无关）；能立刻做的是**任务级 profile 切换**（本轮已落地），
+要自动降级只能**在 Codex 前面加一层本地路由代理**（`docs/CODEX-MODEL-POLICY.md` §4，**待裁决**）。
+
+**实测事实**：
+
+| 事实 | 证据 |
+|---|---|
+| `wire_api` 只接受 `responses` | 故意写 `bogus` → 报错 "unknown variant `bogus`, expected `responses`" |
+| 交我算 `/api/v1/responses` 可用 | 最小请求 **HTTP 200**（`object:"response"`、`model:"qwen3.8-27b"`、24 tokens；响应带 `_litellm_tpm_reserved_model` ⇒ 后端是 LiteLLM 网关） |
+| `codex exec -p qwen` 端到端通 | `model: qwen3.8-27b` / `provider: sjtu-jiaowusuan` / 回复「可以」/ 退出码 **0**（跑两次） |
+| profile 不能写在 `config.toml` | 0.151 要求独立文件 `~/.codex/<name>.config.toml`（`sjtu-min.config.toml` 是先例） |
+| 次数才是瓶颈 | 一次 `codex exec`（2 字回复）用掉 **14~15k tokens**；交我算 10 次/分 ⇒ 长会话必撞 429，**Qwen 只适合单次小任务** |
+
+**改动**：`scripts/codex-model.ps1`（新：按任务选 profile + 把 trimum `.env` 灌进进程环境；存 UTF-8 **with BOM** ——
+PS 5.1 用 `-File` 跑无 BOM 的 UTF-8 会按 GBK 解、中文直接把脚本解析弄挂）、`docs/CODEX-MODEL-POLICY.md`（新）、
+`TODO.md`（新增「🤖 Codex 模型分工」一节 + 给 19 条待办打 `【Qwen】` / `【DS】` 标签）。
+仓库外：新建 `~/.codex/qwen.config.toml` 与 `~/.codex/ds.config.toml`；`~/.codex/config.toml` 加过 `[profiles.*]` 被 0.151 拒绝，已回滚
+（备份 `~/.codex/backups/config.toml.20260921-230249.bak`）。**未改任何 `src/` 与 `tests/`。**
+
+**收尾核对（2026-09-21 23:07）**：真机 `trm status` → `source: rpc` / `http: disabled` / `ipc socket: ok`（pid 27582，uptime 27m）；
+`/opt/trimum/src` 与本地 `src` 逐文件哈希：**105/105 在位，唯一差异是 `env_file.py` 少一个测试用 `reset_loaded()`**（daemon 不调用）；
+全量测试 **1554 passed / 2 failed / 10 skipped**（两条仍是宿主基线）；`server` = `origin/server`，工作区干净。
+
+---
+
+## 2026-09-22 Codex 模型切换复盘：为什么「qwen3.8-27b / sjtu-jiaowoisan 都不行」（✅ 已修 + 已复验）
+
+**症状**：09-22 早上连开 6 个会话，用 `/model` 依次填 `qwen3.6-27b` → `qwen3.8-27b` → `sjtu-jiaowoisan`，
+全部得到同一条报错：`The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed <填的那个>`。
+
+**两个根因（都有 rollout 证据，不是猜的）**：
+
+| # | 根因 | 证据 |
+|---|---|---|
+| A | `/model` 只改**模型名**，**不改 provider**；会话的 provider 始终是 `deepseek-api` | 6 条 rollout 的 `session_meta.model_provider` 全是 `deepseek-api`，而 `turn_context.model` = 你填的值；报错文本来自 DeepSeek |
+| B | `sjtu-jiaowusuan` 是 **provider 名，不是模型名**，写进 `/model` 必然失败 | 同上：`...but you passed sjtu-jiaowoisan` |
+
+⇒ **换 provider 只能重开进程**：`.\scripts\codex-model.ps1 qwen` / `codex -p qwen`（`-p ds` 同理）。另加两个**免记路径**的入口：`scripts\codex-qwen.cmd` / `scripts\codex-ds.cmd`（纯 ASCII 批处理转发，
+内部带 `-NoProfile -ExecutionPolicy Bypass`，双击可跑；交互式与 `-Exec` 两种都实测过）。
+`qwen3.8-27b` 只存在于 `provider = sjtu-jiaowusuan` 上，单独改模型名没有意义。
+
+**顺带查出 `scripts/codex-model.ps1` 的两个真 bug（昨天落下的，本机已复现）**：
+
+| bug | 现象 | 修法 |
+|---|---|---|
+| `.env` 候选顺序错 | 候选表把 `~/.trimum/.env`（只剩 `OPENAI_*` 的老 stub）排在仓库 `.env` **之前**，旧实现**只取第一个存在的候选** ⇒ `JIAOWOISAN_API_KEY` / `DEEPSEEK_API_KEY` 一个都没注入（父进程环境里也没有时）；`codex -p qwen` 只得到 `ERROR: Missing environment variable: JIAOWOISAN_API_KEY.` | 低→高优先级依次加载 + 仓库根 `.env` 权威 + 进程原有变量优先；并在起 codex **之前**校验 profile → provider → `env_key` 是否存在，缺了直接给人话报错 |
+| PS 5.1 把 codex 的 stderr 当致命错误 | 原生命令写 stderr 的每行被包成 ErrorRecord，配上脚本里的 `$ErrorActionPreference = 'Stop'` ⇒ codex 一启动（总会写 `Reading additional input from stdin...`）就抛错中止，`-Exec` 路径其实一次都没跑成 | 在 `& $codex` 前把偏好放回 `Continue`；成败看 `$LASTEXITCODE` |
+
+**署名改正**：Codex provider `sjtu-jiaowoisan` → **`sjtu-jiaowusuan`**（2026-09-22 定名：先误改为 `jiaowosuan`，经确认最终用 `jiaowusuan`）；
+改 `~/.codex/config.toml` 2 处 + `~/.codex/qwen.config.toml` 1 处，
+备份 `~/.codex/backups/config.toml.20260922-072948.bak` / `qwen.config.toml.20260922-072948.bak`。
+
+**复验（2026-09-22 07:33，`codex-cli 0.152.0`）**：先**清空进程里的 key**，
+再跑 `.\scripts\codex-model.ps1 qwen -Exec "只回复两个字：可以"` →
+`provider: sjtu-jiaowusuan` / 回复「可以」/ 退出码 **0**，且脚本自报「注入 33 个变量，.env: ~/.trimum/.env ; D:\trimum\.env」
+⇒ key 确实是从仓库 `.env` 注入的。
+（昨天那份证据取自 **0.151.0-alpha.7.2**；本机已升 **0.152.0**，profile 机制未变，已重新验证。）
+
+**未做（留给裁决）**：环境变量 `JIAOWOISAN_API_KEY` 本轮**没改名** —— 它同时被 `src/`（`llm_router.py` /
+`doctor.py` / `health.py` / `security_config.py`）、`tests/`、`scripts/llm_env_dropin.sh` 和真机 drop-in 引用，
+盲改会让真机 daemon 起不来。选项见 `TODO.md` 的「🤖 Codex 模型分工」小节。
+
+---
+## 2026-09-22 S2 施加点收口：内核层沙箱落地（✅ 代码已落地 + 本机 A/B 回归 + **真机已验**）
+
+**做了什么**：新增 `src/trimum_core/sandbox_exec.py`（Layer K，923 行）—— Landlock 三个 syscall（444/445/446，
+全走 `ctypes`，零依赖、不要 root）+ `prctl(PR_SET_NO_NEW_PRIVS)`，把**全部 7 个 spawn 点**收到一处。
+
+**7 个点**（原设计列 6 个；实做时发现 E4 的 CLI 广接入 `cli_adapter.generic_executor` 也是一条真实派生通道）：
+
+| # | 位置 | 面 |
+|---|---|---|
+| 1–4 | `tool_dispatchers.py`：`GitDispatcher._run_git` / `ShellDispatcher.execute` / `ProcessDispatcher._list_processes` / `._kill_process` | `git_*` / `shell` / `process list` / `process kill` |
+| 5 | `agent_launcher.py:launch_agent` | 子 Agent（施加失败**不启动**） |
+| 6 | `cli_adapter.py:generic_executor` | `trm tool import-cli` 装出来的 CLI 工具 |
+| 7 | `tool_gateway.py`（dispatch 之前） | 不算派生点：给「file 型工具把 request 重建成新对象」那条路兜底 |
+
+`TestNoBypass` 用静态断言钉住：这两个文件里不许再出现 `create_subprocess*`，且 `plan_for(` 的调用次数被锁死。
+
+**关键口径**：
+
+- 施加在**子进程**（`preexec_fn` 钩子）—— daemon 自己不施（Landlock 只能收紧、不可逆，见 `docs/SANDBOX-PLAN.md` §6.1）；
+- 状态词表（审计唯一口径）：`off` / `unsupported` / `readonly|workspace-write|strict` /
+  `<mode>:failed`（**命令不跑**，fail-closed）/ `<mode>:degraded`（关掉 fail-closed 才降级放行，且记 ERROR）；
+- 两档开关：`TRIMUM_SANDBOX`（默认 `workspace-write`）+ `TRIMUM_SANDBOX_FAIL_CLOSED`（默认 `true`），
+  drop-in 写一行即生效、删掉即回滚；优先级 = 内置默认 < `security.yaml` < 环境变量；
+- 放宽方向锁死：`agent.json5` 只能往严里收（`_MODE_RANK`），manifest 里的 `write` **一律忽略 + 告警**；
+- Windows → 如实报 `unsupported`（不假装已隔离、也不静默放行），且**只告警一次**。
+
+**回归（本机 Windows，两棵树 A/B 对照）**：HEAD `261f452` 干净树 **1548 passed / 6 failed / 12 skipped**；
+S2 工作区 **1576 passed / 6 failed / 16 skipped** → **+26 passed（新增用例）/ +6 skipped（Linux 专属）**，
+差额精确等于新用例数。**6 条失败两棵树逐条一致**，与 S2 无关：2 条宿主基线（`PATH` 缺 `python.exe`、
+连不上 `models.sjtu.edu.cn`）+ 4 条宿主 `~/.trimum` 污染（`--fakehome` 后 41/41 全绿）。
+归因脚本 `tmp/cleanrun.py`（剥掉宿主常驻的 21 个脏环境变量再跑）。
+
+**提交**：`92ac32c`（本片：`sandbox_exec` + 7 个接入点 + 32 项测试 + 文档）/ `3276aab`（前一片尾巴：Codex 模型分工脚本与文档）。
+
+**真机修正（2026-09-22 S3 轮补齐，见 `docs/SANDBOX-PLAN.md` §10.5.1）**：
+
+1. **Landlock 只接「目录 + 普通文件」** —— 字符设备（`/dev/null` `/dev/ptmx`…）给权限是 `EINVAL(22)`，
+   管道 / 指向管道的符号链接（`/dev/stdout`…）是 `EBADFD(77)`。修法：新增 `_landlockable()` 装置前过滤
+   （剩下的记 `sandbox.root_not_landlockable`，debug 级）+ `_file_read_rights()` / `_file_write_rights()`
+   （**普通文件不给目录级权限**）+ `EBADFD` **降级为 warning `sandbox.rule_skipped_not_a_file`**（不再 fail-closed）。
+2. **`readonly` 档工作区只读** —— 原先工作区同时进了写根，真机实测「`readonly` 档能写工作区」（**隔离失效**）；
+   已改 `plan_for`：readonly 时工作区只进读根。
+
+真机复跑（2026-09-22）：`test_sandbox_exec.py` + `test_seccomp_exec.py` **97 passed / 2 skipped / 0 failed**；
+原「真机 4 条命令对照」已并入 `scripts/accept_s3.py`（A / C / D 组）。
+
+**未做**：`TaskRegistry.SHELL` 的派生点未收；`trm status` / `doctor` 还没把沙箱状态摆到台面上。
+
+---
+
+## 2026-09-22 S3 seccomp 三档：内核层沙箱的另一半（✅ 代码已落地 + 本机回归 + **真机验收 35 passed / 0 failed**）
+
+**做了什么**：新增 `src/trimum_core/seccomp_exec.py`（733 行）—— 三档**档案**（纯计算 `build_plan`，
+resolver / lib / capability 全可注入 ⇒ 逻辑层在 Windows 上也能测）+ **施加**（`apply_current`，libseccomp 走 ctypes）
++ 能力探测 + 独立 CLI（`python -m trimum_core.seccomp_exec --status / --profile`）；
+`sandbox_exec` 把它接到 Landlock 那半旁边（**Landlock 先、seccomp 后**）。
+
+**三档**：
+
+| 档 | 内容 | 谁用 |
+|---|---|---|
+| `off` | 不施加（照旧 exec，**明确不施加**，不再退 126） | 排障 / 一键退 |
+| `l1`（**默认**） | `KERNEL_BLOCK` **31** 条危险内核面（内核模块 / eBPF / `ptrace` / `io_uring` / 命名空间 / 挂载 / 块设备 / I/O 端口 / keyring / `open_by_handle_at`） | 常规任务 |
+| `strict` | `l1` + `STRICT_BLOCK` 3 条 + **按地址族挡网络 socket**（`AF_INET`/`AF_INET6`/`AF_PACKET`/`AF_NETLINK`），**`AF_UNIX` 放行** | 未知 / 第三方 Agent |
+
+**关键口径**：
+
+- `TRIMUM_SECCOMP`（环境变量 > `security.yaml: sandbox.seccomp` > 默认 `l1`）；与 `TRIMUM_SANDBOX`（Landlock 那半）**互相独立**；
+- **施加顺序**：`apply_plan()` 里 **Landlock 先、seccomp 后** —— `seccomp_load()` **不可逆**，必须排在所有可能失败的步骤之后；
+- 只收紧不放宽：`agent.json5` 的 `seccomp_profile` 只能更严（`PROFILE_RANK`）；包的 `seccomp_allow` / `extra_syscalls`
+  **忽略 + 告警**（`sandbox.manifest_seccomp_allow_ignored`），包的 `seccomp_block` / `extra_block` 可以加；
+- `strict` + `seccomp_allow` 非空 ⇒ **白名单模式**（默认动作 `EPERM` + 69 条基线 + 声明放行），此时**不再叠黑名单规则**；
+- 审计：`sandbox` 与 `seccomp` **两个字段各记一份**（`off` / `unsupported` / `l1` / `strict` / `<档>:failed`）。
+
+**真机跑出来的四条（`docs/SANDBOX-PLAN.md` §11.3）**：
+
+| # | 事实 | 代价（不修会怎样） |
+|---|---|---|
+| 1 | 能力口径是 **API level**（`seccomp_api_get()` = 6），不是版本号 —— `seccomp_version()` 走 ctypes 读不出来（`restype` 试 `c_uint`/`c_int`/`c_ulong` 全是垃圾） | 能力判定失真 |
+| 2 | 判别器只能选「**不施加时一定会成功**」的 syscall（`ptrace(TRACEME)` / `io_uring_setup`）；`bpf` / `mount` / `setns` 非特权下**本来就失败** | 验收得出「拦住了」的**假结论** |
+| 3 | **`SCMP_CMP_EQ` 是 4，不是 0**（`enum scmp_compare` 从 `_SCMP_CMP_MIN = 0` 起算） | `seccomp_rule_add` 返回 `-EINVAL(22)`，「按地址族挡 socket」**整条失效** ⇒ `strict` 档**放行 `AF_INET`** |
+| 4 | Landlock 只接「目录 + 普通文件」 | 见下面 S2 小节的真机修正三条 |
+
+探针留在 `tmp/probe_cmp.py`（真机输出：`op=0 → rc=-22`、`op=1..7 → rc=0`、`sizeof(struct scmp_arg_cmp)=24`）。
+
+**回归**：
+
+| 树 | 结果 |
+|---|---|
+| 本机 Windows（`test_seccomp_exec` + `test_sandbox_exec`） | **86 passed / 13 skipped / 0 failed** |
+| 本机 Windows（全量 `tests`） | **1636 passed / 6 failed / 23 skipped**（6 条与 S2 轮逐条同名，与 S3 无关） |
+| 真机 `/tmp/trm-s3`（两个文件） | **97 passed / 2 skipped / 0 failed**（首跑 8 条失败 → 3 条 → 0 条） |
+| 真机 `/tmp/trm-s3`（全量） | **1645 passed / 16 failed / 4 skipped**（16 条全是宿主 / 合成树产物，归因表见 §11.6） |
+| 真机 `scripts/accept_s3.py` | **35 passed / 0 failed** |
+
+**提交**：`5041885`（本片：`seccomp_exec` + 两半联动 + 两个测试文件 + `accept_s3.py` + 三条真机修正）/
+`45cd19f`（文档回填：`SANDBOX-PLAN` §10.5.1+§11、`SECURITY-DEFENSE-PLAN` §7.1–§7.3 脚注、`TODO` / `STATUS`）/
+`fa2542e`（回填文档提交号）/ `e2046a6` + 本次（`TODO` 的「交给 Qwen 的起手三步」与状态刷新）—— **均已推 `origin/server`**。
+
+**未做**：`TaskRegistry.SHELL` 的派生点仍未收（S2 起挂着）；`trm status` / `doctor` 还没把沙箱状态摆到台面上；
+`/opt/trimum` 的整树同步待本人 `sudo`（`/tmp/sync_opt_tree.sh` + `/tmp/trimum-sync.tar` 已就位）；
+白名单模式的 `allow` 只给运维（`security.yaml`），不是包口子。
+
+---
+
+## 2026-09-22 S3 收尾交接：起手三步验证（✅ 全过 + 真机合成树重建）
+
+> 按 TODO.md「交给 Qwen：S3 收尾之后的起手三步」逐条执行。
+
+**第 1 步 · 读文档**：STATUS.md S3 小节 + docs/SANDBOX-PLAN.md §11（§11.3 四条真机教训、§11.6 归因表），已读，不重查。
+
+**第 2 步 · 跑测试**（全部通过）：
+
+| 树 | 命令 | 结果 | 基线 | 判定 |
+|---|---|---|---|---|
+| 本机 Windows 全量 | python tmp/cleanrun.py tests -q --basetemp D:/trimum/tmp/pytest-fresh -p no:cacheprovider | **1642 passed / 0 failed / 23 skipped**（91.8s） | 1636/6/23 | ✅ 通过且优于基线（6 条宿主失败本轮未复现） |
+| 真机 /tmp/trm-s3 全量 | cd /tmp/trm-s3 && PYTHONPATH=/tmp/trm-s3/src /home/guzhujushi/trimum/.venv/bin/python -m pytest tests -q | **1645 passed / 16 failed / 4 skipped**（67.3s） | 1645/16/4 | ✅ 逐条吻合 §11.6 归因表（7 skill_integration + 2 tool_file_loading + 4 socket_path_consistency + 1 env_list_sorted + 1 test_depends_on + 1 llm_integration） |
+| 真机 ccept_s3.py | 同上 PYTHONPATH | **35 passed / 0 failed** | 35/0 | ✅ 全绿 |
+
+**真机合成树重建**（原 /tmp/trm-s3 已不存在，home 树 /home/guzhujushi/trimum 非 git 仓库且停在 09-20）：
+
+- 从 home 树 tar 出 src / 	ests / scripts / config 到 /tmp/trm-s3；
+- 逐文件比对本地开发树，**43 个版本差文件**（P0 / E5 / 穿插 A-B-C / LLM 路由 / S2 / S3 各轮改动）全部同步上去；
+- 补 config/trust/（	rimum-root.crt + README.md，原 tar 未含非 .py 文件）与空 skills/ 目录（skill_integration 用例需要）；
+- 重建后基线与 §11.6 完全一致 —— 证明合成树现在与本地开发树等价。
+
+**推送**：origin/server 之前停在 dad54c9，本地领先 1 个提交（a72dc5 RAG 调研文档）—— 已开代理推送，四分支纪律不变（日常只推 server）。
+
+**下一项**：S4 子 Agent 资源边界（systemd-run --user transient，见 docs/SANDBOX-PLAN.md §8 S4 行）。
+
+---
+
+
+## 2026-09-22 RAG 检索能力调研（✅ 调研完成，不改代码；docs/RAG-RESEARCH.md）
+
+> 因 S4（systemd-run --user 子 Agent 资源边界）是完整实现片、超出 10 分钟窗口，本轮改做用户备选：RAG 调研。
+> 纯文档，无代码改动，测试基线不变。
+
+- **现状**：ContextManager.search() 已用 **SQLite FTS5**（unicode61）做关键词检索，MemoryClassifier
+  做 domain/category 过滤——**但没有语义检索**（无 embedding / 无向量 / 无混合排序）。
+- **结论**：trimum 的 RAG = 给现有记忆层补一条「**本地 embedding + sqlite-vec**」语义通道，再 **RRF 混合排序**；
+  存储 / 命名空间 / 读确认（project_ctx/global_ctx）/ 审计**全部复用现成**，只加「语义召回」一层，全程离线、只读。
+- **推荐路径**：R1（把 FTS5 search() 接进记忆读取路径，零新依赖）→ R2（sqlite-vec + 本地 embedding 走
+  llm_router 本地档）→ R3（BM25 + 向量 RRF 融合 + 经 context_compactor 装窗 + 审计留痕）。
+- **不做的（YAGNI）**：LangChain / LlamaIndex、长文档 chunking、FAISS / 专用向量库 / 常驻向量服务、云 embedding API。
+- **归属**：E7 前置能力切片，**未立项**，等 E7 节奏再排。
+
+## 2026-09-22 零散待办前三项：B4 security revoke + C1 ask Ctrl+C + F2 CLI-daemon 集成测试（✅ 全部完成）
+
+> 按 `TODO.md` 顺序做前三项。全量回归 **1660 passed / 0 failed / 23 skipped**（比上轮 1642 多 18 条新增，零回归）。
+
+### B4：`trm security revoke <token_id>`
+
+- `ToolGateway.revoke_jit_token(token_str)`：幂等，找不到返回 False；找到则删除 + 审计日志。
+- `api_server._revoke_jit_token(state, token_str)`：前缀匹配（≥4 位），多个匹配报模糊；新 RPC `security.revoke`。
+- CLI `security.py`：`revoke` 子命令（走 RPC，失败返回 exit 1 + 错误信息）。
+
+### C1：`trm ask` Ctrl+C 中断处理
+
+- `ask.py handler`：`asyncio.run(_execute())` 外包 `try/except KeyboardInterrupt`，捕到则打印 `interrupted by user` + 返回 exit code 130（壱明 SIGINT 口径）。
+
+### F2：CLI↔daemon 集成测试（`test_integration.py::TestCliDaemonIntegration`，9 条）
+
+- 真 `create_app` + `TestClient` + 真 `IpcHandler` RPC router（不起真 daemon 进程）。
+- 覆盖：health RPC/HTTP 合同一致、`trm status` 在线/离线、`security tokens` RPC（措蔽 + 过滤）、`security revoke` RPC（完整串 / 前缀 / 不存在）。
+
+### 测试新增（18 条）
+
+| 文件 | 新增 |
+|---|---|
+| `tests/test_cli.py` | 1（`security revoke` 解析） |
+| `tests/test_cli_commands.py` | 8（revoke CLI ×4 + Ctrl+C ×1 + gateway ×3） |
+| `tests/test_integration.py` | 9（F2 集成全部） |
+
+## 2026-09-22 CLI 进阶第一项：`trm ask --image` 多模态输入（✅ 完成）
+
+> 提交待推。全量 **1660 passed / 6 failed / 23 skipped**（6 条失败为既有宿主基线，零回归）。
+
+### 做了什么
+
+| 位置 | 内容 |
+|---|---|
+| `src/trimum_core/agent_loop.py` | 新增 `_IMAGE_MIME` / `_image_to_data_url()` / `_build_user_content()`；`run()` 与 `_plan()` 接受 `images` 参数，用户消息按 OpenAI 多模态格式携带 base64 图片 |
+| `src/trimum_core/cli/commands/ask.py` | 新增 `--image` / `-I` 参数（`nargs="+"`），透传到 `AgentLoop.run()` |
+| `tests/test_agent_loop.py` | 6 条新增：`_image_to_data_url`（有效 / 缺失 / 不支持格式）+ `_build_user_content`（无图 / 多图 / 空列表） |
+
+### 关键设计
+
+- **消息格式**：无图时 user content 保持 `str`（向后兼容）；有图时变为 `[{"type":"text",...}, {"type":"image_url","image_url":{"url":"data:...;base64,..."}}]`
+- **支持格式**：png / jpg / jpeg / gif / webp / bmp / tiff
+- **LLM 能力依赖**：图片以 OpenAI 兼容多模态格式发送；若 LLM 不支持 vision，API 报错由 `_plan()` 的 `except` 捕获并走 `_fallback_plan()` 降级
+
+---
+## 2026-09-22 CLI 进阶第二项：`trm memory import` / `export` 记忆迁移（✅ 完成）
+
+> 全量 **1664 passed / 6 failed / 23 skipped**（6 条失败为既有宿主基线，零回归）。
+
+### 做了什么
+
+| 位置 | 内容 |
+|---|---|
+| `src/trimum_core/cli/commands/memory.py` | 新增 `export`（JSON v1，支持 `--file` 或 stdout）和 `import`（`--file` 或 stdin）子命令 |
+| `tests/test_memory_import_export.py` | 4 条测试：空导出 / 有数据导出 / 导出→导入往返 / 版本校验 |
+
+### 导出格式（JSON v1）
+
+```json
+{
+  "version": 1,
+  "exported_at": "2026-09-22T12:00:00+00:00",
+  "global_entries": {"key": "value"},
+  "agent_entries": {"agent-id": {"key": "value"}},
+  "categories": [{"domain": "...", "category": "...", "description": "..."}]
+}
+```
+
+### 用法
+
+```
+trm memory export -o backup.json
+trm memory import -i backup.json
+trm memory export | trm memory import   # 管道
+```
+
+---
+
+---
+## 2026-09-22 文档收尾：TODO / STATUS 校正 + 待办按模型分工（✅ 完成）
+
+> 本轮**只动文档**（`AGENTS.md` / `TODO.md` / `STATUS.md`），零代码改动、零测试影响。
+
+### 修正三处「与仓库现状不符」
+
+| # | 问题 | 改法 |
+|---|---|---|
+| 1 | `TODO.md` / `STATUS.md` 都写「本地领先 `origin/server` 2 个提交、**未推**」，但 reflog 显示 `01819e9` 已于 **22:11:09** 推送（`git rev-list --count origin/server..server` = 0） | 两处均改为「**已与 `origin/server` 同步**」 |
+| 2 | 常驻区「下一步」第 1 条指向 `TODO.md`「EventBus 通信缺口」、第 2 条指向「🚚 E5 第三片实施计划」—— 这两个小节在上一轮 TODO 改写时已删 | 改为指向 `STATUS.md` 自己的 2026-09-21 日志与 `TODO.md`「P2 杂项」 |
+| 3 | 上一轮「TODO 只留未闭环」改写时**连带删掉了若干仍未闭环的项** | 全部补回（清单见下） |
+
+### 补回的未闭环项（上一轮误删）
+
+- **沙箱**：`TaskRegistry.SHELL` 派生子进程仍未收口（7 个 spawn 点里的第 8 个）、S4/S5 未做、`trm status` / `doctor` 未露出 Landlock + seccomp 状态。
+- **LLM 路由 5 项**（与 `docs/LLM-ROUTING.md` §8 同源）：跨进程限流、token 维度计量、429 `Retry-After`、`doctor` 路由表、成本账本。
+- **E7**：另两条未决（是否改用原生工具调用 / 会话记录存哪）、`scripts/accept_e7.py` 待写。
+- **P2**：运行记录落盘（环形 200 条重启即丢）、启动失败退出路径（HTTP 开着的 daemon 仍走 uvicorn `sys.exit(3)`，可能被 aiosqlite 非 daemon 线程拖住）、总线历史仅内存 100 条。
+- **未开工子系统**：记忆桥零调用点、`SystemMonitor` 从未被实例化、`agent_runtime` spawn 仍是 Stub。
+- **新增「安全收尾」一节**：`.git/config` 里明文 GitHub token、本机 `.env` 里的真机 sudo 口令、`~/.trimum/.env` 老 stub。
+
+### 待办按模型分工（本轮主要交付）
+
+- `TODO.md` 每条待办打上 `【Qwen】`（交我算，免费、单次小任务）/`【DS】`（deepseek-flash，复杂件）/`【本人】`（要 sudo 或要拍产品决策）三类标签。
+- 新增「🤖 模型分工」一节：标签读法、两个免记命令入口、**为什么不能全靠 Qwen**（10 次/分 vs 一个 turn 十几次调用）、`/model` 只改模型名不改 provider 的坑。
+- 新增「Qwen 任务提示词（复制即用）」一节：**11 条**（`.trimumrc` 别名 / 补全脚本 / confidence 三级分流 / API Key Manager / `Retry-After` / doctor 路由表 / 成本账本 / 沙箱状态 / 剧本原地开关 / agent-sdk e2e / SonarQube 重扫），每条含落点 + 要求 + 验收，另附统一前缀（读文档 → 全量回归 → 回填文档 → 只推 `server`）。
+
+### 顺带定下的工作方式（写进 `AGENTS.md` 已有章节，本轮验证）
+
+- **写含中文的文件走 Node REPL 的 `fs.writeFileSync`**（UTF-8 + LF，实测 round-trip 一致、`cr=0`）；PowerShell here-string 会按 GBK 写坏。
+- **Git Bash 可用**：`& "C:\Program Files\Git\bin\bash.exe" -lc "<脚本>"`（PATH 上的 `bash` 是别的包装器，别用）；中文内联、here-doc 均无损，行尾保持 LF。**别**把 bash 传成工具自己的 shell 参数 —— 那样 bash 会把 stdin 当脚本读，here-doc 会把后续内容吃掉（实测：文件建成 0 字节 + 卡住）。
