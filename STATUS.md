@@ -19,6 +19,20 @@
 
 ---
 
+## 2026-09-22 RAG 检索能力调研（✅ 调研完成，不改代码；docs/RAG-RESEARCH.md）
+
+> 因 S4（systemd-run --user 子 Agent 资源边界）是完整实现片、超出 10 分钟窗口，本轮改做用户备选：RAG 调研。
+> 纯文档，无代码改动，测试基线不变。
+
+- **现状**：ContextManager.search() 已用 **SQLite FTS5**（unicode61）做关键词检索，MemoryClassifier
+  做 domain/category 过滤——**但没有语义检索**（无 embedding / 无向量 / 无混合排序）。
+- **结论**：trimum 的 RAG = 给现有记忆层补一条「**本地 embedding + sqlite-vec**」语义通道，再 **RRF 混合排序**；
+  存储 / 命名空间 / 读确认（project_ctx/global_ctx）/ 审计**全部复用现成**，只加「语义召回」一层，全程离线、只读。
+- **推荐路径**：R1（把 FTS5 search() 接进记忆读取路径，零新依赖）→ R2（sqlite-vec + 本地 embedding 走
+  llm_router 本地档）→ R3（BM25 + 向量 RRF 融合 + 经 context_compactor 装窗 + 审计留痕）。
+- **不做的（YAGNI）**：LangChain / LlamaIndex、长文档 chunking、FAISS / 专用向量库 / 常驻向量服务、云 embedding API。
+- **归属**：E7 前置能力切片，**未立项**，等 E7 节奏再排。
+
 ## 2026-09-22 S3 seccomp 三档：内核层沙箱的另一半（✅ 代码已落地 + 本机回归 + **真机验收 35 passed / 0 failed**）
 
 **做了什么**：新增 `src/trimum_core/seccomp_exec.py`（733 行）—— 三档**档案**（纯计算 `build_plan`，

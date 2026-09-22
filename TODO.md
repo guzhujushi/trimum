@@ -43,6 +43,19 @@
 **推送**：`server` 已推（`origin/server` = 含 S3 全部提交的那个头）；下轮开工前若看到 `origin/server` 落后，先开代理
 （`127.0.0.1:7993`）再 `git push origin server`。
 
+### 📚 穿插项：RAG 检索能力调研（2026-09-22，只调研不改代码）
+
+> 因 S4（systemd-run 资源边界）是完整实现片，超出 10 分钟窗口，本轮改做用户给的备选：RAG 调研。
+> 产出：docs/RAG-RESEARCH.md。
+
+- **结论**：trimum 已有「FTS5 关键词检索的记忆层」（ContextManager.search + MemoryClassifier），
+  但**没有语义检索**。RAG 的正确形态 = 给现有记忆层补一条「本地 embedding + sqlite-vec」语义通道，
+  再 **RRF 混合排序**；存储 / 命名空间 / 确认 / 审计全复用现成，**只加「语义召回」一层**，全程离线、只读。
+- **推荐路径**：R1（把 FTS5 search() 真正接进记忆读取路径，零新依赖）→ R2（sqlite-vec + 本地 embedding
+  走 llm_router 本地档）→ R3（BM25 + 向量 RRF 融合 + 经 context_compactor 装窗 + 审计）。
+- **不做的（YAGNI）**：LangChain/LlamaIndex、长文档 chunking、FAISS/专用向量库、云 embedding API。
+- **归属**：E7 前置能力切片，**未立项**，等 E7 节奏再排。
+
 ### 本次（2026-09-21）完成
 
 | 提交 | 内容 |
