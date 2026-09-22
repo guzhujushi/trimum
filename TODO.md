@@ -2,7 +2,8 @@
 
 > 最后更新：2026-09-21（E1 命令面 / Skills → E6 选装模型 + 首启引导 → E3 环境层 `trm env` → E2 MCP 接入 M0/M1/M2 → M3 策展导入器 → M4 传输与生命周期 → M4.5 远端工具聚合 → M4.5 收口小项 → E4 广接入 → W1 workflow 执行语义 → **EventBus 通信盘点** → **P0 步骤 1/3 载荷契约扁平化** → **步骤 2/3 L4 改走 `SecMonitor.inspect()`** → **步骤 2 补丁：L4 装配统一 + 处置映射 + 签名收敛** → **步骤 3/3 定 `workflow.trigger` 归属（P0 闭环）** → **E5 第一片：`.trmpkg` 包格式** → **E5 第二片：`trm pkg` CLI + 真实内置根 + 签名索引 + `trm install` + 能力交集** → **E5 第三片步骤 1：`trm install --remove`（卸载与注销）** → **E5 第三片步骤 2：`trm pkg index` 发布方闭环 + `docs/PACKAGE-CHANNEL-OPS.md`** → **E5 第三片步骤 3：多用户边界（调研 + 设计，`docs/MULTI-USER-BOUNDARY.md`，不改代码）** → **穿插项步骤 A：剧本自动触发策略（取证类武装 / 处置类不武装 / 自动触发不派子 Agent）** → **穿插项步骤 B：总线硬化（索引接线 + 失败可观测 + 严格模式 + 订阅修正）** → **穿插项步骤 C：`WorkflowListener` 接线（意图驱动链落地 + `trm workflow submit`）** → **E7 自研编码智能体：规格与设计（`docs/CODING-AGENT-PLAN.md`，待裁决）** → **沙箱前置片：socket 收口** → **TCP 收口四步（代码侧落地，`docs/SANDBOX-PLAN.md` §9.3.7）** → **真机切开关：整树同步 + 收 TCP 脚本就绪（备份 / 导入预演 / 回滚三条护栏）** → **真机切开关落地（TCP 已收口）+ LLM 路由 / 限流 / 回退 + 测试环境隔离** → **Codex 侧模型分工（qwen / ds profile + launcher + TODO 标签）** → **S3 seccomp 三档（真机验收 35 passed / 0 failed）**）
 > 测试基线：本地 **1636 passed / 6 failed / 23 skipped**（2026-09-22 S3 seccomp 三档之后；S2 轮 1576/6/16 → **S3 轮 1636/6/23**，+60 全为新增用例，6 条失败与 S2 轮逐条同名）；上一轮基线 **1554 passed / 2 failed / 10 skipped**（2026-09-21 沙箱前置片 TCP 收口之后；socket 收口轮 1502 → TCP 收口轮 1519；穿插项步骤 C 之后 1489 → 步骤 B 1475）；步骤 3 之后是 **1326**（只加文档）；2 项失败 = 既有宿主基线：PATH 缺 `python.exe`（`test_depends_on::test_existing_dep_returns_empty`）+ LLM 断网（`test_llm_integration`）；原先那批「沙箱写 `~/.trimum` 被拒」已由 `tests/conftest.py` 把 `TRIMUM_HOME` 指到临时目录消掉）。历史：E4 前 940 → E4 后 1099 → W1 后 1156 → P0 步骤 1 后 1167 → 步骤 2 后 1176 → 步骤 2 补丁 1210 → 步骤 3 后 1212 → E5 第一片 1228 → E5 第二片 1301 → E5 第三片步骤 1 1315 → **步骤 2 1326** → 步骤 A 1365 → 步骤 B 1475 → **步骤 C 1489** → E7 设计轮 1489（只加文档）→ socket 收口轮 1502 → **TCP 收口轮 1519** → **LLM 路由轮 1547** → **测试隔离轮 1554**；基线里的「写真实 `~/.trimum` 被拒」那几项已由 `tests/conftest.py`（`TRIMUM_HOME` 指向临时目录）消掉，剩下的 2 项（PATH 缺 `python.exe`、LLM 断网）是纯宿主状态基线与本仓库改动无关；真机 Ubuntu 开发树 **1098 passed / 11 failed / 2 skipped**（同机对照基线，失败名单逐条相同，无回归）；S3 轮真机跑在**合成树 `/tmp/trm-s3`**（开发树缺模块，与 `docs/SANDBOX-PLAN.md` §10.8 同源）**1645 passed / 16 failed / 4 skipped** —— 这 16 条**逐条都不是 S3**，全是宿主 / 合成树产物，归因表见 §11.6
-> 当前分支：`server`；**本地领先 `origin/server`（仍停在 `18d3144`）6 个提交待推**（S2 轮 4 个 + S3 轮 2 个）——
+> 当前分支：`server`；**本地领先 `origin/server`（仍停在 `18d3144`）若干提交待推**（S2 轮 4 个 + S3 轮 3 个，
+> 准确数以 `git log --oneline origin/server..server` 为准）——
 > 代理 `127.0.0.1:7993` 没开时 push 不上去（直连 GitHub 是 `Connection was reset`），**开代理后 `git push origin server` 即可**。
 > 日常只推 `server`，`main` / `ubuntu` / `arch-linux` 只在里程碑收尾时同步。
 
@@ -22,6 +23,25 @@
 **S3 seccomp 三档也已落地并真机验收**（`seccomp_exec` 三档 + 与 `sandbox_exec` 的 Landlock 两半联动，
 `scripts/accept_s3.py` **35 passed / 0 failed**；S2 与 S3 的真机 bug 一并修完，2026-09-22）。
 下一步：**S4 子 Agent 资源边界**（长驻子 Agent 走 `systemd-run --user` transient，见 `docs/SANDBOX-PLAN.md` §8 的 S4 行）。
+
+### 🤝 交给 Qwen：S3 收尾之后的起手三步（2026-09-22）
+
+1. **先读**：`STATUS.md` 最新的「S3 seccomp 三档」小节 + `docs/SANDBOX-PLAN.md` **§11**
+   —— 尤其 **§11.3 四条真机教训**（`SCMP_CMP_EQ` 是 4 不是 0、判别器必须「不施加也成功」…）
+   与 **§11.6 那张「16 条真机失败逐条归因」表**，**别重新查一遍**。
+2. **跑测试**：本机 `python tmp/cleanrun.py tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider`
+   （基线 **1636 passed / 6 failed / 23 skipped**，6 条都是宿主基线）；
+   真机 `ssh guzhujushi@100.115.86.48` → `cd /tmp/trm-s3 && PYTHONPATH=/tmp/trm-s3/src /home/guzhujushi/trimum/.venv/bin/python -m pytest tests -q`
+   （基线 **1645 / 16 / 4**，16 条全是宿主 / 合成树产物）；
+   真机验收 `... scripts/accept_s3.py` → 期望 **35 passed / 0 failed**。
+   （`PYTHONPATH` 必须指**导入根** `.../src`；指到 `.../src/trimum_core` 会让子进程静默退回旧树。）
+3. **下一项**：**S4 子 Agent 资源边界**（`systemd-run --user` transient）；自己的档位 `.\scripts\codex-model.ps1 qwen`。
+
+**需要用户本人跑（`sudo`，agent 跑不了）**：`sudo bash /tmp/sync_opt_tree.sh --dry-run` → 满意后
+`sudo bash /tmp/sync_opt_tree.sh --restart`（`/tmp/trimum-sync.tar` 与 `/tmp/sync_opt_tree.sh` 已就位；
+`--rollback` 整树还原，备份在 `/var/backups/trimum/src-<时间戳>`）。**没跑 = 生产一个字节没动**。
+
+**还没做的**：`git push origin server`（代理 `127.0.0.1:7993` 没开时推不上去；直连 GitHub 是 `Connection was reset`）。
 
 ### 本次（2026-09-21）完成
 
