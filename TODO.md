@@ -1008,6 +1008,8 @@ shell 真的过网关（`args==["echo hi"]` + `raw_command`）/ 被拒上报 / *
 
 | 分支 | 状态 | 备注 |
 |------|------|------|
+| `server`（2026-09-22 S2 施加点收口） | ✅ 已提交 | `92ac32c` `sandbox_exec`（Landlock + `PR_SET_NO_NEW_PRIVS`，全走 ctypes、零依赖）收 **7** 个 spawn 点，**fail-closed + 审计**；`tests/test_sandbox_exec.py`（32 项，26 通过 / 6 项 Linux 专属）+ `tests/conftest.py` 缓存隔离；本机 A/B：HEAD `261f452` 1548/6/12 → **1576/6/16**（+26/+6 精确等于新用例数，6 条失败两树逐条一致）；详见 `docs/SANDBOX-PLAN.md` §10 |
+| `server`（2026-09-22 Codex 模型分工收尾） | ✅ 已提交 | `3276aab` `scripts/codex-model.ps1`（.env 低→高优先级加载 + env_key 预检）+ `scripts/codex-ds.cmd` / `codex-qwen.cmd` 新入口 + `docs/CODEX-MODEL-POLICY.md`（`/model` 只改模型名、不改 provider） |
 | `server`（2026-09-21 E7 设计轮） | ✅ 已提交 | `36fedb7` E7 规格与设计（自研编码智能体）：`docs/CODING-AGENT-PLAN.md`（现状勘察 / 定位裁决 / 红线 / 五步分片 / 待裁决两条）+ 生态战略 §5 E7 口径修订；**只加文档**，全量仍 1489/5/8 |
 | `server`（2026-09-21 穿插项 A/B/C） | ✅ 已推送 | `d5d4b02` 剧本自动触发策略（取证 8 条武装 / 处置 8 条不武装 / 自动触发不派子 Agent）+ `tests/test_playbook_auto_trigger.py`（40 项）；`dd3c0a2` 总线硬化（索引接线 / 失败可观测 / 严格模式 / 订阅修正）+ `tests/test_event_bus.py`（103）+ `tests/test_live_console.py`（7）；步骤 C `WorkflowListener` 接线（`submit()` 当生产者 / daemon 装配 / `trm workflow submit`，命令面 78）+ `tests/test_workflow_listener.py`（12）—— `f51b86d` |
 | `server` | ✅ 已同步 | 当前工作分支；E1 `779c0e0` / E6 `ab26edf` / 清理+证书 `1456aba` / E3 `4331437` / E2 `634e62a` / **M3 `e7a30f5`** / **真机修复轮 `209c98e`** |

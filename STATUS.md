@@ -48,6 +48,8 @@ S2 工作区 **1576 passed / 6 failed / 16 skipped** → **+26 passed（新增�
 连不上 `models.sjtu.edu.cn`）+ 4 条宿主 `~/.trimum` 污染（`--fakehome` 后 41/41 全绿）。
 归因脚本 `tmp/cleanrun.py`（剥掉宿主常驻的 21 个脏环境变量再跑）。
 
+**提交**：`92ac32c`（本片：`sandbox_exec` + 7 个接入点 + 32 项测试 + 文档）/ `3276aab`（前一片尾巴：Codex 模型分工脚本与文档）。
+
 **未做**：真机 4 条命令对照（`docs/SANDBOX-PLAN.md` §10.6，本人跑）；`TaskRegistry.SHELL` 的派生点未收；
 `trm status` / `doctor` 还没把沙箱状态摆到台面上。
 
