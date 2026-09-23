@@ -434,7 +434,48 @@ tail -n 6 ~/.code-tunnel-logs/login.log     # 取设备码
 
 - 首次要**人工**去 `https://github.com/login/device` 输设备码（约 15 分钟有效，过期就重启隧道换码）。
 - 授权后手机浏览器开 `https://vscode.dev/tunnel/tianyi`；要 7x24 再 `code tunnel service install`（用户级 systemd）。
-- **这条路用不到域名 / frp / Nginx**；`vs.guzhujushi.cn` 是**备用通路**（code-server + frp + Nginx 反代）才用的。
+- **这条路用不到域名 / frp / Nginx**；备用通路见下面 **T2（Tailscale + `code serve-web`）**。
+- 域名那条（code-server + frp + Nginx 反代 `vs.guzhujushi.cn`）**2026-09-23 已废弃**：要备案 / 证书 / 公网暴露，收益不抵成本。
+
+### 备用通路 T2：VS Code Web over Tailscale（`code serve-web`，2026-09-23 打通）
+
+**定位**：`vscode.dev` 隧道（主）之外的**备选**。域名那条（code-server + frp + Nginx 反代 `vs.guzhujushi.cn`）**已废弃**。
+
+**为什么够用**：`code serve-web` 是 VS Code CLI（1.138.0）自带子命令，**只绑 Tailscale IP** ⇒ Tailscale 自带加密与设备身份，
+**不需要域名、证书、备案、frp、入站端口**，也不暴露公网；tailnet 内只有本人 4 台设备。
+
+```bash
+~/bin/serve-web-up                  # 起服务（重启后手跑一次，与 ~/bin/tunnel-up 并列）
+# 等价于：
+setsid nohup ~/.local/bin/code serve-web --host "$(tailscale ip -4 | head -1)" --port 8080 \
+  --without-connection-token --accept-server-license-terms \
+  --default-folder "$HOME/trimum" --disable-telemetry \
+  >> ~/.vscode-web/serve-web.log 2>&1 < /dev/null &
+```
+
+- 入口：`http://100.115.86.48:8080/`（手机浏览器直接开；建议「添加到主屏幕」当 PWA）。仓库副本：`scripts/serve_web_up.sh`。
+- **首次启动会下载 server 端**（日志 `Downloading server <commit>`），期间 HTTP **202** + 页面提示 downloading，下完自动变 200 —— 别以为挂了。
+- **前端资源由真机本地提供**（`/stable-<commit>/static/...`，实测 `workbench.js` 19.3 MB / 200）⇒ 手机浏览器**不依赖境外 CDN**；
+  只有扩展市场（`marketplace.visualstudio.com` 200 / 1.2s）与 `vscode-unpkg.net` 是外网。
+- 关掉：`pkill -f "code serve-web"`；换端口：`TRIMUM_WEB_PORT=8081 ~/bin/serve-web-up`。
+- **安全口径**：`--host` 绑 Tailscale IP（**不是** `0.0.0.0`）+ `--without-connection-token` ⇒ 只有 tailnet 内设备可达。
+  要更严就换 `--connection-token-file`（代价是每次要拼 token 才能进）。
+- 实测（2026-09-23）：真机本机 200；Windows 侧经 Tailscale **200 / 0.64s**。
+  **坑**：本机 curl 默认吃 `http_proxy`（UniClash `127.0.0.1:7993`），测 tailnet 地址要加 `--noproxy "*"`，否则报 `000`（SSH 不受影响）。
+
+### `code tunnel` 的坑：keyring 没解锁时 `tunnel-up` 会「看起来成功但没起来」（2026-09-23 实测）
+
+`~/bin/tunnel-up` 在非交互场景（无 `~/.config/trimum/tunnel.pw`、非 tty）拿不到口令 ⇒ 跳过 keyring 解锁，
+`code tunnel user show` 报 `not logged in`，隧道会再要一次设备码，**而脚本仍 `exit 0`** —— 容易误判为「已恢复」。
+
+```bash
+code tunnel user show    # 期望：logged in with provider GitHub Account
+code tunnel status       # 期望：..."tunnel":"Connected"...
+```
+
+- 日志另可见 `failed to lookup tunnel: authorization error: ... github.com/login/device/code`：真机直连 GitHub 偶发瞬断（已知），
+  重试即可，或 `~/bin/with-proxy` 兜底。
+- **根治仍待二选一**（空口令 keyring / 0600 口令文件），见 `TODO.md` §8；T2 通了之后这条不急。
 
 ### 省电 / 无桌面收敛（`scripts/ubuntu_slim_desktop.sh`）
 

@@ -11,6 +11,7 @@
 - **分支**：`server`，**已与 `origin/server` 同步**（`efe2885` ask --image + `01819e9` memory 于 2026-09-22 22:11 推送；本轮文档提交紧随其后）；`main` / `ubuntu` / `arch-linux` 里程碑收尾时同步（推送前先开代理 `127.0.0.1:7993`）。
 - **测试基线**：本地 **1664 passed / 6 failed / 23 skipped**（09-22 `trm memory import/export` 之后；6 条失败 = 既有宿主基线，零回归）。
 - **沙箱**：S1 系统级加固（真机已 `apply` 在位）/ S2 施加点收口（`sandbox_exec`，7 个 spawn 点，fail-closed）/ S3 seccomp 三档（真机验收 35/0）；**TCP 已收口**（`trm status` → `http: disabled` + `ipc socket: ok`，全机 8321 无监听）。
+- **真机访问**：主 = `vscode.dev/tunnel/tianyi`（2026-09-23 起 keyring 锁、`tunnel-up` 起不来，待决策）；备 = **T2 Tailscale**（`~/bin/serve-web-up` → `http://100.115.86.48:8080/`，已实测）；域名/frp 方案**已废弃**。
 - **下一步**：E7 待裁决两条（沙箱是否提前 / 首发是否允许自动改盘+自动跑测试）后开工；沙箱剩真机 4 条命令对照（`docs/SANDBOX-PLAN.md` §10.6，本人 sudo）+ 开发树整树同步。详见「下一步」与 `TODO.md`；本轮已按「模型分工」把待办切成 【Qwen】/【DS】/【本人】 三列（Qwen 任务附提示词）。
 ## 任务清单
 
@@ -2635,3 +2636,32 @@ gitea、alist 可考虑挪真机（阿里云内存太紧）；myblog / frps / ng
 - `setterm --blank 1 --powerdown 1`（在 tty1 本地终端跑，**非交互 SSH 会话里要带 `TERM=linux`** 且重定向到 `> /dev/tty1`）⇒ 1 分钟无键盘输入自动黑屏，任意键唤醒。**未持久化**。
 - 最省事：直接按显示器电源键（主机照常跑）。
 - 不可用：`/sys/class/drm/card1-DP-1/dpms` 是 `-r--r--r--` 只读，写 `Off` 报 Permission denied。
+
+## 2026-09-23 手机接入 Tailscale：备用通路改用 T2（VS Code Web over Tailscale）（✅ 完成）
+
+> 触发：手机已连上 Tailscale；本人要求「域名那条废弃、Tailscale 作备选、走 T2」，并报告 `~/bin/tunnel-up` 没跑成。
+
+### 裁决
+- **废弃**：code-server + frp + Nginx 反代 `vs.guzhujushi.cn`（要备案 / 证书 / 公网暴露；真机上 `code-server` / `nginx` / `caddy` 本来就没装）。
+- **备用通路 = T2**：真机 `code serve-web`，**只绑 Tailscale IP `100.115.86.48:8080`** ⇒ 免域名 / 证书 / 备案 / frp；Tailscale 负责加密与设备身份，tailnet 内仅本人 4 台设备。
+- 主路仍是 `vscode.dev/tunnel/tianyi`；T2 取代原先被写成「备用」的域名方案。
+
+### 真机实测
+| 项 | 结果 |
+|---|---|
+| `code serve-web --help` | ✅ 存在（CLI 1.138.0）：`--host` / `--port` / `--without-connection-token` / `--accept-server-license-terms` / `--default-folder` / `--disable-telemetry` |
+| 服务 | `~/bin/serve-web-up`（仓库副本 `scripts/serve_web_up.sh`）→ 只监听 `100.115.86.48:8080`（不是 `0.0.0.0`） |
+| 首次启动 | 先 HTTP **202**（日志 `Downloading server 7debcd0e…`），下完转 **200** |
+| 前端资源 | 由真机本地提供（`workbench.js` 19.3 MB / 200）⇒ 手机浏览器**不依赖境外 CDN**；仅扩展市场走外网（`marketplace.visualstudio.com` 200 / 1.2s） |
+| Windows 经 Tailscale | **200 / 0.64s**（须加 `--noproxy "*"`：本机 curl 默认吃 `http_proxy=127.0.0.1:7993`，不加报 `000`；SSH 不受影响） |
+| 手机 | `sgt-al50` 已在 tailnet，`tailscale status` 上报 OS = `android`（即 Android 版 Tailscale）；T2 只需浏览器，无需再装 App |
+
+### `tunnel-up` 失败的根因（已定位）
+- 非交互执行时拿不到 keyring 口令（无 `~/.config/trimum/tunnel.pw`、非 tty）⇒ `[1/3] 没拿到口令` ⇒ `code tunnel user show` = `not logged in` ⇒ 隧道重启后停在设备码（日志 `74F3-E72F`），**而脚本仍 `exit 0`**，容易被判成「已经跑过」。
+- 日志另有一次 `failed to lookup tunnel: authorization error: … github.com/login/device/code` —— 真机直连 GitHub 偶发瞬断（已知）。
+- 根治二选一（空口令 keyring / 0600 口令文件）仍待【本人决策】；**T2 通了之后这条不急**。
+
+### 文档与产物
+- `docs/OPERATIONS.md`：新增「备用通路 T2：VS Code Web over Tailscale」+「keyring 未解锁时 `tunnel-up` 的假成功」两节；隧道章节里「备用通路 = 域名方案」的说法已改。
+- `TODO.md` §8：废弃域名方案、改记 T2；头部日期 → 2026-09-23。
+- `scripts/serve_web_up.sh`：T2 启动脚本入库（与 `tunnel_up.sh` / `with_proxy.sh` 同等对待），真机 `~/bin/serve-web-up` 已同步为同一份。

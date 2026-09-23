@@ -1,6 +1,6 @@
 # trimum — 待办清单
 
-> 最后更新：2026-09-22
+> 最后更新：2026-09-23
 > **本文件只留「未闭环」的待办 + 红线 + 模型分工。** 已完成的历史进度（P0 / E1–E7 / M0–M4.5 / W1 / 沙箱 S1–S3 / 穿插项 A–C 等）一律在 `STATUS.md`（追加式日志，见其「## 日志」），本文件不再重复叙述。
 > 测试基线：本地 **1664 passed / 6 failed / 23 skipped**（09-22 `trm memory import/export` 之后，6 条失败 = 既有宿主基线）；真机 Ubuntu 开发树 1098/11/2；S3 合成树 1645/16/4（16 条均宿主/合成树产物，非 S3）。
 > 分支：`server`，**已与 `origin/server` 同步**（最近业务提交 `01819e9` = `ask --image` + `memory import/export`，2026-09-22 22:11 推；本轮文档提交紧随其后），其后为 2026-09-22 真机纳管相关提交（见 `STATUS.md` 同日日志）。日常只推 `server`，`main` / `ubuntu` / `arch-linux` 里程碑收尾时同步；推送前开代理 `127.0.0.1:7993`。
@@ -72,13 +72,15 @@ P0 安全响应链 / E5 分发渠道 / 穿插三项已收口；沙箱 **S1**（�
 - `~/.trimum/.env` 是只含 `OPENAI_*` 的老 stub（加载器已修成「按 key 叠加 + 仓库 `.env` 权威」）⇒ 建议删掉，免得再被误选【本人】
 
 ### 8. Ubuntu 真机常驻（2026-09-22 新增；背景见 `STATUS.md` 同日日志）
-- **隧道重启后自动恢复**（授权与在线已完成：`vscode.dev/tunnel/tianyi`、`status` = Connected）。需**决策** + 一条 sudo：
+- **隧道重启后自动恢复**（授权与在线已完成：`vscode.dev/tunnel/tianyi`；**2026-09-23 起 keyring 又锁上，`tunnel-up` 起不来**，见 `docs/OPERATIONS.md`；T2 已可替代故**不急**）。需**决策** + 一条 sudo：
   `sudo loginctl enable-linger guzhujushi`（用户级 systemd 服务没 linger 起不来）；且**开机时 gnome-keyring 是锁的**（token 存在 keyring 里），光装 `code tunnel service install` 重启后仍要人工授权 ⇒ 二选一：
   ① **空口令默认 keyring**：把 `login.keyring` 备份后重建（不落盘口令，任何会话都能读 token）；
   ② **0600 口令文件 + 开机解锁的 user service**：保留现有 keyring，但机器上要存登录口令。【本人决策】
 - 省电脚本**还剩 4 个服务没停**（`avahi-daemon` / `cups` / `cups-browsed` / `sysstat` 仍 active+enabled）；已生效的：`multi-user.target`、`gdm3` 停、`fwupd`+`fwupd-refresh.timer` 停、**睡眠/挂起/休眠 target 全部 masked**。连续 3 次都断在 `fwupd` 之后，需带 sudo 手动跑一次并抓报错。【本人】
 - 真机本地屏幕**自动黑屏未持久化**：目前靠手敲 `setterm --blank 1 --powerdown 1` 或按显示器电源键；要开机自动生效需写进开机流程（或 GRUB `consoleblank=300`）。走 sysfs 的 DPMS 关屏在本机**不可用**（`/sys/class/drm/card1-DP-1/dpms` 只读）。【DS】
-- 备用通路：code-server + frp + Nginx 反代 `vs.guzhujushi.cn`（基础设施已备好；**tunnel 这条路用不到域名**）【DS】
+- **备用通路（已定，2026-09-23）**：T2 = VS Code Web over Tailscale —— `~/bin/serve-web-up` → `http://100.115.86.48:8080/`，
+  只绑 Tailscale IP、免域名/证书/备案/frp。搭建与坑见 `docs/OPERATIONS.md`。**域名那条（code-server + frp + Nginx 反代 `vs.guzhujushi.cn`）已废弃**。【已裁】
+- T2 目前是**重启后手跑**（`~/bin/serve-web-up`）；要不要像 tunnel 一样做成常驻（user service + linger）待定。【本人决策】
 - `trm codex-proxy`：qwen 撞 429 自动降 `ds`（方案 B2，见 `docs/CODEX-MODEL-POLICY.md` §4）【DS】
 - 真机 sudo NOPASSWD 白名单（本机 `.env` 现明文存着真机 sudo 口令，见「安全收尾」）【本人】
 
