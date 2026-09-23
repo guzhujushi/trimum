@@ -33,10 +33,12 @@
 - 源码同步到两处；测试文件优先同步到 home；`/opt/trimum/tests` 需要 sudo。
 - **真机现成工具**（2026-09-22/23 装）：
   - `~/bin/codex-run ds|qwen` —— 跑 codex（已带 nvm PATH + 注入 `~/.codex/env`）；`~/bin/codex-smoke` 冒烟。
-  - `~/bin/tunnel-up` —— 恢复 `code tunnel`（内含 keyring 解锁 + 脱离会话启动）；**重启后要手动跑一次**。
+  - `~/bin/tunnel-up` —— 恢复 `code tunnel`（**已改为走 systemd user service `trimum-tunnel`**，没装 service 时回退「解锁 keyring + setsid」）；口令文件 `~/.config/trimum/tunnel.pw`（0600）。
   - `~/bin/with-proxy <命令>` —— 备用网络通道（经 Tailscale → Windows UniClash `100.124.243.30:7993`）；**只在直连抽风时用**，慢 4~10 倍，代理不可达自动降级直连。
   - `~/.local/bin/code` —— VS Code CLI（1.138.0，与 server 同 commit）；扩展装在 `~/.vscode-server/extensions`。
-  - VS Code 入口：`https://vscode.dev/tunnel/tianyi`（手机可用）。
+  - VS Code 入口：**主** `https://vscode.dev/tunnel/tianyi`；**备（T2，Tailscale 直连）** `~/bin/serve-web-up` → `http://100.115.86.48:8080/`（手机浏览器可用，免域名/证书/frp）。
+  - **三个用户级 systemd 服务**：`trimum-web`（VS Code Web）/ `trimum-tunnel`（隧道）/ `trimum-mihomo`（Clash Meta 核，`127.0.0.1:7890`）；装/重装 `scripts/install_user_units.sh`，重启后自启靠 `loginctl enable-linger guzhujushi`（**待本人 sudo 开**，脚本 `scripts/enable_linger.sh`）。
+  - mihomo 配置 `~/.config/mihomo/config.yaml`（机场订阅只放这台机器，**不入仓库**）。
 - **坑（细节见 `docs/OPERATIONS.md`）**：GitHub 凭据在 gnome-keyring 里，**没有桌面会话时 keyring 是锁的** ⇒ `code tunnel` 会误报未登录并重新要设备码；用登录口令 `gnome-keyring-daemon --unlock --replace` 解锁即可，**不要重新授权**。
 
 ## sudo 规则

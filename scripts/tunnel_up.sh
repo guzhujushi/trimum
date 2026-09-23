@@ -1,15 +1,32 @@
 #!/usr/bin/env bash
-# 真机隧道一键恢复：解锁 keyring（可选）→ 拉起 code tunnel（脱离会话）→ 报状态
+# 真机隧道一键恢复（v2，2026-09-23）：优先走 systemd user service（trimum-tunnel），
+# 没装 service 时回退到老的「解锁 keyring + setsid nohup」路径。
 #
 # 用法：
-#   ~/bin/tunnel-up                              # 交互式（会提示输登录口令）
-#   TRIMUM_PW_FILE=/tmp/.pw ~/bin/tunnel-up      # 从 0600 文件读口令（非交互）
-#   TRIMUM_PW_FILE=~/.config/trimum/tunnel.pw ~/bin/tunnel-up   # 长期方案②就指到这里
+#   ~/bin/tunnel-up                              # 直接跑（service 在位时=restart + 报状态）
+#   TRIMUM_PW_FILE=/tmp/.pw ~/bin/tunnel-up      # 自定义口令文件（默认 ~/.config/trimum/tunnel.pw）
 #
-# 为什么需要口令：GitHub 凭据存在 gnome-keyring 里，会话一结束 keyring 就锁；
-# 没有桌面会话时得手动 unlock 一次，隧道才认得"已登录"。
+# 为什么需要口令：GitHub 凭据在 gnome-keyring 里，会话一结束 keyring 就锁；
+# 没有桌面会话时得解锁一次，隧道才认得「已登录」。口令文件必须 0600。
+# 7x24 常驻还需 `loginctl enable-linger guzhujushi`（sudo，见 scripts/enable_linger.sh）。
 set -u
 export PATH="$HOME/.local/bin:$PATH"
+UNIT="trimum-tunnel.service"
+
+if systemctl --user cat "$UNIT" >/dev/null 2>&1; then
+  systemctl --user restart "$UNIT"
+  sleep 18
+  status="$(timeout 20 code tunnel status 2>&1 | head -c 400)"
+  echo "unit=$(systemctl --user is-active "$UNIT")"
+  echo "$status"
+  echo "入口：https://vscode.dev/tunnel/tianyi"
+  case "$status" in
+    *'"Connected"'*) exit 0 ;;
+    *) echo "未 Connected —— 查：journalctl --user -u $UNIT -n 40 --no-pager"; exit 1 ;;
+  esac
+fi
+
+# ---- 回退路径（未装 service）----
 LOG="$HOME/.code-tunnel-logs/login.log"
 mkdir -p "$(dirname "$LOG")"
 
@@ -33,12 +50,6 @@ else
 fi
 
 echo "[2/3] 登录态：$(timeout 20 code tunnel user show 2>&1 | head -1)"
-
-if timeout 20 code tunnel status 2>/dev/null | grep -q '"Connected"'; then
-  echo "[3/3] 隧道已在跑（Connected），无需重启进程"
-  exit 0
-fi
-
 pkill -f "code tunnel" 2>/dev/null; sleep 1
 setsid nohup "$HOME/.local/bin/code" tunnel --accept-server-license-terms --name tianyi >> "$LOG" 2>&1 < /dev/null &
 sleep 16

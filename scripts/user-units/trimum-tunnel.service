@@ -1,0 +1,15 @@
+[Unit]
+Description=trimum: VS Code tunnel (tianyi) with keyring unlock
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+ExecStart=%h/bin/tunnel-run
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

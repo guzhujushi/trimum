@@ -11,7 +11,7 @@
 - **分支**：`server`，**已与 `origin/server` 同步**（`efe2885` ask --image + `01819e9` memory 于 2026-09-22 22:11 推送；本轮文档提交紧随其后）；`main` / `ubuntu` / `arch-linux` 里程碑收尾时同步（推送前先开代理 `127.0.0.1:7993`）。
 - **测试基线**：本地 **1664 passed / 6 failed / 23 skipped**（09-22 `trm memory import/export` 之后；6 条失败 = 既有宿主基线，零回归）。
 - **沙箱**：S1 系统级加固（真机已 `apply` 在位）/ S2 施加点收口（`sandbox_exec`，7 个 spawn 点，fail-closed）/ S3 seccomp 三档（真机验收 35/0）；**TCP 已收口**（`trm status` → `http: disabled` + `ipc socket: ok`，全机 8321 无监听）。
-- **真机访问**：主 = `vscode.dev/tunnel/tianyi`（2026-09-23 起 keyring 锁、`tunnel-up` 起不来，待决策）；备 = **T2 Tailscale**（`~/bin/serve-web-up` → `http://100.115.86.48:8080/`，已实测）；域名/frp 方案**已废弃**。
+- **真机访问**：主 = `vscode.dev/tunnel/tianyi`；备 = **T2 Tailscale**（`http://100.115.86.48:8080/`）。两者都已是 **systemd user service**（`trimum-tunnel` / `trimum-web`），`status`=Connected、web=200；域名/frp 方案**已废弃**。另有 `trimum-mihomo`（本机 Clash 核，待机场订阅）。**重启后自启只差 `loginctl enable-linger guzhujushi`（待本人 sudo）**。
 - **下一步**：E7 待裁决两条（沙箱是否提前 / 首发是否允许自动改盘+自动跑测试）后开工；沙箱剩真机 4 条命令对照（`docs/SANDBOX-PLAN.md` §10.6，本人 sudo）+ 开发树整树同步。详见「下一步」与 `TODO.md`；本轮已按「模型分工」把待办切成 【Qwen】/【DS】/【本人】 三列（Qwen 任务附提示词）。
 ## 任务清单
 
@@ -2665,3 +2665,40 @@ gitea、alist 可考虑挪真机（阿里云内存太紧）；myblog / frps / ng
 - `docs/OPERATIONS.md`：新增「备用通路 T2：VS Code Web over Tailscale」+「keyring 未解锁时 `tunnel-up` 的假成功」两节；隧道章节里「备用通路 = 域名方案」的说法已改。
 - `TODO.md` §8：废弃域名方案、改记 T2；头部日期 → 2026-09-23。
 - `scripts/serve_web_up.sh`：T2 启动脚本入库（与 `tunnel_up.sh` / `with_proxy.sh` 同等对待），真机 `~/bin/serve-web-up` 已同步为同一份。
+
+## 2026-09-23 真机三件常驻（T2 / tunnel / mihomo）+ context7 MCP 可用（✅ 完成）
+
+> 本人指令：T2 常驻、tunnel-up 常驻、评估 Clash 核复用订阅的可行性、试 context7 MCP。
+
+### 一、三个用户级 systemd 服务（真机实测）
+
+| 单元 | 结果 |
+|---|---|
+| `trimum-web.service` | ✅ active+enabled，只监听 `100.115.86.48:8080`，`http=200`；`~/bin/serve-web-up` 已改为 restart 该服务 |
+| `trimum-tunnel.service` | ✅ active+enabled，`code tunnel user show` = `logged in`，`status` = `"name":"tianyi"` / `"Connected"` / `has_editor_link:true`；`~/bin/tunnel-up` 同改为 restart |
+| `trimum-mihomo.service` | ✅ active+enabled（mihomo v1.19.31，`127.0.0.1:7890` + API `:9090`） |
+
+- **tunnel-up 失败的根治**：采用 TODO §8 方案② —— `~/.config/trimum/tunnel.pw`（**0600**，9 字节）由 `tunnel-run.sh` 读取后 `gnome-keyring-daemon --unlock --replace`；单元里显式 `DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus`，否则 libsecret 找不到 keyring。**代价：登录口令落盘**（想改回不落盘就切方案①「空口令 keyring」）。
+- **踩过的坑**：老的 `setsid nohup` 进程会继续占着 8080 / 接管隧道 ⇒ systemd 实例 `activating` 抖动、新服务「Connected to an existing tunnel process」。收编必须 `pkill -f "code serve-web"` + `pkill -f "code tunnel"` 再 `systemctl --user restart`。
+- **还差一条 sudo**：`loginctl enable-linger guzhujushi`（现 `Linger=no`）。脚本 `scripts/enable_linger.sh` 已 scp 到真机 `/tmp/`，**待本人跑**。
+- 仓库件：`scripts/user-units/{trimum-web,trimum-tunnel,trimum-mihomo}.service` + `{serve-web-run,tunnel-run}.sh`、`scripts/install_user_units.sh`（一键装/重装）、`scripts/serve_web_up.sh` / `scripts/tunnel_up.sh`（v2，优先走 systemd）。
+
+### 二、Clash 核复用订阅：可行，底座已跑通
+
+- 真机 x86_64 / Ubuntu 24.04.1 / 849G 空闲盘，`7890/9090/7993` 全空闲，无任何既有 clash/sing-box。
+- 从 `api.github.com` 取 latest（真机直连 GitHub 200 / 0.7s；注意 `raw.githubusercontent.com` **000 超时**，走 api 或 objects 即可）→ 装 `~/bin/mihomo`（22.8 MB，**用户级，无需 sudo**）。
+- 链路实测：`curl -x http://127.0.0.1:7890 https://github.com` → **200 / 0.79s**（DIRECT 占位配置；日志见 `[TCP] ... match Match using PROXY[DIRECT]`）。
+- **唯一缺口 = 机场订阅链接**：UniClash 的订阅存在不透明存储里（`%APPDATA%\UniClash`、`%LOCALAPPDATA%\UniClash` **均为空目录**，`D:\UniClash\brand.json` = `{"site":"yangfan"}`，HKCU/HKLM 注册表无匹配，`%APPDATA%\org.ikuuu` 是另一个已停用的客户端）⇒ **需本人从 UniClash 界面复制**，写进真机 `~/.config/mihomo/config.yaml` 的 `proxy-providers`（链接**不入仓库**）。
+- 风险已在 `docs/OPERATIONS.md` 列全：设备数/IP 并发限制、订阅 UA 校验、流量共享、私有规则集、Windows 侧 `:53` 劫持 vs 真机 DNS。**不上 TUN**（要 root），`mixed-port` + 环境变量足够。
+
+### 三、context7 MCP：**可用**（已注册）
+
+- 原先没配（`~/.codex/config.toml` 只有 `node_repl` enabled、`cua_repl` disabled）。
+- 直接拉起来做了真握手：`Context7 Documentation MCP Server v4.1.1`，`initialize` / `tools/list` 正常，工具两个 = `resolve-library-id` + `query-docs`；
+  实测 `resolve-library-id("FastAPI")` 返回 4 个库 ID（含 Code Snippets 2377 / Reputation High / Benchmark 84.86），`query-docs` 正常响应（会把 `/fastapi/fastapi` 重定向到 `/websites/fastapi_tiangolo`）。
+- 已注册：`codex mcp add context7 -- "D:\New Folder\npx.cmd" -y @upstash/context7-mcp@latest`（**新会话才会加载成工具**）。探针脚本留在 `tmp/ctx7_probe{,2}.mjs`。
+- 顺带发现：本机 `node` 实际在 `D:\New Folder\node.exe` —— 与 `STATUS.md` 里那个「身份不明的 `:57322`（node，`D:\New Folder\node.exe`）」是同一来源。
+
+### 四、提交
+- `4cd3ce5`（T2 文档与脚本）已**推送** `origin/server`（首次推送时本机代理 7993 未监听而失败，UniClash 起来后重推成功）。
+- 本轮 `scripts/user-units/*` + `scripts/install_user_units.sh` + `scripts/install_mihomo.sh` + `scripts/enable_linger.sh` + `docs/OPERATIONS.md` + `TODO.md` + `AGENTS.md` + `STATUS.md` 见下一个提交。

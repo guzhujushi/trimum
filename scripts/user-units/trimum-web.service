@@ -1,0 +1,14 @@
+[Unit]
+Description=trimum: VS Code Web (serve-web) bound to Tailscale IP
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/bin/serve-web-run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

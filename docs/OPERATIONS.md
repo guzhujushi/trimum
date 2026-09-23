@@ -453,7 +453,7 @@ setsid nohup ~/.local/bin/code serve-web --host "$(tailscale ip -4 | head -1)" -
   >> ~/.vscode-web/serve-web.log 2>&1 < /dev/null &
 ```
 
-- 入口：`http://100.115.86.48:8080/`（手机浏览器直接开；建议「添加到主屏幕」当 PWA）。仓库副本：`scripts/serve_web_up.sh`。
+- 入口：`http://100.115.86.48:8080/`（手机浏览器直接开；建议「添加到主屏幕」当 PWA）。仓库副本：`scripts/serve_web_up.sh`（安装与自启见下面「真机常驻」）。
 - **首次启动会下载 server 端**（日志 `Downloading server <commit>`），期间 HTTP **202** + 页面提示 downloading，下完自动变 200 —— 别以为挂了。
 - **前端资源由真机本地提供**（`/stable-<commit>/static/...`，实测 `workbench.js` 19.3 MB / 200）⇒ 手机浏览器**不依赖境外 CDN**；
   只有扩展市场（`marketplace.visualstudio.com` 200 / 1.2s）与 `vscode-unpkg.net` 是外网。
@@ -476,6 +476,56 @@ code tunnel status       # 期望：..."tunnel":"Connected"...
 - 日志另可见 `failed to lookup tunnel: authorization error: ... github.com/login/device/code`：真机直连 GitHub 偶发瞬断（已知），
   重试即可，或 `~/bin/with-proxy` 兜底。
 - **根治仍待二选一**（空口令 keyring / 0600 口令文件），见 `TODO.md` §8；T2 通了之后这条不急。
+
+### 真机常驻：三个用户级 systemd 服务（2026-09-23 落地）
+
+| 单元 | 作用 | 监听 / 入口 | 仓库件 |
+|---|---|---|---|
+| `trimum-web.service` | VS Code Web（serve-web），**只绑 Tailscale IP** | `http://100.115.86.48:8080/` | `scripts/user-units/trimum-web.service` + `serve-web-run.sh` |
+| `trimum-tunnel.service` | VS Code 隧道 `tianyi`（先解锁 keyring 再 exec） | `https://vscode.dev/tunnel/tianyi` | `scripts/user-units/trimum-tunnel.service` + `tunnel-run.sh` |
+| `trimum-mihomo.service` | mihomo（Clash Meta 核），本机代理 | `127.0.0.1:7890`（API `:9090`） | `scripts/user-units/trimum-mihomo.service` + `scripts/install_mihomo.sh` |
+
+````bash`
+# 安装 / 重装（真机上跑，或 scp 到 /tmp 后 bash）
+bash scripts/install_user_units.sh
+# 手动重启某一个
+systemctl --user restart trimum-web.service     # 等价 ~/bin/serve-web-up
+systemctl --user restart trimum-tunnel.service  # 等价 ~/bin/tunnel-up
+systemctl --user status trimum-mihomo.service
+`````
+
+- 两个 `~/bin/*-up` 脚本（`serve-web-up` / `tunnel-up`）已改成**优先 `systemctl --user restart`**，没装 service 时回退到老的 `setsid nohup` 路径。
+- **重启后自启还差一条 sudo**：`loginctl enable-linger guzhujushi` —— 没有 linger，用户管理器只在登录后存在，服务不随开机起。
+  脚本已备好：`scripts/enable_linger.sh`（由**本人**跑：`sudo bash /tmp/enable_linger.sh`；撤销 `sudo loginctl disable-linger guzhujushi`）。
+- **keyring 口令文件**：`~/.config/trimum/tunnel.pw`（0600）由 `tunnel-run.sh` 读取后 `gnome-keyring-daemon --unlock --replace`；
+  单元里显式给 `DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus`，否则 libsecret 找不到 keyring。
+  代价：**登录口令落盘**（TODO §8 方案②）；想不落盘就切方案①（空口令 keyring），届时删掉该文件与 `tunnel-run.sh` 里的解锁段。
+- **踩过的坑**：老的 `setsid nohup` 进程会继续占端口/隧道，害得 systemd 实例 `activating` 抖动或「接到已有隧道」上；
+  收编时先 `pkill -f "code serve-web"` / `pkill -f "code tunnel"` 再 `systemctl --user restart`。
+
+### Clash 核心复用机场订阅（mihomo）：可行性已实测（2026-09-23）
+
+**结论：可行，底座已在真机跑起来**（`trimum-mihomo.service`，v1.19.31，用户级、**不需要 sudo**）。
+
+- 实测：`curl -x http://127.0.0.1:7890 https://github.com` → **200 / 0.79s**（当前是 DIRECT 占位配置，链路本身通）。
+- 装法（`scripts/install_mihomo.sh`）：从 `api.github.com` 取 latest → 下 `mihomo-linux-amd64-compatible-*.gz`（真机直连 GitHub 200 / 0.7s）→ `gzip -dc > ~/bin/mihomo`。
+- 配置落点：`~/.config/mihomo/config.yaml`；真实订阅写成 `proxy-providers`（`type: http` + url + `interval: 86400`），
+  **订阅链接只写在这台机器的 0600 文件里，绝不入仓库**（红线：密钥/订阅只记位置与形状）。
+- 与现有兜底的关系：`~/bin/with-proxy` 走「真机 → Tailscale(DERP hkg) → Windows UniClash」，慢 4~10 倍且依赖笔记本开机；
+  换成本机 mihomo 后延迟回到直连量级，`with-proxy` 退化为极小兜底（只在 mihomo 挂了时用）。
+
+**还差什么**：机场订阅链接。UniClash 把订阅放在不透明存储里（
+`%APPDATA%\\UniClash` 与 `%LOCALAPPDATA%\\UniClash` 都是空目录，`D:\\UniClash\\brand.json` = `{"site":"yangfan"}`，
+HKCU/HKLM 注册表里也查不到）⇒ **需要本人从 UniClash 界面复制订阅链接**。
+
+**风险清单**（切换前确认）：
+1. 机场**设备数/IP 并发限制**：同一订阅 Windows 已在用，加真机可能超限或被限速。
+2. 订阅 URL 常带 UA 校验（有的机场只认 Clash 客户端 UA）——mihomo 默认 UA 一般可用，不行就在 provider 里加 `header`。
+3. 流量**共享同一份订阅**，两处同跑会一起烧。
+4. 规则集：UniClash 的配置带私有规则/策略组，直接抄 YAML 未必对；用 `proxy-providers` 只取节点、规则另写更稳。
+5. DNS：Windows 侧 UniClash 劫持了 `:53`；真机 mihomo 若开 `dns.enable` 要确认不抢系统解析。
+
+- **不建议**上 TUN（要 root + 改网络栈）；`mixed-port` + 环境变量（给 git/npm/codex 用）就够，和现有 `with-proxy` 口径一致。
 
 ### 省电 / 无桌面收敛（`scripts/ubuntu_slim_desktop.sh`）
 

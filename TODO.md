@@ -72,7 +72,7 @@ P0 安全响应链 / E5 分发渠道 / 穿插三项已收口；沙箱 **S1**（�
 - `~/.trimum/.env` 是只含 `OPENAI_*` 的老 stub（加载器已修成「按 key 叠加 + 仓库 `.env` 权威」）⇒ 建议删掉，免得再被误选【本人】
 
 ### 8. Ubuntu 真机常驻（2026-09-22 新增；背景见 `STATUS.md` 同日日志）
-- **隧道重启后自动恢复**（授权与在线已完成：`vscode.dev/tunnel/tianyi`；**2026-09-23 起 keyring 又锁上，`tunnel-up` 起不来**，见 `docs/OPERATIONS.md`；T2 已可替代故**不急**）。需**决策** + 一条 sudo：
+- **隧道常驻已完成**（`trimum-tunnel.service` + `~/.config/trimum/tunnel.pw`=方案②，keyring 自动解锁，`status`=Connected）。**只剩一条 sudo**：
   `sudo loginctl enable-linger guzhujushi`（用户级 systemd 服务没 linger 起不来）；且**开机时 gnome-keyring 是锁的**（token 存在 keyring 里），光装 `code tunnel service install` 重启后仍要人工授权 ⇒ 二选一：
   ① **空口令默认 keyring**：把 `login.keyring` 备份后重建（不落盘口令，任何会话都能读 token）；
   ② **0600 口令文件 + 开机解锁的 user service**：保留现有 keyring，但机器上要存登录口令。【本人决策】
@@ -80,7 +80,7 @@ P0 安全响应链 / E5 分发渠道 / 穿插三项已收口；沙箱 **S1**（�
 - 真机本地屏幕**自动黑屏未持久化**：目前靠手敲 `setterm --blank 1 --powerdown 1` 或按显示器电源键；要开机自动生效需写进开机流程（或 GRUB `consoleblank=300`）。走 sysfs 的 DPMS 关屏在本机**不可用**（`/sys/class/drm/card1-DP-1/dpms` 只读）。【DS】
 - **备用通路（已定，2026-09-23）**：T2 = VS Code Web over Tailscale —— `~/bin/serve-web-up` → `http://100.115.86.48:8080/`，
   只绑 Tailscale IP、免域名/证书/备案/frp。搭建与坑见 `docs/OPERATIONS.md`。**域名那条（code-server + frp + Nginx 反代 `vs.guzhujushi.cn`）已废弃**。【已裁】
-- T2 目前是**重启后手跑**（`~/bin/serve-web-up`）；要不要像 tunnel 一样做成常驻（user service + linger）待定。【本人决策】
+- T2 已做成常驻（`trimum-web.service`，`~/bin/serve-web-up` 现在=重启该服务）；**重启后自启仍等 `loginctl enable-linger guzhujushi`**【本人 sudo】。
 - `trm codex-proxy`：qwen 撞 429 自动降 `ds`（方案 B2，见 `docs/CODEX-MODEL-POLICY.md` §4）【DS】
 - 真机 sudo NOPASSWD 白名单（本机 `.env` 现明文存着真机 sudo 口令，见「安全收尾」）【本人】
 
@@ -97,7 +97,7 @@ P0 安全响应链 / E5 分发渠道 / 穿插三项已收口；沙箱 **S1**（�
 - 【本人】**阿里云 `frps.toml` 的 `auth.token` 太弱（短、纯字典词），且 2026-09-23 被误写进本仓库（公开）⇒ 必须视为已泄露，尽快轮换**（轮换要同步所有 frpc 客户端：真机那条必须一起改，否则隧道断）。
 - 【红线】把真实密钥写进仓库（本轮已踩一次：阿里云 frp token）⇒ 密钥只能记「位置 + 形状」，不写值；已写入的要**轮换**，不能只删字面值。
 - 【本人】本机两个监听进程待确认（非管理员拿不到命令行）：`100.124.243.30:8080`（python 3.14，绑在 Tailscale IP 上）、`0.0.0.0:57322`（node，`D:\New Folder\node.exe`）—— 是什么服务、要不要挪真机？
-- 【DS】真机装 Clash/Mihomo 客户端（复用现有订阅）**替代** `~/bin/with-proxy` 这条「经 Windows 笔记本」的迂回路径（Tailscale DERP 中继，慢 4–10 倍、且依赖笔记本开机）。
+- 【DS】真机装 Clash/Mihomo **替代** `~/bin/with-proxy` 这条迂回路径（慢 4–10 倍、依赖笔记本开机）：**底座已装好并实测**（`trimum-mihomo.service` v1.19.31，`127.0.0.1:7890`，DIRECT 出网 200/0.79s，见 `docs/OPERATIONS.md`）；**只差机票订阅链接**——UniClash 把订阅存在不透明存储里，需本人从界面复制，写进真机 `~/.config/mihomo/config.yaml` 的 `proxy-providers`（**订阅链接不入仓库**）。【本人给链接 → DS 接线】
 
 ## 红线（写进代码与测试）
 
