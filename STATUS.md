@@ -12,6 +12,7 @@
 - **测试基线**：本地 **1664 passed / 6 failed / 23 skipped**（09-22 `trm memory import/export` 之后；6 条失败 = 既有宿主基线，零回归）。
 - **沙箱**：S1 系统级加固（真机已 `apply` 在位）/ S2 施加点收口（`sandbox_exec`，7 个 spawn 点，fail-closed）/ S3 seccomp 三档（真机验收 35/0）；**TCP 已收口**（`trm status` → `http: disabled` + `ipc socket: ok`，全机 8321 无监听）。
 - **真机访问**：主 = `vscode.dev/tunnel/tianyi`；备 = **T2 Tailscale**（`http://100.115.86.48:8080/`）。两者都已是 **systemd user service**（`trimum-tunnel` / `trimum-web`），`status`=Connected、web=200；域名/frp 方案**已废弃**。另有 `trimum-mihomo`（本机 Clash 核，待机场订阅）。**重启后自启只差 `loginctl enable-linger guzhujushi`（待本人 sudo）**。
+- **无桌面浏览器**：`~/bin/browse [--proxy] shot|text|pdf|dom <URL>` —— headless Chromium（Playwright 自带，**零 sudo**），产物落 `~/trimum/tmp/browse-out/`（T2 里可直接看）。详见 `docs/OPERATIONS.md`「无桌面下开浏览器」。
 - **下一步**：E7 待裁决两条（沙箱是否提前 / 首发是否允许自动改盘+自动跑测试）后开工；沙箱剩真机 4 条命令对照（`docs/SANDBOX-PLAN.md` §10.6，本人 sudo）+ 开发树整树同步。详见「下一步」与 `TODO.md`；本轮已按「模型分工」把待办切成 【Qwen】/【DS】/【本人】 三列（Qwen 任务附提示词）。
 ## 任务清单
 
@@ -2728,3 +2729,38 @@ gitea、alist 可考虑挪真机（阿里云内存太紧）；myblog / frps / ng
 ### 顺带
 - UniClash 侧确认**取不到订阅链接**：`%APPDATA%\UniClash`、`%LOCALAPPDATA%\UniClash` 皆空目录，近 25 分钟 `%APPDATA%`/`%LOCALAPPDATA%` 只有 Tailscale 写过文件，GUI 只开非 HTTP 的 `127.0.0.1:53107`，`UniClashCore.exe` 不常驻（因此 Windows 侧 `7993` 时通时不通）。
 - `D:\UniClash\brand.json` = `{"site":"yangfan"}`；机场官网域名落在订阅规则的策略组名里（`a4.yfyfind.net`）。
+
+## 2026-09-23 无桌面下开浏览器：`~/bin/browse`（headless Chromium，零 sudo）（✅ 完成）
+
+> 起因：本人问「ubuntu 怎么开浏览器，现在没有桌面的情况」。
+
+### 现状盘点（只读，真机实测）
+| 项 | 结果 |
+|---|---|
+| 系统 | Ubuntu 24.04.1 / 6.8.0-41 / 849G 空闲盘 |
+| TUI 浏览器 | w3m / lynx / links / links2 / elinks / browsh / carbonyl **全无** |
+| 图形栈 | `Xorg`+`xinit`+`startx`+全部 `xserver-xorg-video-*` 驱动**都在**；但 **无 WM**（twm/openbox/fluxbox/icewm/xterm 全无） |
+| 远程桌面 | Xvfb / x11vnc / xpra / weston / wayvnc **全无** |
+| 浏览器 | `firefox` = **snap**（`1:1snap1-0ubuntu5`，155.0.1）；chromium 没装 |
+| 依赖库 | libnss3 / libgbm / libgtk-3 / libasound / libcups **全在** ⇒ 自带 Chromium 可直接跑 |
+| 权限 | `sudo -n` 不可用 ⇒ 装包得本人；apt 索引正常（86057 包）、archive 直连 200 |
+
+### 做了什么
+- 装 **Playwright 自带 Chromium**（`~/.cache/ms-playwright/chromium-1243`，114MB，全在用户目录）——绕开 snap、**无需 sudo**。
+- `~/.local/share/browse/browse.mjs`（实现）+ `~/bin/browse`（入口），四模式：`shot` 截图 / `text` 正文 / `pdf` / `dom`。
+- 关键参数：**`--no-sandbox`**（Ubuntu 24.04 默认 `kernel.apparmor_restrict_unprivileged_userns=1`，非 snap Chromium 拿不到 userns）；`--proxy` 走本机 mihomo(7890)；桌面 UA + `zh-CN` + 1440x900（`--mobile` 切 iPhone 视口/UA）。
+- 产物默认落 **`~/trimum/tmp/browse-out/`** = T2 默认打开的目录 ⇒ 手机在 `http://100.115.86.48:8080/` 里直接预览/下载。
+- 仓库件：`scripts/browse.mjs`、`scripts/install_browse.sh`（一键装/重装，自带 mihomo 代理探测）。
+
+### 实测（真机）
+| 命令 | 结果 |
+|---|---|
+| `browse --direct text https://example.com` | 200 / 标题 `Example Domain` / 正文 129 字 |
+| `browse --direct shot https://www.baidu.com` | 200 / 109 KB，拷回本机肉眼核对**渲染完整**（logo、热搜、导航齐全） |
+| `browse --proxy shot https://github.com/openai/openai-python` | 200 / 3.96 MB 整页截图，标题正确（境外站经 mihomo 通） |
+
+### 另外三条路（已写进 `docs/OPERATIONS.md`，按需再上）
+- **T2 里 `Simple Browser: Show`**：0 成本，但目标站 `X-Frame-Options`/CSP 会拒（Google/GitHub 这类直接白屏）。
+- **`sudo apt-get install -y w3m`**：终端里**交互式**浏览（填表单、跟链接）最好用，代价是本人跑一次 sudo。
+- **`Xvfb + x11vnc`**（或把 Playwright 的 Chromium 塞进 `:99`）：真要图形界面时的路，比 snap firefox 稳。
+- 物理屏 `startx`：X 驱动齐全但无 WM，窗口不能拖动、无输入法，只算应急。

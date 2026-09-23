@@ -537,6 +537,41 @@ HKCU/HKLM 注册表里也查不到，`UniClashCore.exe` 也不常驻、API 端�
 
 - **不建议**上 TUN（要 root + 改网络栈）；`mixed-port` + 环境变量（给 git/npm/codex 用）就够，和现有 `with-proxy` 口径一致。
 
+### 无桌面下「开浏览器」：`~/bin/browse`（headless Chromium，零 sudo，2026-09-23 落地）
+
+**前提盘点（真机实测）**：Xorg/xinit/全部显卡驱动都在，但**没有 WM、没有 xterm、没有 Xvfb/VNC**；
+`firefox` 是 **snap** 版，`chromium` 没装；`node`/`npx` 可用且 mihomo 在跑。⇒ 走「自带浏览器的 Node 工具」最省事。
+
+**它是什么**：Playwright 自带 Chromium（装在 `~/.cache/ms-playwright/`，约 114MB），
+所以**不用 sudo、不碰 snap**。Ubuntu 24.04 默认 `kernel.apparmor_restrict_unprivileged_userns=1`，
+非 snap 的 Chromium 拿不到 user namespace ⇒ 启动参数必须带 `--no-sandbox`（`scripts/browse.mjs` 里已带）。
+
+```bash
+~/bin/browse shot https://example.com          # 整页截图（默认）
+~/bin/browse --viewport shot https://x.com     # 只要首屏
+~/bin/browse text https://news.ycombinator.com # 去脚本/样式的正文文本（最好用，适合喂给 agent）
+~/bin/browse pdf  https://x.com                # 存 PDF
+~/bin/browse dom  https://x.com                # 原始 HTML
+~/bin/browse --proxy shot https://github.com   # 境外站：走本机 mihomo(127.0.0.1:7890)
+~/bin/browse --mobile --wait 3000 shot https://x.com   # 手机视口/UA + 多等 3s
+```
+
+- **产物默认落 `~/trimum/tmp/browse-out/`**（T2 默认打开的目录）⇒ 手机在 `http://100.115.86.48:8080/`
+  里点开图片即可预览/下载，不必先 scp 回来。指定路径就传第二个位置参数。
+- 实测：`example.com` 200/标题正确；`baidu.com` 截图完整；`github.com` 经 `--proxy` 4.0MB 整页截图正常。
+- **开销**：单次冷启动约 2~4s；截图一张约 10s（含 networkidle 等待）。
+
+**其它三条路（都不如上面这条省事，按需再上）**：
+
+| 方案 | 代价 | 适用 |
+|---|---|---|
+| 直接看 T2 里的 `Simple Browser`（命令面板 → `Simple Browser: Show`） | 0 | 目标站允许被 iframe 嵌入时；Google/GitHub 这类会拒（X-Frame-Options） |
+| `sudo apt-get install -y w3m`（TUI 浏览器，终端里看网页、支持表单/cookie） | 一次 sudo（**要本人跑**） | 想在真机终端里**交互式**填表单/跟链接 |
+| `sudo apt-get install -y xvfb x11vnc` + snap firefox/qt chromium | 一次 sudo + 常驻进程 | 真要看**图形界面**；用 `browse.mjs` 里的 Chromium 也能塞进 `:99` 当图形浏览器（比 snap firefox 稳） |
+| 物理屏：接显示器键盘，`startx` 起 X（无 WM，窗口不能拖动） | 无 | 人在机器边上、临时应急 |
+
+**结论**：`browse` 覆盖「读网页 / 看渲染结果 / 抓正文」；真要交互式浏览（登录、点按钮）再上 `w3m`（要一次 sudo）。
+
 ### 省电 / 无桌面收敛（`scripts/ubuntu_slim_desktop.sh`）
 
 ```bash
