@@ -505,7 +505,17 @@ systemctl --user status trimum-mihomo.service
 
 ### Clash 核心复用机场订阅（mihomo）：可行性已实测（2026-09-23）
 
-**结论：可行，底座已在真机跑起来**（`trimum-mihomo.service`，v1.19.31，用户级、**不需要 sudo**）。
+**结论：已落地并接通机场订阅**（`trimum-mihomo.service`，mihomo v1.19.31，用户级、**不需要 sudo**）。
+
+**订阅怎么进来的**（2026-09-23）：订阅链接存在本机 `D:\trimum\.env` 的 `CLASH_PROXY`（.env 已 gitignore），
+真机侧落在 `~/.config/mihomo/subscription.url`（**0600**）；**链接只在这两处，绝不入仓库/文档**。
+
+- ⚠️ **UA 决定格式**：同一订阅，`User-Agent: clash-verge/1.6.0` → Clash YAML（23 KB）；其它 UA → base64（13 KB）。mihomo 必须带 Clash UA 拉。
+- 刷新配置：`~/bin/mihomo-update`（拉订阅 → 打补丁 → 原子替换 → 重启服务；拉失败**保留原配置**）。仓库副本 `scripts/mihomo_update.sh`。
+- 配置里自动打的两个补丁（见 `mihomo_update.sh`）：`mixed-port` → **7890**；`dns.listen` → **127.0.0.1:1053**（原值 `:53` 是特权端口，用户级 service 绑不上，会启动失败）。
+- 实测（2026-09-23，经 `127.0.0.1:7890`）：`google.com` **200/1.85s**、`github.com` 200/1.89s、`api.github.com` 200/3.98s、`registry.npmjs.org` 200/1.76s；
+  而 `api.deepseek.com` / `baidu.com` 命中规则集 `China-Site` → 走 `国内直连[DIRECT]`（0.09s / 0.19s）⇒ **国内站点没有被绕道**。
+- `~/bin/with-proxy` 已改**优先本机 mihomo**，本机不通才退 Windows 那条（顺序：本机 → Tailscale→Windows → 直连）。
 
 - 实测：`curl -x http://127.0.0.1:7890 https://github.com` → **200 / 0.79s**（当前是 DIRECT 占位配置，链路本身通）。
 - 装法（`scripts/install_mihomo.sh`）：从 `api.github.com` 取 latest → 下 `mihomo-linux-amd64-compatible-*.gz`（真机直连 GitHub 200 / 0.7s）→ `gzip -dc > ~/bin/mihomo`。
@@ -514,9 +524,9 @@ systemctl --user status trimum-mihomo.service
 - 与现有兜底的关系：`~/bin/with-proxy` 走「真机 → Tailscale(DERP hkg) → Windows UniClash」，慢 4~10 倍且依赖笔记本开机；
   换成本机 mihomo 后延迟回到直连量级，`with-proxy` 退化为极小兜底（只在 mihomo 挂了时用）。
 
-**还差什么**：机场订阅链接。UniClash 把订阅放在不透明存储里（
+**订阅链接是怎么找出来的**（备查）：UniClash 把订阅放在不透明存储里（
 `%APPDATA%\\UniClash` 与 `%LOCALAPPDATA%\\UniClash` 都是空目录，`D:\\UniClash\\brand.json` = `{"site":"yangfan"}`，
-HKCU/HKLM 注册表里也查不到）⇒ **需要本人从 UniClash 界面复制订阅链接**。
+HKCU/HKLM 注册表里也查不到，`UniClashCore.exe` 也不常驻、API 端口只开非 HTTP 的 `53107`）⇒ 最后由**本人在 `.env` 里给出** `CLASH_PROXY`。
 
 **风险清单**（切换前确认）：
 1. 机场**设备数/IP 并发限制**：同一订阅 Windows 已在用，加真机可能超限或被限速。

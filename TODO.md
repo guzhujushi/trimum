@@ -97,7 +97,7 @@ P0 安全响应链 / E5 分发渠道 / 穿插三项已收口；沙箱 **S1**（�
 - 【本人】**阿里云 `frps.toml` 的 `auth.token` 太弱（短、纯字典词），且 2026-09-23 被误写进本仓库（公开）⇒ 必须视为已泄露，尽快轮换**（轮换要同步所有 frpc 客户端：真机那条必须一起改，否则隧道断）。
 - 【红线】把真实密钥写进仓库（本轮已踩一次：阿里云 frp token）⇒ 密钥只能记「位置 + 形状」，不写值；已写入的要**轮换**，不能只删字面值。
 - 【本人】本机两个监听进程待确认（非管理员拿不到命令行）：`100.124.243.30:8080`（python 3.14，绑在 Tailscale IP 上）、`0.0.0.0:57322`（node，`D:\New Folder\node.exe`）—— 是什么服务、要不要挪真机？
-- 【DS】真机装 Clash/Mihomo **替代** `~/bin/with-proxy` 这条迂回路径（慢 4–10 倍、依赖笔记本开机）：**底座已装好并实测**（`trimum-mihomo.service` v1.19.31，`127.0.0.1:7890`，DIRECT 出网 200/0.79s，见 `docs/OPERATIONS.md`）；**只差机票订阅链接**——UniClash 把订阅存在不透明存储里，需本人从界面复制，写进真机 `~/.config/mihomo/config.yaml` 的 `proxy-providers`（**订阅链接不入仓库**）。【本人给链接 → DS 接线】
+- ~~真机装 Clash/Mihomo 替代 `with-proxy` 迂回路径~~ ✅ **已完成**（`trimum-mihomo.service` v1.19.31 + 机场订阅，`127.0.0.1:7890`，`google/github/npm` 200，国内站点仍走 DIRECT；订阅链接存 `.env:CLASH_PROXY` 与真机 `~/.config/mihomo/subscription.url`(0600)，刷新用 `~/bin/mihomo-update`）。详见 `docs/OPERATIONS.md`。
 
 ## 红线（写进代码与测试）
 

@@ -34,7 +34,8 @@
 - **真机现成工具**（2026-09-22/23 装）：
   - `~/bin/codex-run ds|qwen` —— 跑 codex（已带 nvm PATH + 注入 `~/.codex/env`）；`~/bin/codex-smoke` 冒烟。
   - `~/bin/tunnel-up` —— 恢复 `code tunnel`（**已改为走 systemd user service `trimum-tunnel`**，没装 service 时回退「解锁 keyring + setsid」）；口令文件 `~/.config/trimum/tunnel.pw`（0600）。
-  - `~/bin/with-proxy <命令>` —— 备用网络通道（经 Tailscale → Windows UniClash `100.124.243.30:7993`）；**只在直连抽风时用**，慢 4~10 倍，代理不可达自动降级直连。
+  - `~/bin/with-proxy <命令>` —— 出网代理，顺序 **本机 mihomo(`127.0.0.1:7890`) → Tailscale→Windows UniClash(`100.124.243.30:7993`) → 直连**；本机 mihomo 是主力，后两条只是兜底。
+  - `~/bin/mihomo-update` —— 刷新 mihomo 配置（拉机场订阅 `~/.config/mihomo/subscription.url`，**0600、不入仓库**；`clash-verge/1.6.0` UA 才拿得到 YAML）。
   - `~/.local/bin/code` —— VS Code CLI（1.138.0，与 server 同 commit）；扩展装在 `~/.vscode-server/extensions`。
   - VS Code 入口：**主** `https://vscode.dev/tunnel/tianyi`；**备（T2，Tailscale 直连）** `~/bin/serve-web-up` → `http://100.115.86.48:8080/`（手机浏览器可用，免域名/证书/frp）。
   - **三个用户级 systemd 服务**：`trimum-web`（VS Code Web）/ `trimum-tunnel`（隧道）/ `trimum-mihomo`（Clash Meta 核，`127.0.0.1:7890`）；装/重装 `scripts/install_user_units.sh`，重启后自启靠 `loginctl enable-linger guzhujushi`（**待本人 sudo 开**，脚本 `scripts/enable_linger.sh`）。

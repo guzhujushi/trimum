@@ -2702,3 +2702,29 @@ gitea、alist 可考虑挪真机（阿里云内存太紧）；myblog / frps / ng
 ### 四、提交
 - `4cd3ce5`（T2 文档与脚本）已**推送** `origin/server`（首次推送时本机代理 7993 未监听而失败，UniClash 起来后重推成功）。
 - 本轮 `scripts/user-units/*` + `scripts/install_user_units.sh` + `scripts/install_mihomo.sh` + `scripts/enable_linger.sh` + `docs/OPERATIONS.md` + `TODO.md` + `AGENTS.md` + `STATUS.md` 见下一个提交。
+
+## 2026-09-23 真机 mihomo 接通机场订阅：with-proxy 换成本机代理（✅ 完成）
+
+> 本人把订阅链接放进 `.env` 的 `CLASH_PROXY` 后开工。
+
+### 做了什么
+- 订阅落在真机 `~/.config/mihomo/subscription.url`（**0600**）＋ `config.yaml` 直接用订阅给的完整配置（含 `cdn.jsdmirror.com` 镜像的国内规则集）；
+  **链接/配置都不入仓库**，只记「位置 + 形状」。新增 `~/bin/mihomo-update`（仓库 `scripts/mihomo_update.sh`）做刷新：拉取 → 打补丁 → 原子替换 → 重启，失败保留原配置。
+- **UA 决定格式**（关键发现）：`User-Agent: clash-verge/1.6.0` → Clash YAML 23 KB；其它 UA → base64 13 KB。mihomo 必须带 Clash UA 拉。
+- 自动打的两个补丁（否则用户级 service 起不来或口径不一致）：`mixed-port` → 7890；`dns.listen` `:53` → `127.0.0.1:1053`（特权端口）。
+- `~/bin/with-proxy` 升级 v2：**优先本机 mihomo**，其次 Windows(经 Tailscale)，最后直连；冒烟输出 `[with-proxy] 本机 mihomo → http://127.0.0.1:7890`。
+
+### 实测（经 `127.0.0.1:7890`）
+| 目标 | 结果 | 命中 |
+|---|---|---|
+| `www.google.com` | **200 / 1.85s** | 代理（`主代理[level1-日本02-NF]`） |
+| `github.com` / `api.github.com` | 200 / 1.89s、200 / 3.98s | 代理 |
+| `registry.npmjs.org` | 200 / 1.76s | 代理 |
+| `api.deepseek.com` | 401（通，缺 key） | `国内直连[DIRECT]`（China-Site 规则集） |
+| `www.baidu.com` | 200 / 0.19s | `国内直连[DIRECT]` |
+
+⇒ 境外走代理、国内仍直连（交我算 `models.sjtu.edu.cn` 也从规则集走 DIRECT，`000` 是校外访问本就不可用，非代理问题）。
+
+### 顺带
+- UniClash 侧确认**取不到订阅链接**：`%APPDATA%\UniClash`、`%LOCALAPPDATA%\UniClash` 皆空目录，近 25 分钟 `%APPDATA%`/`%LOCALAPPDATA%` 只有 Tailscale 写过文件，GUI 只开非 HTTP 的 `127.0.0.1:53107`，`UniClashCore.exe` 不常驻（因此 Windows 侧 `7993` 时通时不通）。
+- `D:\UniClash\brand.json` = `{"site":"yangfan"}`；机场官网域名落在订阅规则的策略组名里（`a4.yfyfind.net`）。
