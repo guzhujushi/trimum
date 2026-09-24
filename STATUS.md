@@ -8,7 +8,7 @@
 ## 当前状态（就地更新，只改这几行）
 
 - **阶段**：Phase 3 收尾已完成（P0/P1 阻断项清零，真机 Ubuntu 验证通过）。主线转 **E7 自研编码智能体** + **沙箱**（E7 前置，S1/S2/S3 已落地）。
-- **分支**：`server`，**已与 `origin/server` 同步**（`efe2885` ask --image + `01819e9` memory 于 2026-09-22 22:11 推送；本轮文档提交紧随其后）；`main` / `ubuntu` / `arch-linux` 里程碑收尾时同步（推送前先开代理 `127.0.0.1:7993`）。
+- **分支**：`server`，**已与 `origin/server` 同步至 `b91f7c7`**（2026-09-24 13:02 推送；细节见同日日志）。`main` / `ubuntu` / `arch-linux` 里程碑收尾时同步（推送前先开代理 `127.0.0.1:7993`；**该代理未开时**可走 git bundle → 真机 → 主机 mihomo 代理，见同日日志）。
 - **测试基线**：本地 **1664 passed / 6 failed / 23 skipped**（09-22 `trm memory import/export` 之后；6 条失败 = 既有宿主基线，零回归）。
 - **沙箱**：S1 系统级加固（真机已 `apply` 在位）/ S2 施加点收口（`sandbox_exec`，7 个 spawn 点，fail-closed）/ S3 seccomp 三档（真机验收 35/0）；**TCP 已收口**（`trm status` → `http: disabled` + `ipc socket: ok`，全机 8321 无监听）。
 - **真机访问**：主 = `vscode.dev/tunnel/tianyi`；备 = **T2 Tailscale**（`http://100.115.86.48:8080/`）。两者都已是 **systemd user service**（`trimum-tunnel` / `trimum-web`），`status`=Connected、web=200；域名/frp 方案**已废弃**。另有 `trimum-mihomo`（本机 Clash 核，机场订阅已接，`127.0.0.1:7890`）。`loginctl enable-linger guzhujushi` **已开**（2026-09-24 复核 `Linger=yes`），重启后整套自启已实测通过。
@@ -2803,4 +2803,5 @@ gitea、alist 可考虑挪真机（阿里云内存太紧）；myblog / frps / ng
 - **动因**：体检发现 `emb-svc`（`:18080`）此前只靠 crontab `@reboot` 拉起 ⇒ 进程崩了没人拉、开机时还和 DNS/网络抢时间（当天就因此失败一次）。
 - **做法**：新增 user unit `emb-svc.service`（`Restart=always` / `RestartSec=10` / `After=Wants=trimum-mihomo.service`，环境变量含 `FASTEMBED_CACHE_PATH` 与 `HTTP(S)_PROXY`），`enable --now`；删掉 crontab 里那行 `@reboot`（备份 `~/emb-svc/backups/20260924-125455/crontab.bak`，删后 crontab 为空）。unit 文件入仓库 `scripts/user-units/emb-svc.service`。
 - **验收**：unit active/enabled；模型 `in 0.1s` 从持久缓存加载；`/v1/embeddings` 正常；**韧性**：`kill -9` 主进程 → 10s 内 `Restart=always` 拉回（新 PID、`NRestarts=1`、`:18080` 恢复）。日志改走 journal（`journalctl --user -u emb-svc`）。
+- **提交**：`b91f7c7`（`feat(ops): codex LLM key 四路注入 + emb-svc 升级为 systemd user unit`，5 files +157/-12）。推送路径：本机代理 `127.0.0.1:7993` **未监听**、Windows 直连 GitHub 也不通 ⇒ 用 `git bundle` 把提交送到真机，从真机经**主机 mihomo(`127.0.0.1:7890`)** 代理推（`GIT_ASKPASS` + `.env` 的 `GITHUB_TOKEN`，token 文件用完即删）；远端 `refs/heads/server` 已复核为 `b91f7c7`，真机工作树 `merge --ff-only` 跟上。
 - **同时入仓库**：`scripts/install_user_units.sh` 现在还会 ① 给 `trimum-web`/`trimum-tunnel` 装 `10-llm-env.conf` drop-in（codex key 注入，见 `docs/OPERATIONS.md`）② 在 `~/emb-svc` 就位时装 emb-svc unit，并提示清掉历史 `@reboot` cron 行 ③ 汇总状态。
