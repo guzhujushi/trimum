@@ -11,9 +11,12 @@
 - **分支**：`server`，**已与 `origin/server` 同步**（`efe2885` ask --image + `01819e9` memory 于 2026-09-22 22:11 推送；本轮文档提交紧随其后）；`main` / `ubuntu` / `arch-linux` 里程碑收尾时同步（推送前先开代理 `127.0.0.1:7993`）。
 - **测试基线**：本地 **1664 passed / 6 failed / 23 skipped**（09-22 `trm memory import/export` 之后；6 条失败 = 既有宿主基线，零回归）。
 - **沙箱**：S1 系统级加固（真机已 `apply` 在位）/ S2 施加点收口（`sandbox_exec`，7 个 spawn 点，fail-closed）/ S3 seccomp 三档（真机验收 35/0）；**TCP 已收口**（`trm status` → `http: disabled` + `ipc socket: ok`，全机 8321 无监听）。
-- **真机访问**：主 = `vscode.dev/tunnel/tianyi`；备 = **T2 Tailscale**（`http://100.115.86.48:8080/`）。两者都已是 **systemd user service**（`trimum-tunnel` / `trimum-web`），`status`=Connected、web=200；域名/frp 方案**已废弃**。另有 `trimum-mihomo`（本机 Clash 核，待机场订阅）。**重启后自启只差 `loginctl enable-linger guzhujushi`（待本人 sudo）**。
+- **真机访问**：主 = `vscode.dev/tunnel/tianyi`；备 = **T2 Tailscale**（`http://100.115.86.48:8080/`）。两者都已是 **systemd user service**（`trimum-tunnel` / `trimum-web`），`status`=Connected、web=200；域名/frp 方案**已废弃**。另有 `trimum-mihomo`（本机 Clash 核，机场订阅已接，`127.0.0.1:7890`）。`loginctl enable-linger guzhujushi` **已开**（2026-09-24 复核 `Linger=yes`），重启后整套自启已实测通过。
 - **无桌面浏览器**：`~/bin/browse [--proxy] shot|text|pdf|dom <URL>` —— headless Chromium（Playwright 自带，**零 sudo**），产物落 `~/trimum/tmp/browse-out/`（T2 里可直接看）。详见 `docs/OPERATIONS.md`「无桌面下开浏览器」。
 - **下一步**：E7 待裁决两条（沙箱是否提前 / 首发是否允许自动改盘+自动跑测试）后开工；沙箱剩真机 4 条命令对照（`docs/SANDBOX-PLAN.md` §10.6，本人 sudo）+ 开发树整树同步。详见「下一步」与 `TODO.md`；本轮已按「模型分工」把待办切成 【Qwen】/【DS】/【本人】 三列（Qwen 任务附提示词）。
+
+- **真机硬件**：2026-09-24 内存 8GB → 16GB（`MemTotal` 7.4 → **15.3 GiB**，swap 4 GiB）；同日复核重启后自启全绿（trmd / docker / frpc / tailscaled + 6 个 user unit + 12 个容器 + `@reboot` 脚本）。
+- **真机 codex 环境**：`~/.codex/env` 改**纯 `KEY=VALUE`**（systemd `EnvironmentFile` 不认 `export`），四路注入（`~/.bashrc` / `codex-run` / `codex-smoke` / 两个 VS Code unit 的 drop-in），自检 `~/bin/codex-verify`；同日修复 `emb-svc`（模型缓存落持久目录 + 走 mihomo 代理）。详见 `docs/OPERATIONS.md`。
 ## 任务清单
 
 ### Phase 0 — 基础环境建设 ✅
@@ -2764,3 +2767,40 @@ gitea、alist 可考虑挪真机（阿里云内存太紧）；myblog / frps / ng
 - **`sudo apt-get install -y w3m`**：终端里**交互式**浏览（填表单、跟链接）最好用，代价是本人跑一次 sudo。
 - **`Xvfb + x11vnc`**（或把 Playwright 的 Chromium 塞进 `:99`）：真要图形界面时的路，比 snap firefox 稳。
 - 物理屏 `startx`：X 驱动齐全但无 WM，窗口不能拖动、无输入法，只算应急。
+
+## 2026-09-24 真机换内存（7.4→15.3 GiB）+ 重启体检 + codex/emb-svc 修复
+
+### 关机前体检（结论：无阻断项，可关）
+| 检查面 | 结果 |
+|---|---|
+| 关机抑制 `systemd-inhibit --list` | 仅 4 个标准 `delay`（ModemManager/NetworkManager/UPower/unattended-upgrades），无 `block` |
+| 包管理 | 无在跑的 apt/dpkg；无 `/var/run/reboot-required` |
+| 未保存内容 | VS Code **无 `Backups` 目录**（=无未保存缓冲）；无 tmux/screen；无 codex 进程 |
+| 自启覆盖 | 系统级 trmd/docker/frpc/tailscaled/containerd enabled；6 个 user unit enabled + `Linger=yes`；12 容器全 `restart=always`；`@reboot` 拉起 emb-svc |
+| 依赖 | `frpc` 只转 `127.0.0.1:22 → 8322`；无 NFS/CIFS 挂载 |
+| 未纳管的 | 手动起的 `serve-web`（PID 2808，`--socket-path /tmp/...`，0 连接）—— 重启后消失，无损失 |
+
+### 重启后体检（12:31 开机）
+- 内存 `MemTotal` 16013096 kB = **15.3 GiB**（原 7.4 GiB）⇒ 内存条识别正常。
+- `systemctl --failed` / `systemctl --user --failed` 均 0；6 个 user unit active（`NRestarts=0`）；docker 12 容器全起、无 unhealthy。
+- 端口：mihomo `7890/9090`、trimum-web `:8080`、sjtu-mcp `5173`、dify-mcp `5180` 均在；mihomo 代理与直连 github 都 200；tailscale 在线。
+- 旧的野 `serve-web` 已随重启消失（符合预期）。
+
+### codex「找不到 DEEPSEEK_API_KEY」（真机）— 已修
+- **复现**：`env -u DEEPSEEK_API_KEY codex -p ds exec ...` → `ERROR: Missing environment variable: DEEPSEEK_API_KEY`（连报两次）；经 `~/bin/codex-run ds` → 正常返回。
+- **根因**：key 只在 `~/.codex/env`，此前**仅** `codex-run` / `codex-smoke` 会 source；`~/.bashrc` 不管，systemd 也读不了（`EnvironmentFile` **不认 `export KEY=VALUE`**，systemd-run 实测两 key 全 MISSING）。
+- **修**：`~/.codex/env` 改**纯 `KEY=VALUE`**（0600，单一真源）；`~/.bashrc` 追加 `set -a; . ~/.codex/env; set +a`；`codex-run`/`codex-smoke` 的 source 用 `set -a` 包住（否则子进程拿不到）；`trimum-web`/`trimum-tunnel` 各加 drop-in `10-llm-env.conf`（`EnvironmentFile=-%h/.codex/env`）；新增自检 `~/bin/codex-verify`。
+- **验收**：systemd 解析 SET / 交互 shell SET / 交互 shell 裸跑 `codex -p ds` 返回 OK（197 tokens）；两个 unit 重启后 `/proc/<pid>/environ` 有 `DEEPSEEK_API_KEY`，`:8080` 回 202。
+- 备份：`~/.codex/backups/20260924-124548/{env,bashrc,codex-run,codex-smoke}.bak`。
+
+### emb-svc 未自启（`:18080` 空）— 已修
+- **根因**：fastembed 默认缓存 `/tmp/fastembed_cache`（重启被清），本机**直连 huggingface.co 解析不了**（`getent hosts` 空 / curl 000，经 mihomo 才 200）⇒ `@reboot` 拉起时既无缓存又下不动，`httpx.ConnectError: Temporary failure in name resolution` → startup failed 退出。
+- **修**：`start.sh` 加 `FASTEMBED_CACHE_PATH=$HOME/emb-svc/models/fastembed`（持久）+ `HTTP(S)_PROXY=127.0.0.1:7890`；模型预下载 91 MB（dim=512）。
+- **验收**：`:18080` 在听，`[embsvc] loaded BAAI/bge-small-zh-v1.5 dim=512 in 0.1s`，`/v1/embeddings` 返回 512 维向量。仍由 `@reboot` cron 拉起（**未做 systemd unit ⇒ 无 `Restart=always`**，见 `TODO.md` §8）。
+- 备份：`~/emb-svc/start.sh.bak_20260924-124738`。
+
+### 2026-09-24（续）emb-svc 升级为 systemd user unit
+- **动因**：体检发现 `emb-svc`（`:18080`）此前只靠 crontab `@reboot` 拉起 ⇒ 进程崩了没人拉、开机时还和 DNS/网络抢时间（当天就因此失败一次）。
+- **做法**：新增 user unit `emb-svc.service`（`Restart=always` / `RestartSec=10` / `After=Wants=trimum-mihomo.service`，环境变量含 `FASTEMBED_CACHE_PATH` 与 `HTTP(S)_PROXY`），`enable --now`；删掉 crontab 里那行 `@reboot`（备份 `~/emb-svc/backups/20260924-125455/crontab.bak`，删后 crontab 为空）。unit 文件入仓库 `scripts/user-units/emb-svc.service`。
+- **验收**：unit active/enabled；模型 `in 0.1s` 从持久缓存加载；`/v1/embeddings` 正常；**韧性**：`kill -9` 主进程 → 10s 内 `Restart=always` 拉回（新 PID、`NRestarts=1`、`:18080` 恢复）。日志改走 journal（`journalctl --user -u emb-svc`）。
+- **同时入仓库**：`scripts/install_user_units.sh` 现在还会 ① 给 `trimum-web`/`trimum-tunnel` 装 `10-llm-env.conf` drop-in（codex key 注入，见 `docs/OPERATIONS.md`）② 在 `~/emb-svc` 就位时装 emb-svc unit，并提示清掉历史 `@reboot` cron 行 ③ 汇总状态。

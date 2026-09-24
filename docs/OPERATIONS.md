@@ -640,3 +640,61 @@ Remove-NetFirewallRule -DisplayName "Tailscale->UniClash 7993"
 | `git ls-remote` / `git fetch` | ✅ 成功 | ✅ 成功 |
 
 ⇒ Tailscale 这条是 **DERP 中继（hkg），RTT 150–250ms**，比直连慢 4~10 倍，**只当应急备用**，不要设成全局代理。
+
+## codex 的 LLM key 注入与自检（2026-09-24 重做）
+
+**症状**：真机上裸跑 `codex -p ds` 报 `ERROR: Missing environment variable: DEEPSEEK_API_KEY`。
+
+**根因**：key 只在 `~/.codex/env`，而它此前**只**被 `~/bin/codex-run` / `codex-smoke` source；`~/.bashrc` 不管，
+systemd 也读不了 —— `EnvironmentFile` **不认 `export KEY=VALUE` 前缀**（用 `systemd-run -p EnvironmentFile=...` 实测两 key 全 MISSING）。
+
+**现状：四条路径都通**
+
+| 路径 | 机制 |
+|---|---|
+| `~/.codex/env` 本身 | **纯 `KEY=VALUE`，不带 `export`**（0600）—— 这是关键，三种用法通吃 |
+| `~/.bashrc` | 末尾 `if [ -f "$HOME/.codex/env" ]; then set -a; . "$HOME/.codex/env"; set +a; fi`（交互 shell / VS Code 终端） |
+| `~/bin/codex-run`、`~/bin/codex-smoke` | source 外面包 `set -a`/`set +a`（否则 source 进来的变量不会 export 给 codex 子进程） |
+| `trimum-web` / `trimum-tunnel` | drop-in `~/.config/systemd/user/<unit>.service.d/10-llm-env.conf` → `EnvironmentFile=-%h/.codex/env`（VS Code 扩展里的 codex 走这条；改完 `systemctl --user daemon-reload` + 重启这两个 unit） |
+
+**自检**：`~/bin/codex-verify` —— 四项都要 SET/OK：① 文件权限+键名 ② `systemd EnvironmentFile` 解析 ③ 交互式登录 shell ④ 经 `codex-run` 实跑。
+**回滚**：备份在 `~/.codex/backups/<时间戳>/{env,bashrc,codex-run,codex-smoke}.bak`（2026-09-24 那次是 `20260924-124548`）。
+
+## emb-svc（本地 embedding 服务，:18080）（2026-09-24 修 + unit 化）
+
+**症状**：开机后 `:18080` 不通，`~/emb-svc/service.log` 尾部 `httpx.ConnectError: [Errno -3] Temporary failure in name resolution` → `Application startup failed. Exiting.`
+
+**根因**：fastembed 默认把模型下到 `/tmp/fastembed_cache`（**重启即清空**）；而本机**直连 `huggingface.co` 解析不了**
+（`getent hosts` 空、curl 000，经 mihomo `127.0.0.1:7890` 才 200）⇒ `@reboot` 拉起时既无缓存又下不动，直接退出。
+
+**修法**（`~/emb-svc/start.sh`，备份 `start.sh.bak_20260924-124738`）：
+- `FASTEMBED_CACHE_PATH=$HOME/emb-svc/models/fastembed`（持久，模型 91 MB / dim=512 已预下载）；
+- 冷启动兜底 `HTTP_PROXY` / `HTTPS_PROXY=http://127.0.0.1:7890`（连 mihomo 才会解析得到 HF）。
+- 同日**升级为 systemd user unit** `emb-svc.service`（`Restart=always` + `RestartSec=10` + `After/Wants=trimum-mihomo.service`，unit 文件已入仓库 `scripts/user-units/emb-svc.service`）；crontab 里的 `@reboot` 那行**已删**（备份 `~/emb-svc/backups/20260924-125455/crontab.bak`）。unit 内置同一套 `FASTEMBED_CACHE_PATH`/代理环境变量，日志改为 journal（`journalctl --user -u emb-svc -n 50`）；`start.sh` 保留供手动前台调试。
+
+**验证**：`ss -ltnp | grep 18080` 有监听；日志出现 `[embsvc] loaded BAAI/bge-small-zh-v1.5 dim=512 in 0.1s`；韧性实测 `kill -9` 主进程后 `Restart=always` 10s 内拉回（`NRestarts=1`，端口恢复）；
+`curl -X POST http://127.0.0.1:18080/v1/embeddings -H 'Content-Type: application/json' -d '{"input":"测试一下","model":"BAAI/bge-small-zh-v1.5"}'` 返回 512 维向量。
+
+## 换硬件 / 重启前后清单（2026-09-24 首次实践，换内存条）
+
+**关机前**（都很便宜，缺一项就可能丢东西）：
+```bash
+systemd-inhibit --list                 # 只应有 delay 类（ModemManager/NetworkManager/UPower/unattended-upgrades），出现 block 类先处理
+pgrep -a -f 'apt|dpkg'                 # 应为空
+find ~ -maxdepth 9 -type d -name Backups   # VS Code 未保存缓冲区：应无输出（有输出=先去保存）
+systemctl --user list-unit-files --state=enabled | grep -E 'trimum|dify|feishu|sjtu'
+loginctl show-user "$USER" -p Linger   # 要 Linger=yes，否则用户级服务重启后不自启
+docker inspect -f '{{.Name}} {{.HostConfig.RestartPolicy.Name}}' $(docker ps -q)   # 要全 always
+mount | grep -E 'nfs|cifs|/media|/mnt' # 应为空，否则挂载点会拖住关机
+```
+
+**重启后**（一条龙复核）：
+```bash
+who -b; free -h                        # 开机时间 + 内存是否识别（本次 7.4 → 15.3 GiB）
+systemctl --failed; systemctl --user --failed     # 都应为 0
+for u in trimum-web trimum-tunnel trimum-mihomo emb-svc dify-mcp feishu-bridge sjtu-mcp; do systemctl --user is-active $u; done
+docker ps --filter health=unhealthy --format '{{.Names}}'   # 应为空
+ss -ltnp | grep -E ':(7890|8080|18080|5173|5180)'  # mihomo / T2 web / emb-svc / sjtu-mcp / dify-mcp
+~/bin/codex-verify                     # codex 三条路径 + 一次实跑
+```
+> 本次实测有一处**没自启**：`emb-svc`（`:18080`）—— 见上一节，已在同日修好并 unit 化（`systemctl --user is-active emb-svc` 现在是清单里的一项）。

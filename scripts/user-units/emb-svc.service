@@ -1,0 +1,19 @@
+[Unit]
+Description=trimum: local embedding service (fastembed, :18080)
+After=trimum-mihomo.service
+Wants=trimum-mihomo.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/emb-svc
+Environment=HF_HOME=%h/.cache/huggingface
+Environment=FASTEMBED_CACHE_PATH=%h/emb-svc/models/fastembed
+Environment=HTTP_PROXY=http://127.0.0.1:7890
+Environment=HTTPS_PROXY=http://127.0.0.1:7890
+Environment=EMB_MODEL=BAAI/bge-small-zh-v1.5
+ExecStart=%h/emb-svc/venv/bin/uvicorn app:app --host 0.0.0.0 --port 18080
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
