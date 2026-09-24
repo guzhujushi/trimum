@@ -477,6 +477,80 @@ code tunnel status       # 期望：..."tunnel":"Connected"...
   重试即可，或 `~/bin/with-proxy` 兜底。
 - **根治仍待二选一**（空口令 keyring / 0600 口令文件），见 `TODO.md` §8；T2 通了之后这条不急。
 
+### 客户端侧前提：桌面版 VS Code 要装 `ms-vscode.remote-server`（Remote - Tunnels，2026-09-24 复核）
+
+- **浏览器**开 `https://vscode.dev/tunnel/tianyi` 只要浏览器里 GitHub 登录态是对的，**不需要**本机扩展。
+- **桌面版** VS Code 走 Remote Explorer → Tunnels（或「Connect to Tunnel」）**必须**装扩展 `ms-vscode.remote-server`；
+  没装时隧道**不会出现在列表里**，而且 `%APPDATA%\Code\logs\**` 里**连一条隧道解析记录都不会有**（容易误判成「隧道挂了」）。
+  - 本机（Windows）2026-09-24 实测**未装**：`%USERPROFILE%\.vscode\extensions` 只有
+    `ms-vscode-remote.remote-ssh(-edit)` / `ms-vscode.remote-explorer` / `ms-vscode.remote-repositories` / `github.remotehub`。
+  - 装：`code --install-extension ms-vscode.remote-server`（市场条目 `items?itemName=ms-vscode.remote-server` 实测 200）。
+- **三段式排查口径**（先服务端，再客户端网络，最后客户端软件）：
+
+```bash
+# ① 服务端（真机）：这两条就够定性
+code tunnel user show    # 期望 logged in with provider GitHub Account
+code tunnel status       # 期望 "tunnel":"Connected" + has_editor_link:true + last_fail_reason:null
+
+# ② 客户端网络（Windows）：401 = 通（没带 token 属正常），000/超时才是网络问题
+curl -sS -o NUL -w '%{http_code}\n' https://global.rel.tunnels.api.visualstudio.com/api/v1/tunnels
+curl -sS -o NUL -w '%{http_code}\n' https://vscode.dev
+
+# ③ 客户端软件：扩展在不在
+dir "$env:USERPROFILE\.vscode\extensions" | findstr /i "remote"
+```
+
+- **顺手记一个假故障**：`code tunnel` 与 `serve-web` 的 stdout 都**只写到启动横幅就停**，此后 journal 里一片安静属正常；
+  别把「日志不动」当成「没起来」，判据只看 `code tunnel status` 与 `:8080` 的实际响应。
+- **2026-09-24 23:2x 实测存档**：隧道 `tunnel_id=puzzled-hill-f1v2xw8`（cluster `jpe1`），23:19:35 有过一次**人为重启**
+  （`NRestarts=0`，非崩溃），重启后 `Connected`，隧道进程与 `4.190.51.35:443` ESTAB；同刻 T2 `:8080` 从 Windows 侧 GET **200 / 1.49 s**；
+  Remote-SSH 同样能连（慢 ~76 s，慢在远端**重下 CLI**：`serverStartTime=47`，不是隧道问题）。
+  ⇒ 这一轮报障**不是隧道没起来**，缺口在客户端（见上）。
+
+### 浏览器侧 Codex 扩展无法激活（`command 'chatgpt.openSidebar' not found`）— 已定位 + 已打补丁（2026-09-24）
+
+**症状**：在浏览器里的 VS Code（`vscode.dev/tunnel/tianyi`、T2 `:8080`）点 Codex 图标 →
+`command 'chatgpt.openSidebar' not found`（VS Code 另会报 `Cannot activate the 'Codex' extension because it depends on
+the 'Codex Audio' extension which is disabled`）。
+
+**根因（上游 bug，不是本机配置错）**：`openai.chatgpt` 清单里声明了 `extensionDependencies: ["openai.codex-audio"]`，
+而 `openai.codex-audio` 是 `extensionKind: ["ui"]`（桌面专用、无 browser 入口）⇒ **浏览器侧没有 UI 扩展宿主**，
+依赖恒不满足 ⇒ Codex 整体不激活 ⇒ `chatgpt.openSidebar` 从未注册。上游 issue：`openai/codex#47357`（2026-09-24 仍 open）。
+
+**桌面版不受影响**：Remote-SSH 窗口的 UI 侧是 Windows 桌面，`codex-audio` 能正常激活（本机日志 23:11 实测
+`doActivateExtension openai.codex-audio, root cause: openai.chatgpt`）⇒ 桌面走 Remote-SSH 时 Codex 是好的。
+
+**两种修法**
+1. **去掉硬依赖（本机采用）**：`scripts/fix_codex_audio_dep.sh`（默认 dry-run，`--apply` 才写，自动备份 `package.json.bak_trimum_*`）。
+   真机已执行：server 侧 `openai.chatgpt-26.917.62051-linux-x64/package.json` 的 `extensionDependencies` 已删除
+   （version 仍 26.917.62051、10 个命令含 `chatgpt.openSidebar` 完好）；重跑副本 `~/bin/fix-codex-audio-dep.sh`。
+   **扩展被自动更新/重装后会复原 ⇒ 更新完记得重跑一次。** 回退：把 `package.json.bak_trimum_*` 拷回，或重装扩展。
+2. **降到社区验证可用的版本**：`openai.chatgpt@26.908.40401`（不带这个硬依赖）。注意真机上 `code --install-extension` 走不通
+   （headless CLI 前置检查报 `find libstdc++.so or ldconfig`，补 PATH 也没用），要降级得在浏览器扩展面板里选「安装其他版本」。
+
+**验证**：改完在浏览器里 `Developer: Reload Window`；服务端 `~/.vscode-server/data/logs/<ts>/exthost*/remoteexthost.log`
+应出现 `ExtensionService#_doActivateExtension openai.chatgpt`。
+
+### Remote-SSH 为什么慢（2026-09-24 实测口径）
+
+- **主因是链路延迟，不是机器慢**：Windows → 真机走的是 **Tailscale DERP 中继（香港）**，不是直连。
+  实测 `tailscale ping` **375 ms**、ICMP **375–404 ms**、经 SSH 跑一次 `echo` 往返 **~9 s**。VS Code 远程协议往返极多，这个 RTT 直接变成卡顿。
+- **为什么没直连**：真机侧 `tailscale netcheck` = `MappingVariesByDestIP: true`（**对称 NAT**，出口 `58.247.x.x`（上海电信，已脱敏））+ `PortMapping` 为空
+  ⇒ UDP 打洞失败、退回 DERP；且本机侧到 **hkg 的 DERP 延迟 246 ms**（到 lax 反而 142 ms，ISP 去香港的路由本身就差）。
+- **补测（2026-09-25，人在杭州、换到酒店 WLAN）**：同一条 DERP(hkg) 通路的**抖动比均值更要命** —— `tailscale ping` 连续三次
+  分别 **345 ms / 1.56 s / 4.84 s**，并报 `direct connection not established`；同一时段 `ssh` 连接**时通时断**（同一分钟内既有 timeout 也有成功）。
+  ⇒ 判断链路好坏别只看一次 ping，连测 3–5 次看抖动；远程开发卡顿时优先怀疑这条中继。
+- **次因是首连开销**：真机曾重下 VS Code CLI（`serverStartTime=47`），客户端 `resolveAuthority` 等了 **76 s**；
+  之后每次连接还会因为服务端 `--enable-remote-auto-shutdown` 重新拉起服务。
+- **改善办法（按性价比）**
+  1. **改走 VPS 的 frp 通路**：真机 → VPS `8.145.36.108` = **31 ms**，Windows → VPS:7000 = **46 ms**
+     ⇒ 只要 VPS 安全组放行 **TCP 8322**（`/etc/frp/frpc.ini` 已把 `127.0.0.1:22` 映射为 `remote_port = 8322`），
+     `ssh -p 8322 guzhujushi@8.145.36.108` 就是 **~65–90 ms**，比 DERP 好 4–5 倍。
+     2026-09-24 实测 8322 与 22 **均超时**、只有 7000 通 ⇒ 是**云端安全组没放行**，不是 frps/frpc 没跑。
+  2. 本机加 `"remote.SSH.enableRemoteAutoShutdown": false`；`files.watcherExclude` / `search.exclude` 排除
+     `node_modules`、`.git`、`/opt/trimum`、`~/.vscode-server` 等大目录，减少高延迟下的往返量。
+  3. 想根治 Tailscale 那条：在 VPS 上自建 DERP（`derper`）让两端都指过去（VPS 对两端都只有 30–46 ms）。
+
 ### 真机常驻：三个用户级 systemd 服务（2026-09-23 落地）
 
 | 单元 | 作用 | 监听 / 入口 | 仓库件 |
