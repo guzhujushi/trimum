@@ -2,7 +2,8 @@
 
 History comes from the RPC route ``events.history``; stats come from the
 ``bus`` field of the daemon ``health`` payload.  This command only reads —
-it never publishes, dispatches, or mutates anything.
+ except the ``publish`` action, which sends one event through the
+ ``events.publish`` RPC route.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ DEFAULT_INTERVAL = 2.0
 __command_meta__ = {
     "events": {
         "summary": "Show recent daemon events (event bus history and stats)",
-        "args": "[--limit N] [--follow] [--interval SECS]",
+        "args": "[--limit N] [--follow] [--interval SECS] | publish <type> [--data JSON] [--source S] [--severity SEV]",
         "examples": ["trm events", "trm events --limit 20 --json", "trm events --follow"],
         "tags": ["daemon", "observability"],
         "risk": "low",
@@ -46,11 +47,40 @@ def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
         default=DEFAULT_INTERVAL,
         help=f"poll interval for --follow (seconds, default {DEFAULT_INTERVAL})",
     )
+    parser.add_argument(
+        "action",
+        nargs="?",
+        choices=["publish"],
+        metavar="{publish}",
+        help="action to run (default: read history); use `publish` to send one event",
+    )
+    parser.add_argument(
+        "event_type",
+        nargs="?",
+        metavar="type",
+        help="event type to publish (required with `publish`)",
+    )
+    parser.add_argument(
+        "--data",
+        help="JSON object payload for --publish",
+    )
+    parser.add_argument(
+        "--source",
+        help="event source for --publish (default: cli)",
+    )
+    parser.add_argument(
+        "--severity",
+        choices=["info", "warning", "error"],
+        help="event severity for --publish (default: info)",
+    )
     parser.set_defaults(handler=handler)
 
 
 def handler(args: argparse.Namespace) -> int:
     """Fetch and print recent daemon events, optionally following."""
+    if getattr(args, "action", None) == "publish":
+        return _publish(args)
+
     limit = int(getattr(args, "limit", DEFAULT_LIMIT))
     if limit <= 0:
         return fail("--limit must be a positive integer")
@@ -149,6 +179,40 @@ def _follow(config, limit: int, interval: float) -> int:
     except KeyboardInterrupt:
         print()
         return 0
+
+
+def _publish(args: argparse.Namespace) -> int:
+    """Send one event to the bus via the ``events.publish`` RPC route."""
+    event_type = getattr(args, "event_type", None)
+    if not event_type:
+        return fail("publish needs an event type, e.g. `trm events publish <type> --data '{}'`")
+
+    raw_data = getattr(args, "data", None)
+    if raw_data is None:
+        payload = {}
+    else:
+        try:
+            payload = json.loads(raw_data)
+        except json.JSONDecodeError:
+            return fail("--data 必须是 JSON 对象")
+        if not isinstance(payload, dict):
+            return fail("--data 必须是 JSON 对象")
+
+    config = load_config(args)
+    params = {
+        "event_type": event_type,
+        "payload": payload,
+    }
+    if getattr(args, "source", None):
+        params["source"] = args.source
+    if getattr(args, "severity", None):
+        params["severity"] = args.severity
+
+    data = rpc_call(config, "events.publish", params)
+    if data is None:
+        return fail("daemon is not running — `trm events --publish` needs a live daemon")
+    emit(args, data)
+    return 0
 
 
 __all__ = ["add_subparsers", "handler"]

@@ -135,6 +135,18 @@ class TestWorkflowRuntimeWiring:
         assert "/api/workflows" in paths
         assert "/api/workflows/runs" in paths
 
+    def test_events_publish_route_registered(self, tmp_path):
+        """G-1：`events.publish` RPC 路由必须挂上，`trm events --publish` 才有人接。"""
+        from trimum_core.api_server import _register_ipc_routes
+        from trimum_core.ipc_handler import IpcHandler
+
+        app = create_app(build_config(tmp_path))
+        state = app.state.trimum
+        ipc = IpcHandler(socket_path=str(tmp_path / "trimum.sock"))
+        _register_ipc_routes(ipc, state)
+        handler = ipc.router.get("events.publish")
+        assert handler is not None
+
 
 class TestSystemMonitorWiring:
     """M1：daemon 启动必须把 SystemMonitor 定时采集任务真正跑起来，shutdown 必须把它收掉。"""

@@ -210,3 +210,56 @@ def test_health_payload_includes_bus_stats():
     assert payload["bus"]["history"] == 0
     # state 可能是 None（老路径 / 轻量构造）⇒ 不许抛 AttributeError，也不许有 bus 键
     assert "bus" not in _health_payload(_Cfg(), None)
+
+
+def test_publish_sends_rpc(monkeypatch, capsys):
+    calls = []
+
+    def fake(config, method, params=None, timeout=2.0):
+        calls.append((method, params))
+        if method == "events.publish":
+            return {
+                "published": True,
+                "event": {
+                    "event_type": "ops.ping",
+                    "source": "cli",
+                    "severity": "info",
+                    "payload": {"k": 1},
+                    "timestamp": None,
+                },
+            }
+        raise AssertionError(f"unexpected rpc method: {method}")
+
+    monkeypatch.setattr(events_mod, "rpc_call", fake)
+    assert main(["--json", "events", "publish", "ops.ping", "--data", '{"k":1}']) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert ("events.publish", {"event_type": "ops.ping", "payload": {"k": 1}}) in calls
+    assert out["published"] is True
+    assert out["event"]["payload"] == {"k": 1}
+
+
+def test_publish_bad_data_json_fails_cleanly(monkeypatch, capsys):
+    def no_rpc(*a, **k):
+        raise AssertionError("rpc_call should not be reached for bad --data")
+
+    monkeypatch.setattr(events_mod, "rpc_call", no_rpc)
+    assert main(["events", "publish", "ops.ping", "--data", "{"]) == 1
+    _, err = capsys.readouterr()
+    assert "JSON" in err
+
+
+def test_events_unknown_positional_is_rejected(monkeypatch, capsys):
+    # Positional-arg approach must not widen the command surface: an unknown
+    # first word is rejected by argparse `choices` (exit 2), not swallowed as
+    # an event type.  argparse exits via sys.exit, so main() raises SystemExit.
+    import pytest
+
+    def no_rpc(*a, **k):
+        raise AssertionError("publish must not be reached for an unknown action")
+
+    monkeypatch.setattr(events_mod, "rpc_call", no_rpc)
+    with pytest.raises(SystemExit) as excinfo:
+        main(["events", "somejunk"])
+    assert excinfo.value.code == 2
+    _, err = capsys.readouterr()
+    assert "invalid choice" in err

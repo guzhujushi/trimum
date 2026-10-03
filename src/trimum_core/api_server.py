@@ -414,6 +414,20 @@ def _register_ipc_routes(ipc: IpcHandler, state: AppState) -> None:
         events = state.event_bus.get_history(limit=params.get("limit", 50))
         return [e.model_dump() for e in events]
 
+    @router.register("events.publish")
+    async def rpc_publish_event(params: dict) -> dict:
+        event_type = params.get("event_type")
+        if not event_type:
+            raise ValueError("event_type is required")
+        ev = SystemEvent(
+            event_type=event_type,
+            source=params.get("source") or "cli",
+            severity=params.get("severity") or "info",
+            payload=params.get("payload") or {},
+        )
+        await state.event_bus.publish(ev)
+        return {"published": True, "event": ev.model_dump()}
+
     @router.register("context.get")
     async def rpc_get_context(params: dict) -> dict:
         if not state.context:
