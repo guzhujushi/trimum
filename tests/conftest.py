@@ -113,13 +113,6 @@ def isolate_process_env():
 _HOST_DEPENDENT_TESTS: frozenset[str] = frozenset({
     "tests/test_depends_on.py::TestAgentRegistryCheckDependencies::test_existing_dep_returns_empty",
     "tests/test_other_dispatchers.py::TestEnvDispatcher::test_env_list_sorted",
-    "tests/test_skill_integration.py::test_skill_loader_load_hello_world",
-    "tests/test_skill_integration.py::test_skill_loader_load_git_deploy",
-    "tests/test_skill_integration.py::test_skill_loader_parse_single",
-    "tests/test_skill_integration.py::test_skill_loader_list_skills",
-    "tests/test_skill_integration.py::test_skill_router_get_skill",
-    "tests/test_skill_integration.py::test_skill_router_list_capabilities",
-    "tests/test_skill_integration.py::test_skill_router_execute_skill",
     "tests/test_socket_path_consistency.py::TestClientServerAgreement::test_client_matches_daemon_when_xdg_set",
     "tests/test_socket_path_consistency.py::TestClientServerAgreement::test_client_returns_runtime_dir_candidate_when_nothing_exists",
     "tests/test_socket_path_consistency.py::TestSystemRuntimeDirSocket::test_system_runtime_socket_is_a_candidate",

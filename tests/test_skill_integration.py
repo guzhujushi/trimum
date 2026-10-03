@@ -34,6 +34,46 @@ from trimum_core.tool_gateway import ToolGateway
 
 
 # ===================================================================
+#  SECTION 0: tmp fixture — isolated skills (no real ~/.trimum)
+# ===================================================================
+
+@pytest.fixture()
+def skills_dir(tmp_path: Path) -> Path:
+    """Build two minimal skill.yaml packages under tmp_path and return the root."""
+    hello = tmp_path / "hello-world"
+    hello.mkdir()
+    (hello / "skill.yaml").write_text(
+        "name: hello-world\n"
+        "version: \"1.0.0\"\n"
+        "description: \"Minimal hello-world fixture\"\n"
+        "steps:\n"
+        '  - tool: shell\n'
+        '    args: ["echo", "hello"]\n'
+        '  - tool: shell\n'
+        '    args: ["echo", "world"]\n',
+        encoding="utf-8",
+    )
+    deploy = tmp_path / "git-deploy"
+    deploy.mkdir()
+    (deploy / "skill.yaml").write_text(
+        "name: git-deploy\n"
+        "version: \"1.0.0\"\n"
+        "description: \"Minimal git-deploy fixture\"\n"
+        "precheck:\n"
+        "  require_executables: [git]\n"
+        "steps:\n"
+        '  - tool: shell\n'
+        '    args: ["git", "status"]\n'
+        '  - tool: shell\n'
+        '    args: ["git", "add", "-A"]\n'
+        '  - tool: shell\n'
+        '    args: ["git", "commit", "-m", "fixture"]\n',
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+# ===================================================================
 #  SECTION 1: Skill Schema — no `validate` name conflict
 # ===================================================================
 
@@ -91,9 +131,9 @@ def test_skill_definition_validation():
 #  SECTION 2: SkillLoader — scan real skills directory
 # ===================================================================
 
-def test_skill_loader_load_hello_world():
+def test_skill_loader_load_hello_world(skills_dir):
     """SkillLoader loads ~/.trimum/skills/hello-world/skill.yaml."""
-    loader = SkillLoader()
+    loader = SkillLoader(skills_path=str(skills_dir))
     count = loader.load_all()
     assert count >= 1, "Should load at least hello-world skill"
     hello = loader.get("hello-world")
@@ -103,9 +143,9 @@ def test_skill_loader_load_hello_world():
     assert hello.steps[0].tool == "shell"
 
 
-def test_skill_loader_load_git_deploy():
+def test_skill_loader_load_git_deploy(skills_dir):
     """SkillLoader loads git-deploy with precheck."""
-    loader = SkillLoader()
+    loader = SkillLoader(skills_path=str(skills_dir))
     loader.load_all()
     deploy = loader.get("git-deploy")
     assert deploy is not None, "git-deploy skill should be loaded"
@@ -114,18 +154,18 @@ def test_skill_loader_load_git_deploy():
     assert len(deploy.steps) == 3
 
 
-def test_skill_loader_parse_single():
+def test_skill_loader_parse_single(skills_dir):
     """parse_skill_yaml convenience function works."""
-    skill_path = Path.home() / ".trimum" / "skills" / "hello-world" / "skill.yaml"
+    skill_path = skills_dir / "hello-world" / "skill.yaml"
     assert skill_path.exists()
     sd = parse_skill_yaml(str(skill_path))
     assert sd is not None
     assert sd.name == "hello-world"
 
 
-def test_skill_loader_list_skills():
+def test_skill_loader_list_skills(skills_dir):
     """SkillLoader lists loaded skills."""
-    loader = SkillLoader()
+    loader = SkillLoader(skills_path=str(skills_dir))
     loader.load_all()
     names = loader.list_skill_names()
     assert "hello-world" in names
@@ -147,9 +187,9 @@ def test_skill_router_prefix():
     assert SkillRouter.extract_skill_name("skill:") == ""
 
 
-def test_skill_router_get_skill():
+def test_skill_router_get_skill(skills_dir):
     """SkillRouter resolves skill by name."""
-    loader = SkillLoader()
+    loader = SkillLoader(skills_path=str(skills_dir))
     loader.load_all()
     gw = ToolGateway()
     router = SkillRouter(loader, gw)
@@ -159,9 +199,9 @@ def test_skill_router_get_skill():
     assert router.get_skill("nonexistent") is None
 
 
-def test_skill_router_list_capabilities():
+def test_skill_router_list_capabilities(skills_dir):
     """SkillRouter.list_skill_capabilities returns skill:<name> strings."""
-    loader = SkillLoader()
+    loader = SkillLoader(skills_path=str(skills_dir))
     loader.load_all()
     gw = ToolGateway()
     router = SkillRouter(loader, gw)
@@ -307,9 +347,9 @@ async def test_skill_executor_experience_injection():
 # ===================================================================
 
 @pytest.mark.asyncio
-async def test_skill_router_execute_skill():
+async def test_skill_router_execute_skill(skills_dir):
     """SkillRouter.execute_skill dispatches to executor correctly."""
-    loader = SkillLoader()
+    loader = SkillLoader(skills_path=str(skills_dir))
     loader.load_all()
     mock_gw = AsyncMock(spec=ToolGateway)
     mock_gw.execute.return_value = ExecuteResponse(
