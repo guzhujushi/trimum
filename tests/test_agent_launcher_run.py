@@ -17,7 +17,9 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from trimum_core import sandbox_limits
+from trimum_core import agent_launcher
 from trimum_core.agent_launcher import (
+    LaunchResult,
     agent_log_dir,
     run_agent,
     usage_path_for,
@@ -662,3 +664,39 @@ with open(path, "w", encoding="utf-8") as fh:
 
         assert run.error == ""
         assert run.usage_reported is False
+
+
+class TestLaunchErrorNoProcess:
+    """launch.error 非空且 process is None 时 run_agent 不许触碰 process.pid"""
+
+    @pytest.mark.asyncio
+    async def test_launch_error_with_none_process_returns_error(self, tmp_path, monkeypatch):
+        """T1: fake 返回 LaunchResult(error='boom', process=None) ⇒ 不抛异常，run.error=='boom'"""
+        write_agent(tmp_path, "demo", USAGE_WRITER)
+
+        async def fake_launch(*a, **kw):
+            return LaunchResult(script=kw.get("script"), error="boom")
+
+        monkeypatch.setattr(agent_launcher, "launch_agent", fake_launch)
+
+        run = await run_agent("a1", "demo", base=tmp_path, cgroup=False)
+
+        assert run.error == "boom"
+        assert run.terminated is False
+        assert run.timed_out is False
+
+    @pytest.mark.asyncio
+    async def test_launch_no_error_no_process_returns_script_not_found(self, tmp_path, monkeypatch):
+        """T2: fake 返回 LaunchResult(error=None, process=None) ⇒ 既有 'agent script not found' 行为不回归"""
+        write_agent(tmp_path, "demo", USAGE_WRITER)
+
+        async def fake_launch(*a, **kw):
+            return LaunchResult(error=None, process=None)
+
+        monkeypatch.setattr(agent_launcher, "launch_agent", fake_launch)
+
+        run = await run_agent("a1", "demo", base=tmp_path, cgroup=False)
+
+        assert run.error == "agent script not found: demo"
+        assert run.terminated is False
+        assert run.timed_out is False

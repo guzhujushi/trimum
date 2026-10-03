@@ -547,6 +547,13 @@ async def run_agent(
         argv_for=argv_for,
     )
     process = launch.process
+    # launch.error 非空且 process is None ⇒ 直接返回错误，不触碰 process.pid
+    if process is None and launch.error:
+        return AgentRun(
+            launch=launch,
+            error=launch.error,
+            usage_path=usage_path, limits_state=limits_state, unit=unit,
+        )
     # script 不存在时 launch_agent 只登记（process is None 且无 error）⇒ 直接返回
     if process is None and not launch.error:
         launch = LaunchResult(script=script_path, error=f"agent script not found: {agent_type}")
