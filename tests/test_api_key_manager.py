@@ -82,3 +82,28 @@ def test_cli_key_lists_come_from_single_source():
     truth = llm_router.known_api_key_envs()
     assert tuple(health_mod._ENV_KEYS) == truth
     assert tuple(doctor_mod._ENV_KEYS) == truth
+
+
+def test_known_api_key_envs_matches_literal_contract():
+    """字面量契约：真源少一个名字 / 顺序变了都必须红（独立于 known_api_key_envs 自身）。"""
+    literal = (
+        "POLICY_LLM_API_KEY",
+        "POLICY_LLM_FALLBACK_API_KEY",
+        "PLANNER_LLM_API_KEY",
+        "PLANNER_LLM_FALLBACK_API_KEY",
+        "TRANSFORM_LLM_API_KEY",
+        "TRANSFORM_LLM_FALLBACK_API_KEY",
+        "EXPERIENCE_LLM_API_KEY",
+        "EXPERIENCE_LLM_FALLBACK_API_KEY",
+        "AGENT_LLM_API_KEY",
+        "AGENT_LLM_FALLBACK_API_KEY",
+        "TRIMUM_LLM_API_KEY",
+        "TRIMUM_LLM_FALLBACK_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "JIAOWOISAN_API_KEY",
+        "GROQ_API_KEY",
+        "KIMI_2.7_code_API_KEY",
+        "API_KEY",
+    )
+    assert llm_router.known_api_key_envs() == literal
+    assert tuple(llm_router.describe_api_keys()) == literal
