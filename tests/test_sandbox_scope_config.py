@@ -114,3 +114,22 @@ class TestAgentAllowWrite:
         cfg = SecurityConfig(path=cfg_path).load()
         assert (cfg._raw.get("agents") or {}) == {}
         assert cfg.get_agent_allow_write("probe") == []
+
+
+from trimum_core import sandbox_exec as sx  # noqa: E402
+
+
+class TestValidateScope:
+    """S6⑤：``validate_scope`` 文案（不读真机 ~/.trimum，全部指向 tmp）。"""
+
+    def test_skipped_message_has_no_space_between_label_and_里的路径(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg_config"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg_data"))
+        sx.reset_cache()
+        # manifest 的 sandbox 段用键 read 声明一个不存在的路径：必走 skipped 的 manifest 分支
+        manifest = {"sandbox": {"read": ["~/never_exists_dir_xyz"]}}
+        problems = sx.validate_scope("probe", manifest=manifest)
+        hit = [p for p in problems if "段里的路径" in p["message"]]
+        assert hit, f"分支没走到：{[p['message'] for p in problems]}"
+        assert not any("段 里的路径" in p["message"] for p in problems)

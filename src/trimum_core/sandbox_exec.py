@@ -1123,7 +1123,7 @@ def validate_scope(
             _add(
                 "error",
                 code,
-                f"{_SOURCE_LABEL[source]} 里的路径 {path} {what}，这一条不会生效",
+                f"{_SOURCE_LABEL[source]}里的路径 {path} {what}，这一条不会生效",
                 "删掉这条配置，或把路径改对（~ 会展开成 HOME）",
             )
         else:
