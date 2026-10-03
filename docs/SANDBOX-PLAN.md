@@ -747,7 +747,7 @@ python -m pytest tests/test_sandbox_exec.py -q                               # 6
 
 ### 10.8 未纳入本轮 & 下一步
 
-- `TaskRegistry.SHELL` 派生的子进程（走 `spawn_exec`）**本轮未收**（TODO 只列 6+1 个点）—— 列为下一小步。
+- 旧名 `TaskRegistry.SHELL` 在当前代码里**查无对应物**（`git log -S "TaskRegistry" -- src tests` 零命中；本仓库为浅克隆，更早历史不可考）—— 第 8 个 spawn 点是否仍有遗留，见 `TODO.md` §1「第 8 个 spawn 点收口」；现存仍未走 `sandbox_exec.plan_for` 的派生点有 `mcp_client.MCPClient.start`（`mcp_client.py:561`）等。
 - S3 seccomp 三档 / S4 子 Agent 走 systemd transient / S5 可选档（helper / Docker / bwrap profile）**不变**。
 - `trm status` / `trm doctor` 还没把沙箱状态摆到台面上（眼下只能从审计与日志看）—— 可随后补。
 
@@ -829,7 +829,7 @@ cd /tmp/trm-s3 && /home/guzhujushi/trimum/.venv/bin/python scripts/accept_s3.py
 ### 11.7 未纳入本轮 & 下一步
 
 - 白名单模式的 `allow` 是**运维口子**（`security.yaml: sandbox.seccomp_allow`），**不是包口子**；`WHITELIST_BASELINE` 只够跑最小 shell / 静态小二进制，Python 与动态链接程序要显式补齐 syscall。
-- `TaskRegistry.SHELL` 派生的子进程仍未收口（S2 起挂着）。
+- `TaskRegistry.SHELL` 这个旧名已查无对应物（同上）；第 8 个 spawn 点收口状态见 §10.8。
 - `trm status` / `trm doctor` 还没把 Landlock + seccomp 状态摆上台面。
 - S1 的 `SystemCallFilter`（管 **daemon 自己**）与 S3（管**子进程**）是**两套**，别混。
 
