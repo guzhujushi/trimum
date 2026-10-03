@@ -634,3 +634,25 @@ class TestRemove:
 
         assert pkg_install.untrusted_names() == set()
         assert not (home / "agents" / "outside").exists()
+
+
+def test_default_index_url_follows_trimum_home_lazily(monkeypatch, tmp_path):
+    """决策 7：默认目录索引惰性解析到 ``<TRIMUM_HOME>/packages/index.json5``。"""
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path / "home"))
+
+    url = pkg_install.default_index_url()
+
+    assert url.endswith("home/packages/index.json5")
+    assert Path(url).resolve().is_relative_to(tmp_path.resolve())
+
+
+def test_install_defaults_to_local_index_and_reports_the_path(monkeypatch, tmp_path):
+    """默认走本地目录：目录索引文件不存在时报本地路径（非 http 失败、非 AttributeError）。"""
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv(pkg_install.INDEX_ENV, raising=False)
+
+    with pytest.raises(TrimumError) as exc:
+        pkg_install.install_from_index("nope")
+
+    expected = str(Path(tmp_path) / "home" / "packages" / "index.json5")
+    assert expected in str(exc.value)

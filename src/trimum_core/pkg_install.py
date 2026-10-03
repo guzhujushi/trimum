@@ -50,8 +50,11 @@ TYPE_ROOTS: dict[str, str] = {
     "workflow": "workflows",
     "skill": "skills",
 }
-#: 官方目录（占位：站点上线前用 ``--index`` 或 ``TRIMUM_PKG_INDEX`` 指到本地目录）
-DEFAULT_INDEX_URL = "https://trimum.dev/packages/index.json5"
+#: 默认目录索引：``<TRIMUM_HOME>/packages/index.json5``（站点上线前默认走本地）
+DEFAULT_INDEX_RELATIVE = ("packages", "index.json5")
+
+def default_index_url() -> str:
+    return str(trimum_path(*DEFAULT_INDEX_RELATIVE))
 INDEX_ENV = "TRIMUM_PKG_INDEX"
 #: 下载缓存（包不进缓存目录就不落地到类型根，避免「下了一半」的中间态进业务目录）
 CACHE_DIR = ("cache", "pkgs")
@@ -362,7 +365,7 @@ def install_from_index(
     for the untrusted path, in which case the index is accepted as untrusted too
     (and so is whatever package it points at).
     """
-    source = index_source or os.environ.get(INDEX_ENV) or DEFAULT_INDEX_URL
+    source = index_source or os.environ.get(INDEX_ENV) or default_index_url()
     index_result = pkg_index.verify_index(
         pkg_index.parse_container(read_source_text(source)), root_path=root_path
     )
@@ -525,7 +528,8 @@ def remove_package(name: str, *, dry_run: bool = False) -> dict[str, Any]:
 
 __all__ = [
     "CACHE_DIR",
-    "DEFAULT_INDEX_URL",
+    "DEFAULT_INDEX_RELATIVE",
+    "default_index_url",
     "INDEX_ENV",
     "INSTALL_FORMAT",
     "TYPE_ROOTS",
