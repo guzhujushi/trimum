@@ -201,7 +201,7 @@ chrome --headless=new --remote-debugging-port=9222 --remote-allow-origins=* \
 | Phase 3 | 弹性沙箱体系（Security + Behavior + System Monitor + 三重记忆 + Agent Socket + Workflow v2） | ✅ |
 | Phase 3.5 | Token 管理 + 结构化审计 | ✅ |
 | 生态四层（E0–E7） | L0 环境清单 `trm env` / L1 MCP / L2 Agent Skills / L3 workflow 目录 | ⏳ E1–E4 + W1 已实现，E5 官方分发渠道待做 |
-| Phase 4 | Landlock LSM + Namespace + Seccomp 沙箱 | 📝 设计 |
+| Phase 4 | Landlock LSM + Namespace + Seccomp 沙箱 | ✅ 已实现（判据：`trm status` 的 sandbox 行；证据：`docs/SANDBOX-PLAN.md` S1–S6） |
 
 ---
 
