@@ -1,0 +1,138 @@
+# ================================================================
+# trimum — .gitignore（只排除不需要上传的，其余全保留）
+# ================================================================
+
+# ---- Python build artifacts ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+
+# ---- Python tool caches ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+
+# ---- Virtual envs ----
+.venv/
+venv/
+**/.trimum-env/
+
+# ---- IDE / Editor ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~lock*
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Databases (user data, not schema) ----
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Secrets / credentials ----
+.env
+.env.*
+*.env.local
+**/secrets/
+*.key
+*.pem
+*.crt.private
+
+# ---- Generated / temp ----
+tmp/
+tmp_*
+generated/
+*.generated.*
+.sonar/
+
+# ---- Large binaries ----
+*.iso
+*.img
+*.qcow2
+*.vdi
+*.vmdk
+*.box
+*.pkg
+*.dmg
+*.exe
+*.msi
+*.bin
+*.tar.gz.enc
+
+# ---- Theme lock/preview images (may contain faces) ----
+desktop/themes/*/unlock.png
+desktop/themes/*/preview.png
+desktop/themes/*/preview-unlock.png
+
+# ---- Git / patches ----
+*.orig
+*.rej
+*.patch.tmp
+
+# ---- Backups ----
+*.backup*
+*.bak
+*.old
+
+# ---- Arch Linux packaging ----
+pkg/
+*.pkg.tar.zst
+
+# ---- Node / JS (if used) ----
+node_modules/
+*.js.map
+
+# ---- Analysis dumps ----
+issues.csv
+*.issues.csv
+
+# ---- AI / LLM cache ----
+embeddings-cache/
+chroma-data/
+
+# temp server files
+._*
+
+# ---- 本地草稿 / 任务产物（不入库） ----
+codex-tasks/
+*.bak_*
+HANDOFF.md
+
+# ================================================================
+# 私人文档 / 个人基础设施（不提交，2026-09-25 定）
+#   STATUS.md / TODO.md      —— 个人进度与待办
+#   docs/OPERATIONS.md       —— 真机 / 云服务器 / 隧道 / frp 运维细节
+#   TODO-aliyun.md           —— 阿里云 VPS 待办（IP / 拓扑 / 端口 / 决策点）
+# 说明：这几份内容里有个人与主机信息，不入库；仅停止跟踪，本地文件保留。
+# ================================================================
+STATUS.md
+TODO.md
+docs/OPERATIONS.md
+TODO-aliyun.md
+
+# 机器本地 codex 配置（沙箱/审批策略随机器而异）
+.codex/
+docs/QWEN-PROMPTS.md
+
+# 机器/个人指令文件（含真机 IP / 拓扑线索，不入库，2026-10-03 定）
+AGENTS.md

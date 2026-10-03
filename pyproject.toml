@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trimum-core"
+version = "0.5.0"
+description = "trimum Core Daemon - system-level AI agent runtime"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "aiosqlite>=0.20",
+    "structlog>=24.0",
+    "psutil>=5.9",
+    "httpx>=0.27",
+    "json5>=0.9",
+    "cryptography>=42",
+    "rich>=13.0",
+]
+
+[project.scripts]
+trmd = "trimum_core.main:run"
+trm = "trimum_core.cli:main"
+trimum-client = "trimum_core.trimum_client:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.sonar]
+sourceEncoding = "UTF-8"
+sonar.exclusions = "**/*.webp,**/*.jpg,**/*.png,**/desktop/**"
+sonar.css.exclusions = "**/waybar/**"
+sonar.python.version = "3.12"

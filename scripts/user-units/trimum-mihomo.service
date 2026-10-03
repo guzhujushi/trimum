@@ -1,0 +1,13 @@
+[Unit]
+Description=trimum: mihomo (Clash Meta core) for the host proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/bin/mihomo -d %h/.config/mihomo
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

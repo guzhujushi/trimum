@@ -1,0 +1,11 @@
+[Unit]
+Description=每天检查一次 Let's Encrypt 证书到期 / 续期风险
+
+[Timer]
+OnCalendar=*-*-* 06:30:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=cert-watch.service
+
+[Install]
+WantedBy=timers.target

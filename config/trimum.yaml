@@ -1,0 +1,79 @@
+# AI Native trimum — trimum Core 配置
+# 版本：v1.1
+
+# 服务配置
+server:
+  host: "127.0.0.1"
+  port: 3737
+  workers: 2
+
+# 日志
+logging:
+  level: info  # debug | info | warn | error
+  file: "/var/log/trmd/trimum.log"
+  format: json  # json | text
+
+# 数据库
+database:
+  # Phase 2: SQLite（轻量）
+  url: "sqlite:///var/lib/trmd/trimum.db"
+  # Phase 3+: PostgreSQL
+  # url: "postgresql://trimum:password@localhost:5432/trimum"
+
+# 缓存
+cache:
+  type: memory  # memory | redis
+  redis_url: "redis://localhost:6379/0"
+
+# Agent 管理
+agent:
+  # 默认生命周期
+  default_timeout_seconds: 300
+  max_concurrent_agents: 10
+
+  # 热 Agent 池（始终运行，等待任务）
+  hot_pool:
+    enabled: false
+    max_size: 3
+    agents: []
+
+  # 进程隔离
+  isolation:
+    type: process  # process | container
+    container_image: "trimum-agent:latest"
+
+# 事件总线
+event_bus:
+  type: memory  # memory | redis | nats
+  redis_channel: "trimum:events"
+
+# 策略
+policy:
+  file: "/etc/trimum/policy.yaml"
+  # 是否启用静态策略检查
+  static_check: true
+  # 是否启用 AI 辅助决策（邀请 Security Agent 参与）
+  ai_assist: false
+
+# Tool Gateway
+tool_gateway:
+  allowed_tools:
+    - shell
+    - git
+    - docker
+    - systemctl
+    - journalctl
+  # 沙箱执行命令
+  sandbox_command: "docker run --rm -i trimum-sandbox"
+
+# 知识检索
+knowledge:
+  enabled: false
+  vector_db_url: ""
+  embedding_model: ""
+
+# 审计
+audit:
+  enabled: true
+  storage: database  # database | file
+  file_path: "/var/log/trmd/audit.log"

@@ -1,0 +1,11 @@
+[Unit]
+Description=Let's Encrypt 证书到期 / 续期风险检查（cert_watch.sh）
+Documentation=file:/usr/local/bin/cert_watch.sh --help
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cert_watch.sh --quiet
+Nice=10
+# 告警状态落在 /var/lib/cert-watch/alert.txt，由 /etc/update-motd.d/99-cert-watch 展示

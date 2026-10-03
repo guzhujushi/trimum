@@ -1,0 +1,225 @@
+"""Agent Runtime — sub-agent process lifecycle manager.
+
+职责：
+- 只负责子 Agent 进程的开/关信号
+- 不参与业务逻辑，不决定"做什么"
+- 通过 Unix Socket 与子 Agent 通信（start/stop）
+- 通过 Event Bus 广播状态变更
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any, Optional
+
+from .agent_socket import (
+    AgentSocketServer,
+    AgentSocketClient,
+    SocketMessage,
+    MSG_START,
+    MSG_STOP,
+    MSG_STATUS,
+)
+from .agent_launcher import launch_agent, terminate_process
+from .event_bus import EventBus, AGENT_STATUS_CHANGED
+from .models import EventSeverity, SystemEvent, TRMErrorCode, TrimumError
+
+log = logging.getLogger("trimum_core.agent_runtime")
+
+
+class AgentRuntime:
+    """Manages sub-agent process lifecycle.
+
+    - start_agent(agent_id, config): starts sub-agent process + Socket channel
+    - stop_agent(agent_id): sends stop signal via Socket, cleans up
+    - Publishes status changes to Event Bus
+    - Listens on Event Bus for signals from Workflow Engine
+    - Registers agent session in ContextManager on startup
+    """
+
+    def __init__(
+        self,
+        socket_path: str,
+        event_bus: EventBus,
+        context_manager: Optional[Any] = None,
+        max_agents: int = 10,
+        agents_root: Optional[str] = None,
+    ) -> None:
+        self._socket_server = AgentSocketServer(socket_path)
+        self._event_bus = event_bus
+        self._context_manager = context_manager
+        self._max_agents = max_agents
+        self._socket_path = socket_path
+        self._agents_root = agents_root
+        self._agents: dict[str, asyncio.subprocess.Process] = {}
+        self._stopped = False
+        self._event_task: Optional[asyncio.Task] = None
+
+        # Register socket handlers
+        self._socket_server.register_handler(MSG_STATUS, self._handle_status)
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    async def start(self) -> None:
+        """Start the socket server and begin listening for events."""
+        await self._socket_server.start()
+        # Subscribe to Event Bus for start/stop signals from Workflow Engine
+        self._event_task = asyncio.create_task(self._event_loop())
+        log.info("AgentRuntime started")
+
+    async def stop(self) -> None:
+        """Stop all agents and clean up."""
+        self._stopped = True
+        if self._event_task:
+            self._event_task.cancel()
+            try:
+                await self._event_task
+            except asyncio.CancelledError:
+                pass
+        # Stop all managed agents
+        for agent_id in list(self._agents.keys()):
+            await self.stop_agent(agent_id)
+        await self._socket_server.stop()
+        log.info("AgentRuntime stopped")
+
+    # ------------------------------------------------------------------
+    # Agent lifecycle
+    # ------------------------------------------------------------------
+
+    async def start_agent(
+        self,
+        agent_id: str,
+        agent_type: str,
+        config: dict | None = None,
+    ) -> bool:
+        """Start a sub-agent process and open Socket channel.
+
+        Sub-agent script location: ~/.local/share/trimum/agents/{type}/main.py
+
+        Returns True if started successfully.
+
+        Raises:
+            TrimumError: TRM-1001 if max agents reached or agent already running
+        """
+        if len(self._agents) >= self._max_agents:
+            raise TrimumError(
+                TRMErrorCode.RUNTIME_INIT_FAILED,
+                message=f"Max agents reached ({self._max_agents})",
+            )
+
+        if agent_id in self._agents:
+            raise TrimumError(
+                TRMErrorCode.AGENT_ALREADY_EXISTS,
+                message=f"Agent {agent_id} already running",
+            )
+
+        # 真实 spawn：脚本存在才起进程，并把 PID 绑到 Socket 通道
+        launch = await launch_agent(
+            agent_id,
+            agent_type,
+            base=self._agents_root,
+            socket_path=self._socket_path,
+        )
+        if launch.error is not None:
+            raise TrimumError(
+                TRMErrorCode.RUNTIME_INIT_FAILED,
+                message=launch.error,
+            )
+        self._agents[agent_id] = launch.process  # None = 未安装脚本，仅登记
+
+        # Register session in ContextManager (if available)
+        if self._context_manager is not None:
+            try:
+                metadata = {"agent_type": agent_type, "config": config or {}}
+                await self._context_manager.register_session(agent_id, agent_type, metadata=metadata)
+            except Exception:
+                log.warning("Failed to register session for %s", agent_id)
+
+        # Publish status to Event Bus
+        await self._event_bus.publish(SystemEvent(
+            event_type=AGENT_STATUS_CHANGED,     # 精确等于 "agent.status_changed"
+            source="agent_runtime",
+            severity=EventSeverity.INFO,
+            payload={
+                "agent_id": agent_id,
+                "status": "started",
+                "config": config or {},
+            },
+        ))
+        log.info("Agent %s started (type=%s)", agent_id, agent_type)
+        return True
+
+    async def stop_agent(self, agent_id: str) -> bool:
+        """Stop a sub-agent process.
+
+        Sends stop signal via Socket, waits for clean shutdown.
+
+        Raises:
+            TrimumError: TRM-3001 if agent not found
+        """
+        if agent_id not in self._agents:
+            raise TrimumError(
+                TRMErrorCode.AGENT_NOT_FOUND,
+                message=f"Agent {agent_id} not found",
+            )
+
+        # 先给 Socket 机会优雅退出，再兜底终止进程
+        process = self._agents.get(agent_id)
+        await terminate_process(process)
+
+        del self._agents[agent_id]
+
+        # Publish status to Event Bus
+        await self._event_bus.publish(SystemEvent(
+            event_type=AGENT_STATUS_CHANGED,     # 精确等于 "agent.status_changed"
+            source="agent_runtime",
+            severity=EventSeverity.INFO,
+            payload={
+                "agent_id": agent_id,
+                "status": "stopped",
+            },
+        ))
+        log.info("Agent %s stopped", agent_id)
+        return True
+
+    async def get_status(self, agent_id: str) -> str | None:
+        """Get current status of an agent."""
+        if agent_id in self._agents:
+            return "running"
+        return None
+
+    def list_agents(self) -> list[str]:
+        """List all managed agent IDs."""
+        return list(self._agents.keys())
+
+    # ------------------------------------------------------------------
+    # Socket message handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_status(self, message: SocketMessage) -> None:
+        """Handle status update from a sub-agent."""
+        status = message.payload.get("status", "unknown")
+        await self._event_bus.publish(SystemEvent(
+            event_type=AGENT_STATUS_CHANGED,     # 精确等于 "agent.status_changed"
+            source=f"agent:{message.agent_id}",
+            severity=EventSeverity.INFO,
+            payload={
+                "agent_id": message.agent_id,
+                "status": status,
+                "detail": message.payload,
+            },
+        ))
+
+    # ------------------------------------------------------------------
+    # Event Bus loop
+    # ------------------------------------------------------------------
+
+    async def _event_loop(self) -> None:
+        """Listen on Event Bus for start/stop signals from Workflow Engine."""
+        # Stub: in Phase 3 this will subscribe to task.assigned events
+        # and route them to the appropriate agent via Socket.
+        while not self._stopped:
+            await asyncio.sleep(1)

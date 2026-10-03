@@ -1,0 +1,23 @@
+# trimum Core — Ubuntu 默认配置
+# Install location: /opt/trimum/config/config.yaml
+
+core:
+  host: "127.0.0.1"
+  port: 8321
+  socket_path: "/run/trimum/trimum.sock"
+  workers: 1
+
+logging:
+  level: info
+  file: "/var/log/trimum/trimum.log"
+  format: json
+
+context:
+  db_path: "/var/lib/trimum/context.db"
+
+policy:
+  path: "/opt/trimum/config/policy.yaml"
+
+agent_manager:
+  max_agents: 10
+  health_check_interval: 30
