@@ -36,6 +36,13 @@ async def run_startup(app) -> None:
         await handler()
 
 
+async def run_shutdown(app) -> None:
+    handlers = list(getattr(app.router, "on_shutdown", []))
+    assert handlers, "shutdown handler 未注册"
+    for handler in handlers:
+        await handler()
+
+
 async def teardown(app, state) -> None:
     if state.learning_task is not None:
         state.learning_task.cancel()
@@ -127,6 +134,38 @@ class TestWorkflowRuntimeWiring:
         paths = {route.path for route in app.routes}
         assert "/api/workflows" in paths
         assert "/api/workflows/runs" in paths
+
+
+class TestSystemMonitorWiring:
+    """M1：daemon 启动必须把 SystemMonitor 定时采集任务真正跑起来，shutdown 必须把它收掉。"""
+
+    @pytest.mark.asyncio
+    async def test_startup_starts_the_system_monitor(self, tmp_path):
+        app = create_app(build_config(tmp_path))
+        state = app.state.trimum
+        try:
+            await run_startup(app)
+
+            assert state.system_monitor is not None
+            assert isinstance(state.system_monitor_task, asyncio.Task)
+            assert not state.system_monitor_task.done()
+        finally:
+            await teardown(app, state)
+
+    @pytest.mark.asyncio
+    async def test_shutdown_stops_the_system_monitor(self, tmp_path):
+        app = create_app(build_config(tmp_path))
+        state = app.state.trimum
+        try:
+            await run_startup(app)
+            assert state.system_monitor_task is not None
+
+            await run_shutdown(app)
+            assert state.system_monitor_task.done()
+        finally:
+            if state.system_monitor_task is not None and not state.system_monitor_task.done():
+                state.system_monitor_task.cancel()
+            await teardown(app, state)
 
 
 class TestHealthVersion:

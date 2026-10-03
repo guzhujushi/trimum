@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 try:
     import psutil
@@ -53,7 +53,7 @@ class SystemMonitor:
     Usage::
 
         monitor = SystemMonitor(event_bus)
-        monitor.set_event_callback(lambda event_type, payload: event_bus.emit(...))
+        await event_bus.publish(SystemEvent(...))
         await monitor.collect()  # 单次采集
         await monitor.start_collecting(interval=30)  # 定时采集
     """
