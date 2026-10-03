@@ -37,15 +37,18 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import json
 import logging
 import time
 import uuid
 from collections import deque
+from pathlib import Path
 from typing import Any, Coroutine
 
 from pydantic import BaseModel, Field
 
 from .event_bus import EventBus
+from .paths import trimum_path
 from .models import (
     ExecuteRequest,
     SourceType,
@@ -230,6 +233,7 @@ class WorkflowRuntime:
         allow_concurrent_same_step: bool = False,
         run_window_seconds: float = RUN_WINDOW_SECONDS,
         max_runs_per_window: int = MAX_RUNS_PER_WINDOW,
+        runs_path: Path | None = None,
     ) -> None:
         self._bus = event_bus
         self._gateway = gateway
@@ -241,6 +245,7 @@ class WorkflowRuntime:
         self._allow_concurrent = allow_concurrent_same_step
         self._run_window = max(0.0, float(run_window_seconds))
         self._max_runs_per_window = max(1, int(max_runs_per_window))
+        self._runs_path = runs_path or trimum_path("workflow-runs.jsonl")
         self._run_times: dict[str, deque[float]] = {}
 
         self._workflows: dict[str, RegisteredWorkflow] = {}
@@ -676,6 +681,8 @@ class WorkflowRuntime:
                 "workflow_runtime.run_failed id=%s run=%s error=%s",
                 workflow.id, run_id, exc,
             )
+        self._persist_run(record)
+
         # 收尾事件在「仍然算在跑」的时候发：监听 workflow.finished 的 workflow
         # 会被这一发命中，此时熔断/并发闸门还在，环路走不出第二步。
         try:
@@ -695,6 +702,48 @@ class WorkflowRuntime:
         if cancelled:
             raise asyncio.CancelledError()
         return record
+
+    def _persist_run(self, record: WorkflowRunRecord) -> None:
+        """把一次 run 的记录追加到 JSONL。观测失败绝不影响 run 返回。"""
+        try:
+            path = Path(self._runs_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record.to_dict(), ensure_ascii=False, default=str) + "\n")
+        except Exception as exc:  # noqa: BLE001 - 观测失败不许让业务失败
+            log.warning("workflow_runtime.persist_failed run=%s error=%s", record.run_id, exc)
+
+    def _iter_persisted_runs(self) -> list[dict[str, Any]]:
+        """读 JSONL 全文，坏行/空行跳过，按文件顺序（旧→新）返回。"""
+        path = Path(self._runs_path)
+        if not path.exists():
+            return []
+        runs: list[dict[str, Any]] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict) and item.get("run_id"):
+                runs.append(item)
+        return runs
+
+    def load_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """读 JSONL 尾部 ``limit`` 行，坏行跳过。"""
+        return self._iter_persisted_runs()[-max(1, int(limit)):]
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        """先查内存（进行中的 run 也能查到），再倒序扫整个落盘文件。"""
+        for record in reversed(self._runs):
+            if record.run_id == run_id:
+                return record.to_dict()
+        for item in reversed(self._iter_persisted_runs()):
+            if item.get("run_id") == run_id:
+                return item
+        return None
 
     @staticmethod
     def _project_nodes(

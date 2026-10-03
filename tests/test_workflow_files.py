@@ -191,3 +191,105 @@ class TestRoundtrip:
             assert wf_def.id == "blog-deploy"
             assert len(wf_def.nodes) >= 2
             assert len(wf_def.edges) >= 1
+
+class TestRunPersistence:
+    """run 记录落盘 + 读取（G-2）：只在 tmp 下，不碰真机 ~/.trimum。"""
+
+    def test_run_persists_and_loads(self, tmp_path):
+        import asyncio
+
+        from trimum_core.event_bus import EventBus
+        from trimum_core.workflow_runtime import WorkflowRuntime
+
+        yaml_file = tmp_path / "wf.yaml"
+        yaml_file.write_text(SIMPLE_YAML, encoding="utf-8")
+        runs_path = tmp_path / "workflow-runs.jsonl"
+        bus = EventBus()
+        runtime = WorkflowRuntime(bus, runs_path=runs_path)
+        workflow = WorkflowDefV2.load_yaml(yaml_file)
+        runtime.register(workflow, source="file")
+        record = asyncio.run(runtime.run_now(workflow.id))
+
+        runs = runtime.load_runs()
+        assert any(r.get("run_id") == record.run_id for r in runs)
+        got = runtime.get_run(record.run_id)
+        assert got is not None
+        assert got["run_id"] == record.run_id
+        assert got["status"] == record.status
+        assert runs_path.exists()
+
+    def test_load_runs_skips_bad_lines(self, tmp_path):
+        import json as _json
+        from trimum_core.event_bus import EventBus
+        from trimum_core.workflow_runtime import WorkflowRuntime
+
+        runs_path = tmp_path / "workflow-runs.jsonl"
+        good = _json.dumps({"run_id": "wf-x#all-0001", "status": "completed"})
+        # 三行：截半的坏行 + 纯垃圾行 + 一条正常行；前面再垫一条正常行
+        truncated = '{"run_id": "wf-x#all-0001", "status": "co'
+        runs_path.write_text(
+            '{"run_id": "wf-x#all-0000", "status": "completed"}\n'
+            + truncated + "\n"
+            + 'this is not json at all\n'
+            + good + "\n",
+            encoding="utf-8",
+        )
+        runtime = WorkflowRuntime(EventBus(), runs_path=runs_path)
+        runs = runtime.load_runs()
+        assert [r["run_id"] for r in runs] == [
+            "wf-x#all-0000",
+            "wf-x#all-0001",
+        ]
+
+    def test_cli_status_unknown_run_nonzero(self, tmp_path, monkeypatch):
+        from trimum_core.cli import main
+
+        # 把 TRIMUM_HOME 指到 tmp，status 去空的 <tmp>/workflow-runs.jsonl 找记录
+        monkeypatch.setenv("TRIMUM_HOME", str(tmp_path))
+        rc = main(["workflow", "status", "nope#all-0000"])
+        assert rc != 0
+
+
+class TestGetRunLooksPastTail:
+    """回归：get_run 必须能查到落盘文件里早于尾部的 run（CLI 一次性进程场景）。"""
+
+    def test_get_run_hits_non_tail_persisted_run(self, tmp_path):
+        import json as _json
+        from trimum_core.event_bus import EventBus
+        from trimum_core.workflow_runtime import WorkflowRuntime
+
+        runs_path = tmp_path / "workflow-runs.jsonl"
+        runs_path.write_text(
+            _json.dumps({"run_id": "a#all-0001", "status": "completed"}) + "\n"
+            + _json.dumps({"run_id": "b#all-0002", "status": "completed"}) + "\n",
+            encoding="utf-8",
+        )
+        runtime = WorkflowRuntime(EventBus(), runs_path=runs_path)
+
+        got = runtime.get_run("a#all-0001")
+        assert got is not None
+        assert got["run_id"] == "a#all-0001"
+
+        # 钉死 load_runs 的 limit 语义没被改：limit=1 只回最后一行
+        tail = runtime.load_runs(limit=1)
+        assert [r["run_id"] for r in tail] == ["b#all-0002"]
+
+    def test_cli_status_finds_earlier_persisted_run(self, tmp_path, monkeypatch):
+        import json as _json
+        from trimum_core.cli import main
+        from trimum_core.paths import trimum_path
+
+        monkeypatch.setenv("TRIMUM_HOME", str(tmp_path))
+        runs_file = trimum_path("workflow-runs.jsonl")
+        runs_file.parent.mkdir(parents=True, exist_ok=True)
+        runs_file.write_text(
+            _json.dumps({"run_id": "earlier#all-0001", "status": "completed"}) + "\n"
+            + _json.dumps({"run_id": "later#all-0002", "status": "completed"}) + "\n",
+            encoding="utf-8",
+        )
+
+        rc = main(["workflow", "status", "earlier#all-0001"])
+        assert rc == 0
+
+        rc_unknown = main(["workflow", "status", "missing#all-9999"])
+        assert rc_unknown != 0

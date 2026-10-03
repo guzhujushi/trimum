@@ -133,10 +133,11 @@ def _build_runtime(root: str | None = None, *, include_builtin: bool = True):
     CLI 是一次性进程，这里不做常驻：``list`` 只读注册表，``run`` 才真的执行。
     """
     from trimum_core.event_bus import EventBus
+    from trimum_core.paths import trimum_path
     from trimum_core.workflow_runtime import WorkflowRuntime
 
     bus = EventBus()
-    runtime = WorkflowRuntime(bus)
+    runtime = WorkflowRuntime(bus, runs_path=trimum_path("workflow-runs.jsonl"))
     runtime.register_all(root, include_builtin=include_builtin)
     return runtime, bus
 
@@ -179,15 +180,37 @@ def handler(args: argparse.Namespace) -> int:
         return _handle_submit(args)
 
     if command in {"status", "log"}:
-        data = {
-            "run_id": args.run_id,
-            "status": "unknown",
-            "message": "workflow run state is not persisted by the local CLI",
-        }
-        emit(args, data)
-        return 0
+        return _handle_run_lookup(args, command)
 
     return _show_help(args)
+
+
+def _handle_run_lookup(args: argparse.Namespace, command: str) -> int:
+    """``status`` / ``log``：从落盘的 run 记录里取真数据。"""
+    runtime, _ = _build_runtime(getattr(args, "root", None), include_builtin=True)
+    record = runtime.get_run(args.run_id)
+    if record is None:
+        return fail(f"unknown run: {args.run_id}")
+    if command == "status":
+        emit(args, record, _human_status)
+    else:
+        data = {"run_id": record.get("run_id", args.run_id), "nodes": record.get("nodes", [])}
+        emit(args, data, _human_log)
+    return 0
+
+
+def _human_status(data: dict) -> None:
+    nodes = data.get("nodes", [])
+    print(f"run {data.get('run_id')} status={data.get('status')} "
+          f"duration={data.get('duration')}s")
+    for node in nodes:
+        print(f"  {node['node_id']:<18} {node['status']:<10} "
+              f"{node['duration']}s")
+
+
+def _human_log(data: dict) -> None:
+    for node in data.get("nodes", []):
+        print(f"{node['node_id']} {node['status']} {node['duration']}")
 
 
 def _handle_run(args: argparse.Namespace) -> int:
