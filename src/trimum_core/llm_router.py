@@ -46,12 +46,17 @@ env 约定（全部落在 .env，见 docs/LLM-ROUTING.md）
 from __future__ import annotations
 
 import asyncio
+import fcntl
+import json
+import math
 import logging
 import os
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, TypeVar
+
+from .paths import trimum_path
 
 log = logging.getLogger("trimum_core.llm_router")
 
@@ -134,6 +139,7 @@ _T = TypeVar("_T")
 # 免得为了验证「9 次/分」真的等 6.7 秒。
 _sleep: Callable[[float], None] = time.sleep
 _async_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+_clock: Callable[[], float] = time.time  # 可注入：单测里换成冻结钟，保证预扣的确定性
 
 
 class LlmCallError(RuntimeError):
@@ -216,6 +222,97 @@ class TokenBucket:
             return -self._tokens / self._rate
 
 
+class FileTokenBucket:
+    """\u8de8\u8fdb\u7a0b\u300c\u6bcf\u5206\u949f N \u6b21\u300d\u4ee4\u724c\u6876\uff1a\u914d\u989d\u843d\u76d8\u5230 ``trimum_path("llm-throttle.json")``\u3002
+
+    \u5951\u7ea6\u4e0e :meth:`TokenBucket.consume` \u5b8c\u5168\u4e00\u81f4 \u2014\u2014 \u8fd4\u56de\u300c\u8fd8\u8981\u7b49\u591a\u5c11\u79d2\u300d\u4e14**\u9884\u6263**\u8fd9\u4e00
+    \u6b21\u914d\u989d\u3002\u533a\u522b\u5728\u72b6\u6001\u662f\u5171\u4eab\u7684\uff1adaemon \u4e0e CLI \u5404\u8d77\u4e00\u4e2a\u8fdb\u7a0b\u65f6\uff0c\u4e24\u4efd\u9884\u7b97\u5408\u5e76\u6210\u4e00\u4efd\uff0c
+    \u4e0d\u518d\u5404\u5360 9 \u6b21/\u5206\u3002\u4e32\u884c\u5316\u9760 ``fcntl.flock``\uff08asyncio / threading \u9501\u8de8\u4e0d\u4e86\u8fdb\u7a0b\uff09\u3002
+    """
+
+    def __init__(
+        self,
+        rpm: int,
+        clock: Callable[[], float] = time.time,
+        path: Optional[str] = None,
+        key: str = "default",
+        burst: float = 1.0,
+    ) -> None:
+        self.rpm = max(0, int(rpm))
+        self._rate = self.rpm / 60.0
+        self._capacity = max(1.0, float(burst))   # 与 TokenBucket 同口径：容量 = 1 个 burst
+        self._clock = clock
+        self._path = path or str(trimum_path("llm-throttle.json"))
+        self._key = key
+
+    def _load(self, fd: int) -> dict:
+        """读取共享状态：不存在/损坏/非 dict 都当空状态，绝不抛。"""
+        size = os.fstat(fd).st_size
+        data = b""
+        if size > 0:
+            os.lseek(fd, 0, os.SEEK_SET)
+            try:
+                data = os.read(fd, min(size, 1 << 20))
+            except OSError:
+                data = b""
+        if not data.strip():
+            return {}
+        try:
+            loaded = json.loads(data.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    def _save(self, fd: int, state: dict) -> None:
+        blob = json.dumps(state).encode("utf-8")
+        os.fsync(fd)
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, blob)
+        os.fsync(fd)
+
+    def _coerce_entry(self, entry: Any, now: float) -> tuple[float, float]:
+        """把一条记录读成 ``(tokens, ts)``；字段缺失/类型不对/NaN 都当「空条目」重建，绝不抛。"""
+        if not isinstance(entry, dict):
+            return self._capacity, now
+        try:
+            tokens = float(entry.get("tokens", self._capacity))
+            last = float(entry.get("ts", now))
+        except (TypeError, ValueError):
+            return self._capacity, now
+        if not math.isfinite(tokens) or not math.isfinite(last):
+            return self._capacity, now
+        return tokens, last
+
+    def consume(self) -> float:
+        if self._rate <= 0:
+            return 0.0
+        try:
+            return self._consume_locked()
+        except OSError as exc:
+            # 落盘层不可用（路径是目录 / 权限 / 磁盘满）⇒ 降级放行：限流不该让调用失败。
+            log.warning("llm throttle: 状态文件不可用（%s），本次放行（fail-open）", exc)
+            return 0.0
+
+    def _consume_locked(self) -> float:
+        parent = os.path.dirname(self._path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        fd = os.open(self._path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            state = self._load(fd)
+            now = self._clock()
+            tokens, last = self._coerce_entry(state.get(self._key), now)
+            tokens = min(self._capacity, tokens + max(0.0, now - last) * self._rate)
+            tokens -= 1.0
+            state[self._key] = {"tokens": tokens, "ts": now}
+            self._save(fd, state)
+            return 0.0 if tokens >= 0 else -tokens / self._rate
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
 # ── 进程内状态：每个 provider 一个桶、一份冷却 ────────────────────────
 _buckets: dict[str, TokenBucket] = {}
 _cooldowns: dict[str, float] = {}
@@ -227,6 +324,9 @@ _stats: dict[str, Any] = {
     "rate_limit_seconds": 0.0,
     "cooldowns": 0,
     "skipped_cooling": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
 }
 
 
@@ -253,6 +353,14 @@ def stats() -> dict[str, Any]:
             "buckets": {key: bucket.rpm for key, bucket in _buckets.items()},
             "cooling": cooling,
         }
+
+
+def record_usage(prompt_tokens: int, completion_tokens: int) -> None:
+    """累加一次响应的 token 用量（prompt + completion → total）。"""
+    with _registry_lock:
+        _stats["prompt_tokens"] += int(prompt_tokens)
+        _stats["completion_tokens"] += int(completion_tokens)
+        _stats["total_tokens"] += int(prompt_tokens) + int(completion_tokens)
 
 
 def set_cooldown(target: LlmTarget, seconds: float) -> None:
@@ -607,7 +715,7 @@ def _bucket(target: LlmTarget) -> TokenBucket:
     with _registry_lock:
         bucket = _buckets.get(target.provider)
         if bucket is None:
-            bucket = TokenBucket(target.rpm)
+            bucket = FileTokenBucket(target.rpm, clock=_clock, key=target.provider)
             _buckets[target.provider] = bucket
         return bucket
 

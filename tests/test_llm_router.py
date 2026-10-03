@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 
@@ -21,12 +22,16 @@ _SHARED_KEYS = ("JIAOWOISAN_API_KEY", "API_KEY", "DEEPSEEK_API_KEY")
 
 
 @pytest.fixture(autouse=True)
-def router_env(monkeypatch):
+def router_env(monkeypatch, tmp_path):
     """干净环境 + 干净的桶/冷却 + 打桩睡眠（返回记录等待时长的列表）。"""
     for name in list(os.environ):
         if _ENV_PATTERN.match(name) or name in _SHARED_KEYS:
             monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path))
     R.reset_state()
+    # 注意：不要在这里给 `R._clock` 装假钟 —— 既有用例（`test_throttle_is_applied_between_calls`
+    # / `test_arun_awaits_instead_of_blocking`）的期望值是按真实时钟算的（≈60/rpm 秒），
+    # 装了「每次调用 +1s」的钟会把它们带偏。需要冻结钟的用例自己局部构造（见 T2）。
     waits: list[float] = []
     monkeypatch.setattr(R, "_sleep", lambda seconds: waits.append(seconds))
 
@@ -472,3 +477,64 @@ async def test_arun_awaits_instead_of_blocking(router_env):
         await R.arun_with_fallback(R.ROLE_AGENT, attempt, targets=[target])
     assert len(calls) == 2
     assert router_env and router_env[0] == pytest.approx(10.0, abs=0.5)
+
+
+# ── P1 缺件：跨进程限流 + token 维度 ──────────────────────
+
+
+def test_file_bucket_cross_process_third_consume_waits(tmp_path, monkeypatch):
+    """T1: 同一 TRIMUM_HOME，rpm=2，父进程 + 真起子进程共 3 次 consume() ⇒ 第 3 次 > 0。"""
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path))
+    src_root = os.path.join(os.path.dirname(__file__), "..")
+    child_src = "import os, sys\nsys.path.insert(0, \"src\")\nfrom trimum_core import llm_router as R\nprint(repr(R.FileTokenBucket(2).consume()))"
+    results = []
+    results.append(R.FileTokenBucket(2).consume())
+    for _ in range(2):
+        proc = subprocess.run(
+            [sys.executable, "-c", child_src],
+            cwd=src_root, env={**os.environ, "TRIMUM_HOME": str(tmp_path)},
+            capture_output=True, text=True, timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        results.append(float(proc.stdout.strip()))
+    # 容量口径与 TokenBucket 一致（capacity = 1 个 burst）：第 1 次放行，之后每一次都要等，
+    # 而且等的是「共享文件里的同一个槽位」——这条只有在状态真的跨进程共享时才成立。
+    assert results[0] == 0.0
+    assert results[1] > 0, "第 2 次（子进程）必须读到父进程预扣后的槽位：" + repr(results)
+    assert results[2] > results[1], "第 3 次要排在更后面（预扣是累计的）：" + repr(results)
+
+
+def test_file_bucket_pre_deduct_same_process(tmp_path, monkeypatch):
+    """T2: rpm=2 同进程预扣 ⇒ 第 1 次 0.0，之后每次都 > 0 且**逐次变大**（冻结钟）。"""
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path))
+    _ticks = {"t": 0.0}
+    _clock = lambda: _ticks.__setitem__("t", _ticks["t"] + 1.0) or _ticks["t"]
+    bucket = R.FileTokenBucket(2, clock=_clock)
+    first = bucket.consume()
+    second = bucket.consume()
+    third = bucket.consume()
+    assert first == 0.0, "第 1 次占的是那个空槽，不用等"
+    assert second > 0.0, "第 2 次必须等（容量只有 1 个 burst，与 TokenBucket 同口径）"
+    assert third > second, f"预扣是累计的：第 3 次应排在更后面（{third} <= {second}）"
+
+
+def test_file_bucket_corrupted_file_self_heals(tmp_path, monkeypatch):
+    """T3: 落盘文件写垃圾 ⇒ consume() 不抛且返回 0.0（自愈）。"""
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path))
+    (tmp_path / "llm-throttle.json").write_text("this is not json 垃圾", encoding="utf-8")
+    assert R.FileTokenBucket(2).consume() == 0.0
+
+
+def test_record_usage_accumulates_into_stats():
+    """T4: record_usage(3,5) ⇒ prompt/completion/total = 3/5/8（含累加）。"""
+    R.reset_state()
+    R.record_usage(3, 5)
+    s = R.stats()
+    assert s["prompt_tokens"] == 3
+    assert s["completion_tokens"] == 5
+    assert s["total_tokens"] == 8
+    R.record_usage(3, 5)
+    s = R.stats()
+    assert s["prompt_tokens"] == 6
+    assert s["completion_tokens"] == 10
+    assert s["total_tokens"] == 16
