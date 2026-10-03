@@ -29,7 +29,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal
 
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from .logger import get_logger
 from .mcp_client import (
@@ -126,6 +126,8 @@ def parse_definition_text(text: str) -> dict[str, Any]:
 
 class MCPServerDefinition(BaseModel):
     """One ``<name>.json5`` MCP server definition."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     transport: Literal["stdio", "http", "streamable-http", "streamable_http"] = "stdio"

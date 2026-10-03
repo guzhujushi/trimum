@@ -84,6 +84,11 @@ class TestDefinition:
         assert item.args == ["a", "1"]
         assert item.env == {"TOKEN": "42"}
 
+    def test_unknown_keys_are_forbidden(self):
+        with pytest.raises(Exception) as excinfo:
+            MCPServerDefinition(name="s", command="x", bogus_key=1)
+        assert "bogus_key" in str(excinfo.value)
+
     def test_timeout_must_be_positive(self):
         with pytest.raises(Exception):
             MCPServerDefinition(name="s", command="x", timeout=0)
@@ -190,6 +195,16 @@ class TestRegistry:
         registry = MCPRegistry(directory)
         assert registry.names() == ["shared"]
         assert "duplicate server name" in registry.problems[0]["error"]
+
+    def test_unknown_key_file_becomes_problem(self, tmp_path):
+        directory = tmp_path / "mcp"
+        write_definition(directory, "good", '{command: "x"}')
+        write_definition(directory, "bogus", '{command: "x", bogus_key: 1}')
+        registry = MCPRegistry(directory)
+        servers = registry.load()
+        assert "bogus" not in servers
+        errors = " ".join(problem["error"] for problem in registry.problems)
+        assert "bogus_key" in errors
 
     def test_describe_reports_state_and_problems(self, tmp_path):
         directory = tmp_path / "mcp"
