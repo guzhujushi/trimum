@@ -605,7 +605,7 @@ class TestEnvDispatcher:
     @pytest.mark.asyncio
     async def test_env_list_sorted(self):
         d = EnvDispatcher()
-        with patch.dict("os.environ", {"Z": "z", "A": "a"}):
+        with patch.dict("os.environ", {"Z": "z", "A": "a"}, clear=True):
             resp = await d.execute(_make_req(ToolType.ENV_LIST))
         assert resp.status == "allowed"
         lines = resp.output.split("\n")

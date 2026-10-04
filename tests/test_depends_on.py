@@ -1,6 +1,7 @@
 """#22: AgentManifest depends_on + AgentRegistry.check_dependencies 测试。"""
 import os
 import sys
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -58,8 +59,12 @@ class TestAgentRegistryCheckDependencies:
     def test_existing_dep_returns_empty(self):
         from trimum_core.agent_registry import AgentRegistry
         reg = AgentRegistry()
-        # python 一定在 PATH 中
-        m = _make_manifest("test", ["python"])
+        # 用本机确定存在的解释器可执行名，避免依赖宿主 PATH 里是否有 "python"
+        exe = shutil.which("python3") or shutil.which("python")
+        if exe is None:
+            pytest.skip("本机无 python3/python")
+        dep = Path(exe).name
+        m = _make_manifest("test", [dep])
         if os.name == "nt":
             m = _make_manifest("test", ["python.exe"])
         missing = reg.check_dependencies(m)

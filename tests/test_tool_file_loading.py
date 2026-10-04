@@ -29,15 +29,45 @@ class TestToolFileLoading:
             assert name in names, f"Tool {name} not found in registry"
         print(f"All {len(expected)} tools discovered: {sorted(expected)}")
 
-    def test_get_executor_exists(self):
-        """Each tool should have a file-based executor (main.py)."""
-        tool_names = ["shell", "file", "git", "http", "process", "system",
-                      "env", "knowledge", "notification", "mcp", "custom"]
-        for name in tool_names:
-            executor = self.registry.get_executor(name)
+    def test_get_executor_exists(self, tmp_path):
+        """Every file-based tool must expose a callable executor.
+
+        Uses a self-contained tool tree under ``tmp_path`` so the assertion
+        never depends on the host ``~/.trimum/tools`` layout.
+        """
+        tools_root = tmp_path / "tools"
+        for tool_name in ("fixture-a", "fixture-b"):
+            tool_dir = tools_root / tool_name
+            tool_dir.mkdir(parents=True)
+            (tool_dir / "tool.json5").write_text(
+                f"""
+                {{
+                    name: "{tool_name}",
+                    description: "Fixture {tool_name}",
+                    kind: "shell",
+                    entry: "./main.py",
+                    language: "python",
+                    timeout: 30.0,
+                    risk: "medium",
+                    permissions: {{ filesystem: [], network: false }},
+                    tools: []
+                }}
+                """,
+                encoding="utf-8",
+            )
+            (tool_dir / "main.py").write_text(
+                "async def execute(request):\n    return {'status': 'allowed'}\n",
+                encoding="utf-8",
+            )
+
+        registry = ToolRegistry(str(tools_root))
+        listed = {t.name for t in registry.list_tools()}
+        assert {"fixture-a", "fixture-b"} <= listed, f"fixture tools not discovered: {sorted(listed)}"
+        for name in ("fixture-a", "fixture-b"):
+            executor = registry.get_executor(name)
             assert executor is not None, f"No executor for {name}"
             assert callable(executor), f"Executor for {name} not callable"
-        print("All 11 tools have callable executors")
+        print("Both fixture tools have callable executors: fixture-a, fixture-b")
 
     @pytest.mark.asyncio
     async def test_shell_executor(self):
