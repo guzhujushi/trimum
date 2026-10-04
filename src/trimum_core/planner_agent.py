@@ -36,6 +36,7 @@ from .workflow_engine import (
 )
 from .event_bus import EventBus, NAMESPACE_EVENT, NAMESPACE_TASK
 from . import llm_router
+from .paths import data_dir
 
 # ---------------------------------------------------------------------------
 # Agent SDK — 可选导入 (Planner 特有)
@@ -54,7 +55,9 @@ except ImportError:
 # 常量
 # ---------------------------------------------------------------------------
 
-DEFAULT_WORKFLOW_DIR = Path.home() / ".trimum" / "workflows"
+def default_workflow_dir() -> Path:
+    """工作流目录：env → 配置 paths.workflows → <TRIMUM_HOME>/workflows。"""
+    return data_dir("workflows", env="TRIMUM_WORKFLOWS_DIR")
 
 # Planner Agent 专属环境变量前缀
 PLANNER_ENV_MODEL = "PLANNER_LLM_MODEL"
@@ -230,7 +233,7 @@ class PlannerAgent:
         use_agent_sdk: bool = True,
     ) -> None:
         self._bus = event_bus
-        self._workflow_dir = Path(workflow_dir or DEFAULT_WORKFLOW_DIR)
+        self._workflow_dir = Path(workflow_dir) if workflow_dir else default_workflow_dir()
         self._available_capabilities = available_capabilities or ["shell.exec", "system.monitor"]
         self._use_agent_sdk = use_agent_sdk and _HAS_AGENT_SDK
 

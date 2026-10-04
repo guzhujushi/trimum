@@ -17,6 +17,7 @@ from trimum_core.agent_cert import (
     ensure_cert_dirs,
 )
 from shutil import which
+from trimum_core.paths import data_dir
 from trimum_core.models import AgentManifest, TRMErrorCode, TrimumError
 
 # Try json5 for comment support
@@ -205,7 +206,7 @@ class AgentRegistry:
         registered entries for the same agent names.
         """
         if base_path is None:
-            base_path = str(Path.home() / ".trimum" / "agents")
+            base_path = str(data_dir("agents", env="TRIMUM_AGENTS_DIR"))
 
         agents_dir = Path(base_path)
         if not agents_dir.is_dir():
@@ -237,7 +238,7 @@ class AgentRegistry:
         if not agent_name:
             return None
         if base_path is None:
-            base_path = str(Path.home() / ".trimum" / "agents")
+            base_path = str(data_dir("agents", env="TRIMUM_AGENTS_DIR"))
         agent_dir = Path(base_path) / agent_name
         if not agent_dir.is_dir():
             return None

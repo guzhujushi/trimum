@@ -28,7 +28,10 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
 from typing import Any, Callable, Iterable, Optional, Sequence
+
+from .paths import data_dir, trimum_path, xdg_data_dir
 
 from . import sandbox_exec, seccomp_exec
 from .logger import get_logger
@@ -39,26 +42,24 @@ log = get_logger("trimum_core.agent_launcher")
 STARTUP_GRACE_SECONDS = 0.15
 
 
-def _data_dir() -> Path:
-    xdg = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
-    return Path(xdg) / "trimum"
-
-
 def agent_log_dir(base: Optional[str | Path] = None) -> Path:
     """Agent 输出目录（与脚本根同级，随 ``agents_root`` 一起搬迁）。"""
     return agents_root(base).parent / "agent-logs"
 
 
 def agents_root(base: Optional[str | Path] = None) -> Path:
-    """Agent 脚本根目录。"""
+    """Agent 脚本根目录。优先级：显式 base > TRIMUM_AGENTS_DIR > 配置 paths.agents > 默认。
+
+    默认沿用历史布局：posix = ``$XDG_DATA_HOME/trimum/agents``；
+    Windows 上若 ``<TRIMUM_HOME>/agents`` 存在则优先用它（开发机回退）。
+    """
     if base is not None:
         return Path(base)
     if os.name == "nt":
-        # 开发机回退：~/.trimum/agents
-        windows_root = Path.home() / ".trimum" / "agents"
-        if windows_root.exists():
-            return windows_root
-    return _data_dir() / "agents"
+        legacy = trimum_path("agents")
+        if legacy.exists():
+            return legacy
+    return data_dir("agents", env="TRIMUM_AGENTS_DIR", default=xdg_data_dir("agents"))
 
 
 def resolve_agent_script(

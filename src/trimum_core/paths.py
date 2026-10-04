@@ -51,8 +51,23 @@ def trimum_path(*parts: str) -> Path:
     return trimum_home().joinpath(*parts)
 
 
-def data_dir(name: str, *, env: str | None = None, config: Any = None) -> Path:
-    """解析数据子目录。优先级：显式 env 变量 → 配置文件 ``paths.<name>`` → 默认 ``<TRIMUM_HOME>/<name>``。"""
+def xdg_data_dir(*parts: str) -> Path:
+    """XDG 数据目录下的 trimum 路径（``$XDG_DATA_HOME/trimum``）。
+
+    这是**默认值本体**：``Path.home()`` 只在 XDG 未设时兜底，与 ``config.py``
+    的 XDG 默认同源。调用点不许自己拼 ``Path.home()``。
+    """
+    override = os.environ.get("XDG_DATA_HOME")
+    base = (
+        Path(override).expanduser()
+        if override and override.strip()
+        else Path.home() / ".local" / "share"
+    )
+    return base.joinpath("trimum", *parts)
+
+
+def data_dir(name: str, *, env: str | None = None, config: Any = None, default: Any = None) -> Path:
+    """解析数据子目录。优先级：显式 env 变量 → 配置文件 ``paths.<name>`` → 默认（``default`` 或 ``<TRIMUM_HOME>/<name>``）。"""
     if env:
         value = os.environ.get(env)
         if value and value.strip():
@@ -67,7 +82,7 @@ def data_dir(name: str, *, env: str | None = None, config: Any = None) -> Path:
             return Path(raw).expanduser()
     except Exception:
         pass
-    return trimum_path(name)
+    return Path(default).expanduser() if default is not None else trimum_path(name)
 
 
 def ensure_trimum_home(*, subdirs: tuple[str, ...] = DATA_SUBDIRS) -> Path:
@@ -84,6 +99,7 @@ __all__ = [
     "DATA_SUBDIRS",
     "trimum_home",
     "trimum_path",
+    "xdg_data_dir",
     "ensure_trimum_home",
     "data_dir",
 ]

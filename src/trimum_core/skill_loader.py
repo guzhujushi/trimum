@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field
 
 import logging
 
+from .paths import data_dir
+
 log = logging.getLogger("trimum_core.skill_loader")
 
 try:
@@ -100,7 +102,7 @@ class SkillLoader:
     """
 
     def __init__(self, skills_path: Optional[str] = None) -> None:
-        self._skills_path = Path(skills_path or Path.home() / ".trimum" / "skills")
+        self._skills_path = Path(skills_path) if skills_path else data_dir("skills", env="TRIMUM_SKILLS_DIR")
         self._skills: dict[str, SkillDefinition] = {}
         self._load_errors: dict[str, str] = {}
 
