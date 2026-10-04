@@ -328,6 +328,9 @@ class AgentLoop:
                     "max_retries": llm_cfg.get("max_retries", 1),
                     "rpm": llm_cfg.get("rpm"),
                 },
+                usage_of=lambda value: (
+                    value[1].prompt_tokens, value[1].completion_tokens
+                ),
             )
         except llm_router.LlmCallError as e:
             log.warning("chat completion failed: %s", e)

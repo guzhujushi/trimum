@@ -363,6 +363,28 @@ def record_usage(prompt_tokens: int, completion_tokens: int) -> None:
         _stats["total_tokens"] += int(prompt_tokens) + int(completion_tokens)
 
 
+def _record_usage(
+    role: str,
+    usage_of: Optional[Callable[[_T], Optional[tuple[int, int]]]],
+    value: _T,
+) -> None:
+    """记账只写这一处：由 usage_of 从返回值里抽 (prompt, completion) 再累加。
+
+    红线：观测失败不许让业务失败 —— 任何异常只告警，绝不让 LLM 调用失败。
+    usage_of 为 None、或抽出来的 usage 为 None/空 ⇒ 直接返回，不计账。
+    """
+    if usage_of is None:
+        return
+    try:
+        usage = usage_of(value)
+        if not usage:
+            return
+        prompt_tokens, completion_tokens = usage
+        record_usage(int(prompt_tokens), int(completion_tokens))
+    except Exception as exc:  # noqa: BLE001 - 观测失败不许让业务失败
+        log.warning("llm_router.usage_record_failed role=%s error=%s", role, exc)
+
+
 def set_cooldown(target: LlmTarget, seconds: float) -> None:
     if seconds <= 0:
         return
@@ -797,6 +819,7 @@ def run_with_fallback(
     targets: Optional[list[LlmTarget]] = None,
     defaults: Optional[dict[str, Any]] = None,
     fallback: Optional[bool] = None,
+    usage_of: Optional[Callable[[_T], Optional[tuple[int, int]]]] = None,
 ) -> tuple[_T, LlmTarget]:
     """顺序尝试候选链，返回 (attempt 的返回值, 实际用上的 target)。同步版。
 
@@ -836,6 +859,7 @@ def run_with_fallback(
                     _sleep(wait)
                     continue
                 break
+            _record_usage(role, usage_of, value)
             return value, target
         if position < len(chain) - 1:
             _charge_fallback()
@@ -854,6 +878,7 @@ async def arun_with_fallback(
     targets: Optional[list[LlmTarget]] = None,
     defaults: Optional[dict[str, Any]] = None,
     fallback: Optional[bool] = None,
+    usage_of: Optional[Callable[[_T], Optional[tuple[int, int]]]] = None,
 ) -> tuple[_T, LlmTarget]:
     """run_with_fallback 的异步版：节流与退避都走 asyncio.sleep，不阻塞事件循环。"""
     chain = targets if targets is not None else resolve_targets(
@@ -890,6 +915,7 @@ async def arun_with_fallback(
                     await _async_sleep(wait)
                     continue
                 break
+            _record_usage(role, usage_of, value)
             return value, target
         if position < len(chain) - 1:
             _charge_fallback()

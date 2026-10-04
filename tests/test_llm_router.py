@@ -538,3 +538,82 @@ def test_record_usage_accumulates_into_stats():
     assert s["prompt_tokens"] == 6
     assert s["completion_tokens"] == 10
     assert s["total_tokens"] == 16
+
+
+# ── 决策 19 修订版 A：token 记账收口在统一调用（usage_of 抽取器） ──
+def test_sync_usage_of_records_into_stats(router_env):
+    """T1 同步记账：usage_of 抽 (10,4) ⇒ 返回不变，stats 记 10/4/14。"""
+    R.reset_state()
+    target = _target(rpm=0)
+    value = object()
+
+    def attempt(_t: R.LlmTarget):
+        return value
+
+    result, used = R.run_with_fallback(
+        R.ROLE_POLICY, attempt, targets=[target], usage_of=lambda v: (10, 4)
+    )
+    assert result is value and used is target
+    s = R.stats()
+    assert s["prompt_tokens"] == 10
+    assert s["completion_tokens"] == 4
+    assert s["total_tokens"] == 14
+
+
+@pytest.mark.asyncio
+async def test_async_usage_of_records_into_stats(router_env):
+    """T2 异步记账：arun_with_fallback 同口径，stats 记 10/4/14。"""
+    R.reset_state()
+    target = _target(rpm=0)
+    value = object()
+
+    async def attempt(_t: R.LlmTarget):
+        return value
+
+    result, used = await R.arun_with_fallback(
+        R.ROLE_AGENT, attempt, targets=[target], usage_of=lambda v: (10, 4)
+    )
+    assert result is value and used is target
+    s = R.stats()
+    assert s["prompt_tokens"] == 10
+    assert s["completion_tokens"] == 4
+    assert s["total_tokens"] == 14
+
+
+def test_sync_usage_of_raising_never_fails_business(router_env):
+    """T3 观测失败不许让业务失败：usage_of 抛 RuntimeError ⇒ 照常返回，token 仍 0。"""
+    R.reset_state()
+    target = _target(rpm=0)
+    value = object()
+
+    def attempt(_t: R.LlmTarget):
+        return value
+
+    def boom(_v):
+        raise RuntimeError("usage_of 崩了")
+
+    result, used = R.run_with_fallback(
+        R.ROLE_POLICY, attempt, targets=[target], usage_of=boom
+    )
+    assert result is value and used is target
+    s = R.stats()
+    assert s["prompt_tokens"] == 0
+    assert s["completion_tokens"] == 0
+    assert s["total_tokens"] == 0
+
+
+def test_sync_usage_of_default_keeps_old_behavior(router_env):
+    """T4 不传 usage_of 行为不变：返回值与 stats token 三字段仍 0。"""
+    R.reset_state()
+    target = _target(rpm=0)
+    value = object()
+
+    def attempt(_t: R.LlmTarget):
+        return value
+
+    result, used = R.run_with_fallback(R.ROLE_POLICY, attempt, targets=[target])
+    assert result is value and used is target
+    s = R.stats()
+    assert s["prompt_tokens"] == 0
+    assert s["completion_tokens"] == 0
+    assert s["total_tokens"] == 0
