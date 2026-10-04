@@ -111,10 +111,6 @@ def isolate_process_env():
 
 
 _HOST_DEPENDENT_TESTS: frozenset[str] = frozenset({
-    "tests/test_socket_path_consistency.py::TestClientServerAgreement::test_client_matches_daemon_when_xdg_set",
-    "tests/test_socket_path_consistency.py::TestClientServerAgreement::test_client_returns_runtime_dir_candidate_when_nothing_exists",
-    "tests/test_socket_path_consistency.py::TestSystemRuntimeDirSocket::test_system_runtime_socket_is_a_candidate",
-    "tests/test_socket_path_consistency.py::TestSystemRuntimeDirSocket::test_session_socket_still_wins_when_present",
 })
 
 

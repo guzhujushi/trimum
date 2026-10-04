@@ -59,6 +59,13 @@ class TestClientServerAgreement:
     def test_client_matches_daemon_when_xdg_set(self, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
         monkeypatch.delenv("TRIMUM_SOCKET", raising=False)
+        # 把系统级候选指到不存在的 tmp 路径：真机上 /run/trimum/trimum.sock 是活的，
+        # discover_socket() 会按 _is_live() 先挑中它，让断言随宿主态飘。
+        monkeypatch.setattr(
+            client_module,
+            "SYSTEM_RUNTIME_SOCKET",
+            tmp_path / "system-not-there.sock",
+        )
 
         socket_file = tmp_path / "trimum.sock"
         socket_file.write_text("", encoding="utf-8")
@@ -77,6 +84,12 @@ class TestClientServerAgreement:
         monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
         monkeypatch.delenv("TRIMUM_SOCKET", raising=False)
         monkeypatch.setattr(config_module.os, "getuid", lambda: 4242, raising=False)
+        # 同上：把系统级候选指到不存在的 tmp 路径，隔离宿主活的 /run/trimum socket。
+        monkeypatch.setattr(
+            client_module,
+            "SYSTEM_RUNTIME_SOCKET",
+            tmp_path / "system-not-there.sock",
+        )
 
         assert Path(discover_socket()) == tmp_path / "trimum.sock"
 
@@ -90,21 +103,26 @@ class TestSystemRuntimeDirSocket:
     + XDG_RUNTIME_DIR=/run/trimum），与登录会话的 `/run/user/<uid>` 不同名 ——
     客户端不认识这条就会永远走 HTTP 回退（真机实测：`trm status` 显示 source=http）。"""
 
-    def test_system_runtime_socket_is_a_candidate(self, monkeypatch):
+    def test_system_runtime_socket_is_a_candidate(self, monkeypatch, tmp_path):
+        # 不依赖宿主 /run：两端都把系统级候选指到不存在的 tmp 路径再算候选表。
+        fake_system = tmp_path / "system-not-there.sock"
+        monkeypatch.setattr(client_module, "SYSTEM_RUNTIME_SOCKET", fake_system)
+        monkeypatch.setattr(config_module, "SYSTEM_RUNTIME_SOCKET", fake_system)
         monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/9999")
 
         candidates = socket_candidates()
 
-        assert SYSTEM_RUNTIME_SOCKET == Path("/run/trimum/trimum.sock")
-        # XDG 那条最优先（会话内的实例），系统 daemon 那条紧跟其后：
+        assert client_module.SYSTEM_RUNTIME_SOCKET == fake_system
+        # XDG 那条最优先（会话内的实例，idx==0），系统 daemon 那条紧跟其后：
         # 会话内有 socket 就先用手上的，没有才去认系统 daemon。
         assert candidates[0] == Path("/run/user/9999/trimum.sock")
-        assert candidates[1] == SYSTEM_RUNTIME_SOCKET
-        # /run/user/* 的任何一条都不许排在它前面（Windows 上没有 getuid 那条）
+        assert candidates[1] == client_module.SYSTEM_RUNTIME_SOCKET
+        # 除 idx==0（XDG 自己）外，其余 /run/user/* 候选都不许排在系统 socket 之前
+        # （Windows 上没有 getuid 那条，all() 空真也成立）。
         assert all(
             idx > 1
             for idx, path in enumerate(candidates)
-            if str(path).startswith("/run/user/")
+            if str(path).startswith("/run/user/") and idx != 0
         )
 
     def test_discover_prefers_existing_system_socket(self, monkeypatch, tmp_path):
@@ -128,6 +146,10 @@ class TestSystemRuntimeDirSocket:
         """会话 socket 存在时优先级更高（系统 daemon 只是兜底，不抢会话内实例）。"""
         monkeypatch.delenv("TRIMUM_SOCKET", raising=False)
         monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        # 把系统级候选指到不存在的 tmp 路径：否则真机活的 /run/trimum socket
+        # 会被 discover_socket() 的 _is_live() 先挑中，抢走会话 socket 的优先权。
+        fake_system = tmp_path / "system-not-there.sock"
+        monkeypatch.setattr(client_module, "SYSTEM_RUNTIME_SOCKET", fake_system)
         session_socket = tmp_path / "trimum.sock"
         session_socket.write_text("", encoding="utf-8")
 
