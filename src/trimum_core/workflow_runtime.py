@@ -719,7 +719,12 @@ class WorkflowRuntime:
         if not path.exists():
             return []
         runs: list[dict[str, Any]] = []
-        for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            log.warning("workflow_runtime.runs_read_failed path=%s error=%s", path, exc)
+            return []
+        for line in lines:
             line = line.strip()
             if not line:
                 continue

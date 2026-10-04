@@ -250,6 +250,83 @@ class TestRunPersistence:
         assert rc != 0
 
 
+    def test_persist_failure_does_not_raise(self, tmp_path):
+        """钉 M4：落盘失败（open("a") 抛 IsADirectoryError）绝不许向上抛、
+        也不许改变 run 本身的业务结果。
+
+        口径是「对照实验」：同一 workflow、同一 SIMPLE_YAML，建两个 runtime，
+        唯一的差别是 runs_path——good 指向正常文件，bad 指向一个「目录」
+        （mkdir 成目录让 open("a") 抛 IsADirectoryError）。落盘失败只应影响
+        「盘上有没有记录」，不应影响 run 状态。
+
+        注意这里断言的是 bad_record.status == good_record.status（相同即可），
+        而不是 == "completed"：因为 SIMPLE_YAML 的节点是 agent_type: system-monitor，
+        而 CLI 路径只注册了 agent_type: shell 的 handler（workflow_runtime.py:260），
+        这个 run 本来就是 failed（No handler for node），与落盘失败无关。
+        若把口径写死成 "completed"，会逼实现去换路径凑状态，偏离本用例意图。
+        """
+        import asyncio
+
+        from trimum_core.event_bus import EventBus
+        from trimum_core.workflow_runtime import WorkflowRuntime
+
+        yaml_file = tmp_path / "wf.yaml"
+        yaml_file.write_text(SIMPLE_YAML, encoding="utf-8")
+
+        # 对照组：runs_path 是正常文件路径，落盘应成功。
+        good_runs_path = tmp_path / "good" / "workflow-runs.jsonl"
+        good_runtime = WorkflowRuntime(EventBus(), runs_path=good_runs_path)
+        good_workflow = WorkflowDefV2.load_yaml(yaml_file)
+        good_runtime.register(good_workflow, source="file")
+        good_record = asyncio.run(good_runtime.run_now(good_workflow.id))
+
+        # 实验组：runs_path 指向一个「目录」，open("a") 抛 IsADirectoryError。
+        bad_runs_path = tmp_path / "runs.jsonl"
+        bad_runs_path.mkdir()
+        bad_runtime = WorkflowRuntime(EventBus(), runs_path=bad_runs_path)
+        bad_workflow = WorkflowDefV2.load_yaml(yaml_file)
+        bad_runtime.register(bad_workflow, source="file")
+        # 落盘失败不得让 run_now 抛。
+        bad_record = asyncio.run(bad_runtime.run_now(bad_workflow.id))
+
+        # 落盘失败前后的 run 状态必须一致（不写死 "completed"）。
+        assert bad_record.status == good_record.status
+        # 实验组盘上无记录；对照组真的写进去了。
+        assert bad_runtime.load_runs() == []
+        assert any(
+            r.get("run_id") == good_record.run_id
+            for r in good_runtime.load_runs()
+        )
+
+    def test_persist_appends_one_line_per_run(self, tmp_path):
+        import asyncio
+        import json as _json
+
+        from trimum_core.event_bus import EventBus
+        from trimum_core.workflow_runtime import WorkflowRuntime
+
+        # 钉 M5：一行一 run 靠尾换行保证——同一 runtime 连跑两次，落盘文件必须「一行一 run」且以换行收尾；对 run 的 status 不做任何假设。
+        yaml_file = tmp_path / "wf.yaml"
+        yaml_file.write_text(SIMPLE_YAML, encoding="utf-8")
+        runs_path = tmp_path / "workflow-runs.jsonl"
+        runtime = WorkflowRuntime(EventBus(), runs_path=runs_path)
+        workflow = WorkflowDefV2.load_yaml(yaml_file)
+        runtime.register(workflow, source="file")
+
+        record1 = asyncio.run(runtime.run_now(workflow.id))
+        record2 = asyncio.run(runtime.run_now(workflow.id))
+
+        raw = runs_path.read_text(encoding="utf-8")
+        assert raw.endswith("\n")
+        lines = raw.splitlines()
+        assert len(lines) == 2
+        persisted_ids = [r["run_id"] for r in runtime.load_runs()]
+        for line in lines:
+            item = _json.loads(line)
+            assert item["run_id"] in persisted_ids
+        assert {record1.run_id, record2.run_id} == set(persisted_ids)
+
+
 class TestGetRunLooksPastTail:
     """回归：get_run 必须能查到落盘文件里早于尾部的 run（CLI 一次性进程场景）。"""
 
