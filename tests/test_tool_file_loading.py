@@ -14,19 +14,57 @@ from trimum_core.policy_engine import PolicyEngine
 
 
 class TestToolFileLoading:
-    """Test that file-based tools are discovered and executable."""
+    """Test that file-based tools are discovered and executable.
 
-    def setup_method(self):
+    The registry is pointed at a self-contained tmp tool tree (shell + git)
+    via ``TRIMUM_TOOLS_DIR`` so the file-based executors never depend on the
+    host ``~/.trimum/tools`` layout.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _registry_with_tools(self, tmp_path, monkeypatch):
+        tree = tmp_path / "tools"
+        for name, dispatcher in (("shell", "ShellDispatcher"), ("git", "GitDispatcher")):
+            d = tree / name
+            d.mkdir(parents=True)
+            (d / "tool.json5").write_text(
+                f"""
+                {{
+                    name: "{name}",
+                    description: "Fixture {name} tool",
+                    kind: "{name}",
+                    entry: "./main.py",
+                    language: "python",
+                    timeout: 30.0,
+                    risk: "medium",
+                    permissions: {{ filesystem: [], network: false }},
+                    tools: []
+                }}
+                """,
+                encoding="utf-8",
+            )
+            (d / "main.py").write_text(
+                "from trimum_core.models import ExecuteRequest\n"
+                f"from trimum_core.tool_dispatchers import {dispatcher}\n"
+                "\n"
+                "async def execute(request):\n"
+                f"    return (await {dispatcher}().execute(ExecuteRequest(**request))).model_dump()\n",
+                encoding="utf-8",
+            )
+        monkeypatch.setenv("TRIMUM_TOOLS_DIR", str(tree))
         self.registry = ToolRegistry()
         self.gateway = ToolGateway(policy_engine=PolicyEngine())
 
     def test_tools_dir_discovered(self):
-        """All 11 tool directories should be discovered."""
+        """All 11 built-in tool definitions are present; the file-based
+        shell tool actually resolves an executor from the fixture tmp tree
+        (not the host ``~/.trimum/tools``)."""
         names = {t.name for t in self.registry.list_tools()}
         expected = {"shell", "file", "git", "http", "process", "system",
                     "env", "knowledge", "notification", "mcp", "custom"}
         for name in expected:
             assert name in names, f"Tool {name} not found in registry"
+        assert self.registry.get_executor("shell") is not None
         print(f"All {len(expected)} tools discovered: {sorted(expected)}")
 
     def test_get_executor_exists(self, tmp_path):

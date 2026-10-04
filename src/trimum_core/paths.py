@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 #: Override the data root (tests, provisioning, future per-user profiles).
 HOME_ENV = "TRIMUM_HOME"
@@ -50,6 +51,25 @@ def trimum_path(*parts: str) -> Path:
     return trimum_home().joinpath(*parts)
 
 
+def data_dir(name: str, *, env: str | None = None, config: Any = None) -> Path:
+    """解析数据子目录。优先级：显式 env 变量 → 配置文件 ``paths.<name>`` → 默认 ``<TRIMUM_HOME>/<name>``。"""
+    if env:
+        value = os.environ.get(env)
+        if value and value.strip():
+            return Path(value).expanduser()
+    if config is None:
+        from .config import Config
+
+        config = Config()
+    try:
+        raw = config.get(f"paths.{name}", None)
+        if isinstance(raw, str) and raw.strip():
+            return Path(raw).expanduser()
+    except Exception:
+        pass
+    return trimum_path(name)
+
+
 def ensure_trimum_home(*, subdirs: tuple[str, ...] = DATA_SUBDIRS) -> Path:
     """Create the data root (and its known subdirectories) if missing."""
     root = trimum_home()
@@ -65,4 +85,5 @@ __all__ = [
     "trimum_home",
     "trimum_path",
     "ensure_trimum_home",
+    "data_dir",
 ]

@@ -31,6 +31,7 @@ from .models import (
     ToolType,
 )
 from . import sandbox_exec
+from .paths import data_dir
 from .logger import get_logger
 from .mcp_bridge import split_name
 
@@ -1232,7 +1233,7 @@ class DispatcherRegistry:
 
     def __init__(self, tools_path: str | None = None) -> None:
         self._dispatchers: dict[ToolType, Any] = {}
-        self._tools_path = tools_path or str(Path.home() / ".trimum" / "tools")
+        self._tools_path = tools_path or str(data_dir("tools", env="TRIMUM_TOOLS_DIR"))
         self._register_builtins()
 
     def _register_builtins(self) -> None:

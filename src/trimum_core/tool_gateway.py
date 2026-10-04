@@ -54,6 +54,7 @@ from . import capability
 from . import sandbox_exec
 from .audit_store import AuditStore
 from .tool_dispatchers import DispatcherRegistry
+from .paths import data_dir
 from .tool_file_loader import is_enabled, scan_tools
 from .sec_monitor import OpContextClassifier, SecMonitor
 from .sec_executor import SecExecutor, SecurityRuntime
@@ -136,7 +137,7 @@ class ToolRegistry:
             file_count += 1
 
         # 2. Load each tool's main.py module
-        tools_path = Path(self._tools_path or Path.home() / ".trimum" / "tools")
+        tools_path = Path(self._tools_path) if self._tools_path else data_dir("tools", env="TRIMUM_TOOLS_DIR")
         if tools_path.is_dir():
             for child in sorted(tools_path.iterdir()):
                 if not child.is_dir():

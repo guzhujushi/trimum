@@ -19,6 +19,7 @@ except ImportError:
     HAS_JSON5 = False
 
 from .models import ToolDefinition, ToolType, RiskLevel
+from .paths import data_dir
 
 log = logging.getLogger("trimum_core.tool_file_loader")
 
@@ -245,7 +246,7 @@ def scan_tools(
     manifests (``enabled: false``) are skipped unless *include_disabled* is set.
     """
     if base_path is None:
-        base_path = str(Path.home() / ".trimum" / "tools")
+        base_path = str(data_dir("tools", env="TRIMUM_TOOLS_DIR"))
 
     tools_dir = Path(base_path)
     if not tools_dir.is_dir():
