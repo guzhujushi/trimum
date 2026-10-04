@@ -50,6 +50,14 @@ def default_audit_path() -> Path:
 AUDIT_KEY_FILENAME = "audit.key"
 
 
+class AuditKeyUnreadable(RuntimeError):
+    """key 文件读不了（PermissionError / EIO 等）⇒ fail-closed。
+
+    「读不了」不等于「空」：不许按空文件走 ``_repair_empty_key_file()`` 换 key，
+    否则旧行（用旧 key 签的）整条链作废。
+    """
+
+
 def audit_key_path() -> Path:
     """审计链 HMAC key 的落盘位置：``<TRIMUM_HOME>/audit.key``（默认 ``~/.trimum/audit.key``）。"""
     return trimum_path(AUDIT_KEY_FILENAME)
@@ -98,12 +106,21 @@ def resolve_hmac_key(explicit: Optional[str] = None) -> str:
 
 
 def _read_key_file(path: Path) -> str:
-    """读已有 key 文件；空内容最多重试 5 次（每次 50ms），仍空则返回 ``""``。"""
+    """读已有 key 文件；空内容最多重试 5 次（每次 50ms），仍空则返回 ``""``。
+
+    ``FileNotFoundError``（``exists()`` 与读取之间的竞态）当作读不到 ⇒ 返回 ``""``；
+    其它 ``OSError``（EACCES / EIO 等）**读不了 ≠ 空** ⇒ 抛 ``AuditKeyUnreadable``
+    fail-closed，绝不允许调用方据此换 key。
+    """
     for _ in range(5):
         try:
             text = path.read_text(encoding="utf-8").strip()
-        except OSError:
+        except FileNotFoundError:
             return ""
+        except OSError as exc:
+            raise AuditKeyUnreadable(
+                f"audit key file unreadable: {path} (errno={getattr(exc, 'errno', None)})"
+            ) from exc
         if text:
             return text
         time.sleep(0.05)
@@ -442,4 +459,4 @@ class AuditStore:
         return events
 
 
-__all__ = ["AuditStore", "DEFAULT_AUDIT_FILENAME", "default_audit_path", "resolve_hmac_key", "audit_key_path"]
+__all__ = ["AuditStore", "AuditKeyUnreadable", "DEFAULT_AUDIT_FILENAME", "default_audit_path", "resolve_hmac_key", "audit_key_path"]

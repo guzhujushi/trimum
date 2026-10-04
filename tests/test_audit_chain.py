@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import pytest
 import subprocess
 import sys
 from pathlib import Path
@@ -506,3 +507,55 @@ def test_t27_concurrent_first_create_single_key(tmp_path):
         outs.append(out.strip())
     assert len(set(outs)) == 1, outs          # 全一致
     assert len(outs[0]) == 64 and int(outs[0], 16) >= 0
+
+
+# T28 —— key 文件读不了（EACCES）⇒ fail-closed：抛 AuditKeyUnreadable，绝不当「空」换 key
+def test_t28_unreadable_key_file_fails_closed(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("TRIMUM_AUDIT_HMAC_KEY", raising=False)
+
+    from trimum_core.audit_store import AuditKeyUnreadable, audit_key_path, resolve_hmac_key
+
+    key = resolve_hmac_key()  # 正常拿一把 key
+    key_path = audit_key_path()
+    original = key_path.read_text(encoding="utf-8")
+
+    real_read_text = Path.read_text
+
+    def _deny_read_text(self, *args, **kwargs):
+        if self == key_path:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _deny_read_text)
+    with pytest.raises(AuditKeyUnreadable):
+        resolve_hmac_key()
+    Path.read_text = real_read_text  # 只恢复 read_text（保留 TRIMUM_HOME），再断言文件没被动过
+    # fail-closed 后 key 文件仍在、内容一字未变（没被 unlink / 覆盖 / 换新 key）
+    assert key_path.exists()
+    assert key_path.read_text(encoding="utf-8") == original
+
+
+# T29 —— 恢复可读后复用同一把 key（证明 T28 没生成过第二把、没改过文件）
+def test_t29_readable_again_reuses_same_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("TRIMUM_AUDIT_HMAC_KEY", raising=False)
+
+    from trimum_core.audit_store import AuditKeyUnreadable, audit_key_path, resolve_hmac_key
+
+    key = resolve_hmac_key()
+    key_path = audit_key_path()
+
+    real_read_text = Path.read_text
+
+    def _deny_read_text(self, *args, **kwargs):
+        if self == key_path:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _deny_read_text)
+    with pytest.raises(AuditKeyUnreadable):
+        resolve_hmac_key()
+    Path.read_text = real_read_text  # 只恢复 read_text（保留 TRIMUM_HOME，防泄漏到后续用例）
+
+    assert resolve_hmac_key() == key  # 同一把，没换
