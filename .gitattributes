@@ -21,12 +21,28 @@
 
 # Config files
 *.json text eol=lf
+*.json5 text eol=lf
+*.jsonl text eol=lf
 *.ini text eol=lf
 *.conf text eol=lf
+
+# systemd units / timers
+*.service text eol=lf
+*.timer text eol=lf
+
+# Node ESM
+*.mjs text eol=lf
 
 # PowerShell scripts
 *.ps1 text eol=crlf
 *.psm1 text eol=crlf
+
+# Windows batch
+*.cmd text eol=crlf
+
+# 无扩展名的脚本 / 配置（真机 + 文档引用件）
+scripts/trm text eol=lf
+docs/omarchy-ref/git-config text eol=lf
 
 # Binary (images, etc)
 *.png binary

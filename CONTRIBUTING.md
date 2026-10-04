@@ -5,21 +5,16 @@
 
 ## 开发状态
 
-主线 = **E7 自研编码智能体**（规格 `docs/CODING-AGENT-PLAN.md`；两条裁决落定后按五步分片落地）。
-已收口：P0 安全响应链 / E5 分发渠道 / E1–E7 地基 / 沙箱 S1–S3（真机 `accept_s3.py` 35/0）。
-测试基线：本地 `1664 passed / 6 failed / 23 skipped`（6 条是既有宿主基线，不算回归）；真机开发树 `1098 / 11 / 2`。
+主线 = **§1 工程缺口（自用口径）**（见 `TODO.md`）；E7 自研编码智能体五片全闭、沙箱 S1–S6 全闭。
+当前在推的队列：`cfm1`（非 CLI 确认通道）→ `pol1`（`LlmPolicyEngine` 接线）→ `dog1` → `ebpf1` → `dboot1`，另有 `cfg2`。
+测试基线：全量 **`0 failed / 2169 passed / 4 skipped`**（`--collect-only` 2178）；剩 4 skipped = 2 条平台专有 + 2 条 mcp snapshot 缺件。
 
 ## 分支策略
 
-| 分支 | 对应仓库 | 用途 |
-|---|---|---|
-| `server` | trimum-server | **日常开发分支**：只提交、只推这一个 |
-| `main` | trimum | 主分支 |
-| `ubuntu` | trimum-ubuntu | 平台分支 |
-| `arch-linux` | trimum-arch | 平台分支 |
-
-日常只在 `server` 上提交/推送；`main` / `ubuntu` / `arch-linux` **不随每轮改动走**。**收尾阶段**（里程碑闭环 / 发布 / 上真机验收）才同步：
-逐提交 `git cherry-pick`；`git diff --name-status <target>..server` 必须为空；不覆盖各分支独有文件（deploy / 桌面 / 平台配置）；再按 `main` → `ubuntu` → `arch-linux` → `server` 推送。
+**只有 `server` 一支**（= 默认 / 主分支）：日常只在 `server` 上提交、只推 `server`（`git push origin server`，SSH 直连）。
+历史 `main` / `ubuntu` / `arch-linux` 三分支与「四分支 cherry-pick 收尾」**已废止**（2026-10-03 迁移后）。
+旧历史归档在私有库 `guzhujushi/trimum-legacy`，本地 remote `legacy` + 分支 `legacy-archive` 仅作快照，不再开发。
+本仓库**是公开的**：不提交密钥 / 真机 IP / 隧道名 / 个人运维细节（`STATUS.md` / `TODO.md` / `docs/OPERATIONS.md` / `.env` / `.codex/` 等已 gitignore）。
 
 ## 提交规范
 
@@ -41,17 +36,24 @@ feat(llm): 429 冷却改读 Retry-After（秒数 / HTTP 日期，缺失回退 60
 - UTF-8 无 BOM + LF；别用会写成 GBK 的工具写中文（Windows 侧口径见 `AGENTS.md`）。
 - Shell 脚本放 `scripts/`，幂等可重跑；破坏性动作默认 `--dry-run`，`--apply` 才落地且带回滚。
 - 临时文件一律进 `tmp/`（`*.bak_*`、`tmp/` 已忽略），根目录不留 `tmp_*`。
+- **配置优先，不许硬编码**：路径 / 目录 / 端口 / 阈值这类值不许写死在代码里；解析顺序固定为
+  **显式函数参数 > 环境变量 > 配置文件（`$XDG_CONFIG_HOME/trimum/config.yaml`）> 默认值**；
+  配置缺失 / 坏文件 / 空项一律**静默走默认**；新增可配置项必须补「配置缺失走默认」用例并在文档写明键名
+  （详见 `AGENTS.md`「配置优先，不许硬编码」）。
 
 ## 测试与验收
 
 ```bash
-python -m pytest tests -q --basetemp tmp/pytest-tmp -p no:cacheprovider   # 全量（基线见上）
-python -m pytest tests/test_<模块>.py -q --basetemp tmp/pytest-tmp -p no:cacheprovider
+.venv/bin/python -m pytest tests -q --basetemp /tmp/trimum-pytest   # 全量（基线见上）
+.venv/bin/python -m pytest tests/test_<模块>.py -q --basetemp /tmp/trimum-pytest
 ```
+
+全量**必须**用 `.venv/bin/python`；`--basetemp` 走 `/tmp/...`（AF_UNIX 路径上限 108 字符，`tmp/` 下会让 `test_agent_spawn` 假挂）。
+**验收口径**：① failed 集合逐条相同；② collect 增量必须等于新增用例数（别拿 passed 反推）。
 
 - **实现与验收分权**：写实现的一方不写验收结论、不跑全量、不提交；验收方独立跑测试 + 接口校验 + 质量检查，末尾给 `VERDICT: PASS|FAIL`。
 - 批量派活（qwen 实现 → 门禁 → ds 验收 → 通过才提交）走 `scripts/trimum-dev.sh`，口径见 `~/.codex/skills/trimum-dev/SKILL.md`：改动必须 ⊆ `allowed.txt`，越界即停手。
-- 真机验收脚本：`scripts/accept_w1.py`(48/0) / `accept_e4.py`(43/0) / `accept_ipc_only.sh`(15/0) / `accept_s3.py`(35/0)。
+- 真机验收脚本：`scripts/accept_w1.py`(48/0) / `accept_e4.py`(43/0) / `accept_ipc_only.sh`(15/0) / `accept_s3.py`(35/0) / `accept_s4.py` / `accept_m4.py` / `accept_e7.py`。
 
 ## 平台口径（先判自己在哪台机器上跑）
 
@@ -109,4 +111,5 @@ python -m pytest tests/test_<模块>.py -q --basetemp tmp/pytest-tmp -p no:cache
 
 ## 文档分工
 
-`AGENTS.md` = 项目级指令（分支 / 真机 / 密钥 / 平台口径）；`docs/ARCH.md` = 架构；专题文档 `docs/CODING-AGENT-PLAN.md` / `docs/SANDBOX-PLAN.md` / `docs/LLM-ROUTING.md`；`STATUS.md` = 常驻区 + 追加日志（新进展**只追加到末尾**，不回填）；`TODO.md` = 只剩未闭环 + 红线。
+`AGENTS.md` = 项目级指令（分支 / 真机 / 密钥 / 平台口径）；`docs/ARCH.md` = 架构；专题文档 `docs/CODING-AGENT-PLAN.md` / `docs/SANDBOX-PLAN.md` / `docs/LLM-ROUTING.md` / `docs/MULTI-USER-BOUNDARY.md`；
+`STATUS.md` = **常驻区（就地小改）+ 追加日志（新进展只追加到文件末尾，不回填、不通读）**；`TODO.md` = **只剩未闭环 + 红线**，已完成项一律进 `STATUS.md`。
