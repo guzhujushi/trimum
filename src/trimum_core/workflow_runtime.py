@@ -39,6 +39,7 @@ import asyncio
 import fnmatch
 import json
 import logging
+import os
 import time
 import uuid
 from collections import deque
@@ -74,6 +75,9 @@ REVIEW_AGENT = "trm-agent"
 
 #: 运行记录保留条数（内存环形）
 DEFAULT_MAX_RUNS = 200
+
+#: workflow-runs.jsonl 落盘文件体积上限；写新记录前超过它就先归档成 .1（只留一份）
+RUNS_MAX_BYTES = 5 * 1024 * 1024
 
 #: 判定「节点失败」用的终态
 FAILED_NODE_STATUSES = ("failed", "timeout", "blocked", "cancelled")
@@ -234,6 +238,7 @@ class WorkflowRuntime:
         run_window_seconds: float = RUN_WINDOW_SECONDS,
         max_runs_per_window: int = MAX_RUNS_PER_WINDOW,
         runs_path: Path | None = None,
+        runs_max_bytes: int | None = None,
     ) -> None:
         self._bus = event_bus
         self._gateway = gateway
@@ -246,6 +251,7 @@ class WorkflowRuntime:
         self._run_window = max(0.0, float(run_window_seconds))
         self._max_runs_per_window = max(1, int(max_runs_per_window))
         self._runs_path = runs_path or trimum_path("workflow-runs.jsonl")
+        self._runs_max_bytes = max(1, int(runs_max_bytes or RUNS_MAX_BYTES))
         self._run_times: dict[str, deque[float]] = {}
 
         self._workflows: dict[str, RegisteredWorkflow] = {}
@@ -707,6 +713,9 @@ class WorkflowRuntime:
         """把一次 run 的记录追加到 JSONL。观测失败绝不影响 run 返回。"""
         try:
             path = Path(self._runs_path)
+            if path.is_file() and path.stat().st_size >= self._runs_max_bytes:
+                # 轮转：当前文件归档成 <原名>.1（覆盖旧归档，只留一份），再开新文件
+                os.replace(str(path), str(path) + ".1")
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record.to_dict(), ensure_ascii=False, default=str) + "\n")
@@ -962,6 +971,7 @@ class WorkflowRuntime:
 
 __all__ = [
     "DEFAULT_MAX_RUNS",
+    "RUNS_MAX_BYTES",
     "NodeRunRecord",
     "REVIEW_AGENT",
     "RegisteredWorkflow",

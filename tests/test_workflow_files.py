@@ -370,3 +370,112 @@ class TestGetRunLooksPastTail:
 
         rc_unknown = main(["workflow", "status", "missing#all-9999"])
         assert rc_unknown != 0
+
+    def test_t30_rotation_archives_first_run(self, tmp_path):
+        """T30：runs_max_bytes 设很小（200），连跑两次 run ⇒
+        盘上出现归档 workflow-runs.jsonl.1，当前 workflow-runs.jsonl 只剩最后一次 run
+        （load_runs() 里只有它）；归档文件里能逐行 json.loads 解析出第一次的 run_id。"""
+        import asyncio
+        import json as _json
+
+        from trimum_core.event_bus import EventBus
+        from trimum_core.workflow_runtime import WorkflowRuntime
+
+        yaml_file = tmp_path / "wf.yaml"
+        yaml_file.write_text(SIMPLE_YAML, encoding="utf-8")
+        runs_path = tmp_path / "workflow-runs.jsonl"
+        archive_path = Path(str(runs_path) + ".1")
+        runtime = WorkflowRuntime(EventBus(), runs_path=runs_path, runs_max_bytes=200)
+        workflow = WorkflowDefV2.load_yaml(yaml_file)
+        runtime.register(workflow, source="file")
+
+        record1 = asyncio.run(runtime.run_now(workflow.id))
+        record2 = asyncio.run(runtime.run_now(workflow.id))
+        assert record1.run_id != record2.run_id
+
+        # 第二次写之前触发轮转：当前文件只剩最后一次 run
+        assert archive_path.exists()
+        assert runs_path.exists()
+        current_ids = [r["run_id"] for r in runtime.load_runs()]
+        assert current_ids == [record2.run_id]
+        # 归档里能逐行解析出第一次的 run_id
+        archived_ids = []
+        for line in archive_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                archived_ids.append(_json.loads(line)["run_id"])
+        assert record1.run_id in archived_ids
+
+    def test_t31_load_and_get_run_ignore_archive(self, tmp_path):
+        """T31：load_runs()/get_run() 不读 .1 归档——往归档里塞一条假 run，
+        get_run 查不到、load_runs 里也没有。"""
+        import json as _json
+
+        from trimum_core.event_bus import EventBus
+        from trimum_core.workflow_runtime import WorkflowRuntime
+
+        runs_path = tmp_path / "workflow-runs.jsonl"
+        runs_path.write_text(
+            _json.dumps({"run_id": "cur#all-0001", "status": "completed"}) + "\n",
+            encoding="utf-8",
+        )
+        archive_path = Path(str(runs_path) + ".1")
+        archive_path.write_text(
+            _json.dumps({"run_id": "archived#all-0000", "status": "completed"}) + "\n",
+            encoding="utf-8",
+        )
+        runtime = WorkflowRuntime(EventBus(), runs_path=runs_path)
+
+        assert runtime.get_run("archived#all-0000") is None
+        assert "archived#all-0000" not in [r["run_id"] for r in runtime.load_runs()]
+        # 当前文件里的 run 仍然读得到
+        assert runtime.get_run("cur#all-0001") is not None
+
+    def test_t32_rotation_failure_does_not_affect_run(self, tmp_path):
+        """T32：轮转失败（runs_path 指向目录 ⇒ os.replace / open("a") 抛）
+        不许影响 run：run_now 仍返回 completed，且绝不向上抛。
+        断言只用 record 对象，不依赖 capsys/caplog/stdout 文本。"""
+        import asyncio
+        import json as _json
+        import os as _os
+        from pathlib import Path as _Path
+
+        from trimum_core.event_bus import EventBus
+        from trimum_core.workflow_runtime import WorkflowRuntime
+
+        # 构造一个能成功跑完（completed）的 workflow：handler 走 shell 的内置别名，
+        # 由 workflow_runtime 自身注册，不依赖 gateway。
+        yaml_text = """
+id: rot-completed
+name: 轮转失败不影响 run
+steps:
+  - trigger:
+      event_type: system.heartbeat
+    execute:
+      - agent_type: shell
+        instruction: "true"
+        timeout_seconds: 30
+"""
+        yaml_file = tmp_path / "wf.yaml"
+        yaml_file.write_text(yaml_text, encoding="utf-8")
+
+        # 先把 runs_path 建成「文件」（触发 stat >= 阈值），再删掉换成目录：
+        # os.replace(目录→文件.1) 对目录源抛 IsADirectoryError，写入 open("a") 也抛，
+        # 整个轮转+写入在 _persist_run 的 try 内被吞掉。
+        runs_dir = tmp_path / "runs.jsonl"
+        probe = runs_dir.with_suffix(".jsonl.tmp")
+        probe.write_text("x" * 100, encoding="utf-8")
+        _os.remove(probe)
+        runs_dir.mkdir()
+
+        runtime = WorkflowRuntime(EventBus(), runs_path=runs_dir, runs_max_bytes=10)
+        workflow = WorkflowDefV2.load_yaml(yaml_file)
+        runtime.register(workflow, source="file")
+        record = asyncio.run(runtime.run_now(workflow.id))
+
+        assert record.status == "completed"
+        # 轮转没发生：没有归档，runs_path 仍是目录
+        assert not _Path(str(runs_dir) + ".1").exists()
+        assert runs_dir.is_dir()
+        # 读侧同样安全：目录路径读不出任何 run
+        assert runtime.load_runs() == []
