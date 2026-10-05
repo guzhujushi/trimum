@@ -220,3 +220,25 @@ def test_preauthorized_bad_config_is_false(tmp_path):
 
     store3 = ApprovalStore(tmp_path / "s", config=WeirdRuleConfig())
     assert store3.preauthorized(tool="shell", cwd="/x") is False
+
+
+def test_claim_once_first_true_then_false_and_persists(tmp_path):
+    store = ApprovalStore(directory=tmp_path / "approvals")
+    assert store.claim_once("run-1:wf:n1") is True
+    assert store.claim_once("run-1:wf:n1") is False
+    fresh = ApprovalStore(directory=tmp_path / "approvals")
+    assert fresh.claim_once("run-1:wf:n1") is False  # 真落盘，新实例也领不到
+
+
+def test_claim_once_fail_closed_on_bad_directory(tmp_path):
+    blk = tmp_path / "blocked"
+    blk.write_text("x", encoding="utf-8")
+    assert ApprovalStore(directory=blk).claim_once("k") is False  # 目录是文件 ⇒ 不抛
+    assert ApprovalStore(directory=tmp_path / "approvals").claim_once("") is False  # 空 key 不许领
+
+
+def test_claim_once_does_not_pollute_pending_listing(tmp_path):
+    store = ApprovalStore(directory=tmp_path / "approvals")
+    assert store.claim_once("k") is True
+    assert store.list_pending() == []
+    assert [p for p in store.directory.glob("*.json")] == []  # 非递归：令牌在 claims/ 子目录

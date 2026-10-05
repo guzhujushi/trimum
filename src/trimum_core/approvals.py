@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 import os
 import time
 import uuid
@@ -275,6 +276,37 @@ class ApprovalStore:
                 continue
             records.append(record)
         return records
+
+    def claim_once(self, key: str, *, meta: dict[str, Any] | None = None) -> bool:
+        """一次性令牌申领（cfm1d）：首次 `True`，其余（已领过 / 任何异常）一律 `False`。
+
+        落盘在 `<approvals_dir>/claims/<sha256(key)>.json`（**子目录**，不污染
+        `list_pending()` 的 `*.json` 口径）。用 `O_CREAT|O_EXCL` 保证原子；坏 key /
+        不可写目录 / 已存在 ⇒ fail-closed 返回 False，**不抛**。
+        """
+        try:
+            text = str(key or "")
+            if not text:
+                return False
+            digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            directory = self._directory / "claims"
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"{digest}.json"
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            try:
+                payload = {
+                    "key": text,
+                    "claimed_at": float(self._clock()),
+                    "meta": dict(meta or {}),
+                }
+                os.write(fd, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            finally:
+                os.close(fd)
+            return True
+        except FileExistsError:
+            return False
+        except Exception:  # noqa: BLE001 —— fail-closed
+            return False
 
     def preauthorized(self, *, tool: str = "", cwd: str = "", config: Any = None) -> bool:
         """声明式放行：tool 精确（空=任意）+ cwd 前缀（空=任意）；无规则/异常 ⇒ False（fail-closed）。"""

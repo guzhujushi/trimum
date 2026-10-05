@@ -190,7 +190,7 @@ class TestShellNodePreauthorized:
                 "approval_rules": [{"tool": "shell", "cwd": str(tmp_path)}],
             },
         )
-        result = await runtime._handle_shell_node("wf", node_ok, {})
+        result = await runtime._handle_shell_node("wf", node_ok, {"triggered_by": "manual", "run_id": "run-1"})
         assert result["success"] is True
         assert registry.dispatched == ["echo hello"]
         # 没落 pending
@@ -211,3 +211,94 @@ class TestShellNodePreauthorized:
         assert "TOOL_EXECUTION_FAILED" in str(exc.value) or "failed" in str(exc.value).lower()
         assert registry2.dispatched == []
         assert len(_pending_files(store2)) == 1
+
+
+class TestDeclaredApprovalOneShot:
+    def _node_with_rules(self, tmp_path: Path) -> NodeDefinition:
+        return NodeDefinition(
+            id="step_0_task_0",
+            label="echo hello",
+            handler="shell",
+            config={
+                "instruction": "echo hello",
+                "approval_rules": [{"tool": "shell", "cwd": str(tmp_path)}],
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_event_triggered_rules_do_not_auto_approve(self, tmp_path):
+        store = ApprovalStore(directory=tmp_path / "approvals")
+        gw, registry = _confirm_gateway(tmp_path, approval_store=store)
+        runtime = WorkflowRuntime(EventBus(), gateway=gw)
+        node = self._node_with_rules(tmp_path)
+        with pytest.raises(Exception):
+            await runtime._handle_shell_node("wf", node, {"triggered_by": "event", "run_id": "run-ev"})
+        assert registry.dispatched == []
+        assert len(_pending_files(store)) == 1
+
+    @pytest.mark.asyncio
+    async def test_declared_rules_are_one_shot_within_run(self, tmp_path):
+        store = ApprovalStore(directory=tmp_path / "approvals")
+        gw, registry = _confirm_gateway(tmp_path, approval_store=store)
+        runtime = WorkflowRuntime(EventBus(), gateway=gw)
+        node = self._node_with_rules(tmp_path)
+
+        first = await runtime._handle_shell_node("wf", node, {"triggered_by": "manual", "run_id": "run-x"})
+        assert first["success"] is True
+        assert registry.dispatched == ["echo hello"]
+
+        with pytest.raises(Exception):
+            await runtime._handle_shell_node("wf", node, {"triggered_by": "manual", "run_id": "run-x"})
+        assert registry.dispatched == ["echo hello"]
+        assert len(_pending_files(store)) == 1
+
+    @pytest.mark.asyncio
+    async def test_declared_rules_allowed_again_in_new_run(self, tmp_path):
+        store = ApprovalStore(directory=tmp_path / "approvals")
+        gw, registry = _confirm_gateway(tmp_path, approval_store=store)
+        runtime = WorkflowRuntime(EventBus(), gateway=gw)
+        node = self._node_with_rules(tmp_path)
+
+        first = await runtime._handle_shell_node("wf", node, {"triggered_by": "manual", "run_id": "run-a"})
+        assert first["success"] is True
+        second = await runtime._handle_shell_node("wf", node, {"triggered_by": "manual", "run_id": "run-b"})
+        assert second["success"] is True
+        assert registry.dispatched == ["echo hello", "echo hello"]
+        assert _pending_files(store) == []
+
+    @pytest.mark.asyncio
+    async def test_claim_failure_is_fail_closed(self, tmp_path, monkeypatch):
+        store = ApprovalStore(directory=tmp_path / "approvals")
+        gw, registry = _confirm_gateway(tmp_path, approval_store=store)
+        runtime = WorkflowRuntime(EventBus(), gateway=gw)
+        node = self._node_with_rules(tmp_path)
+        monkeypatch.setattr(store, "claim_once", lambda *a, **k: False)
+        with pytest.raises(Exception):
+            await runtime._handle_shell_node("wf", node, {"triggered_by": "manual", "run_id": "run-f"})
+        assert registry.dispatched == []
+        assert len(_pending_files(store)) == 1
+
+    @pytest.mark.asyncio
+    async def test_missing_store_keeps_cli_behaviour(self, tmp_path):
+        gw, registry = _confirm_gateway(tmp_path)  # 不传 approval_store
+        runtime = WorkflowRuntime(EventBus(), gateway=gw)
+        node = self._node_with_rules(tmp_path)
+        result = await runtime._handle_shell_node("wf", node, {"triggered_by": "manual", "run_id": "run-nostore"})
+        assert result["success"] is True
+        assert registry.dispatched == ["echo hello"]
+
+    @pytest.mark.asyncio
+    async def test_no_rules_node_never_touches_store(self, tmp_path):
+        store = ApprovalStore(directory=tmp_path / "approvals")
+        gw, registry = _confirm_gateway(tmp_path, approval_store=store)
+        runtime = WorkflowRuntime(EventBus(), gateway=gw)
+        node = NodeDefinition(
+            id="step_0_task_0",
+            label="echo hello",
+            handler="shell",
+            config={"instruction": "echo hello"},
+        )
+        with pytest.raises(Exception):
+            await runtime._handle_shell_node("wf", node, {"triggered_by": "manual", "run_id": "run-norules"})
+        assert len(_pending_files(store)) == 1
+        assert not (store.directory / "claims").exists()

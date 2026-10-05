@@ -915,6 +915,37 @@ class WorkflowRuntime:
             )
         return self._gateway
 
+    def _authorize_declared_approval(
+        self,
+        gateway: Any,
+        wf_id: str,
+        node: NodeDefinition,
+        context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """cfm1d：声明放行的一次性令牌。返回**实际可用**的规则列表（不可用 ⇒ []）。
+
+        口径（三条缺一不可）：
+          ① `context["triggered_by"] == "manual"` —— 事件触发不认声明（决策 18 / G-3）；
+          ② 网关带 `approval_store.claim_once`，且 `(run_id, wf_id, node.id)` 首次申领成功；
+          ③ 任一环缺失 / 抛异常 ⇒ []（fail-closed，退回网关 pending 路径），绝不静默放行。
+        """
+        rules = list(node.config.get("approval_rules") or [])
+        if not rules:
+            return []
+        if str(context.get("triggered_by") or "") != "manual":
+            return []
+        store = getattr(gateway, "_approval_store", None)
+        claim = getattr(store, "claim_once", None)
+        if claim is None:
+            return []
+        run_id = str(context.get("run_id") or "")
+        try:
+            if not claim(f"{run_id}:{wf_id}:{node.id}", meta={"workflow_id": wf_id, "node_id": node.id}):
+                return []
+        except Exception:  # noqa: BLE001 —— fail-closed
+            return []
+        return rules
+
     async def _handle_shell_node(
         self,
         wf_id: str,
@@ -944,7 +975,7 @@ class WorkflowRuntime:
             agent_id=self._agent_id,
             timeout_seconds=node.timeout_seconds,
             source_type=self._source_type,
-            approval_rules=list(node.config.get("approval_rules") or []),
+            approval_rules=self._authorize_declared_approval(gateway, wf_id, node, context),
         )
         response = await gateway.execute(request)
 
