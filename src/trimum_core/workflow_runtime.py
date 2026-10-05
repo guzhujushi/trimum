@@ -50,6 +50,7 @@ from pydantic import BaseModel, Field
 
 from .event_bus import EventBus
 from .paths import trimum_path
+from .codex_launcher import resolve_codex_argv
 from .models import (
     ExecuteRequest,
     SourceType,
@@ -69,6 +70,9 @@ log = logging.getLogger("trimum_core.workflow_runtime")
 
 #: ``agent_type`` 取这些值时按「本地命令」处理（走 ToolGateway）
 SHELL_AGENT_ALIASES = ("shell", "bash", "sh", "zsh", "terminal")
+
+#: ``agent_type`` 取这些值时拉起 codex CLI（决策 18；仅人工激活）
+CODEX_AGENT_ALIASES = ("codex", "codex-cli")
 
 #: 需要 Agent 判断（而不是本地命令）的步骤编译成这个 agent 类型
 REVIEW_AGENT = "trm-agent"
@@ -264,6 +268,10 @@ class WorkflowRuntime:
         # ``agent_type: shell`` → 本地命令处理器（走 ToolGateway）
         for alias in SHELL_AGENT_ALIASES:
             self._engine.register_handler(alias, self._handle_shell_node)
+
+        # ``agent_type: codex`` → 拉起 codex CLI（决策 18；仅人工激活）
+        for alias in CODEX_AGENT_ALIASES:
+            self._engine.register_handler(alias, self._handle_codex_node)
 
     # ── 只读属性 ──────────────────────────────────────────
 
@@ -971,6 +979,88 @@ class WorkflowRuntime:
             "workflow_id": wf_id,
         }
 
+    async def _handle_codex_node(
+        self,
+        wf_id: str,
+        node: NodeDefinition,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """``agent_type: codex`` 节点：拉起 codex CLI（决策 18）。
+
+        口径：① **只允许人工激活** —— ``context["triggered_by"]`` 不是 ``"manual"``
+        一律拒（G-3：事件自动触发不派 codex 窗口）；② 命令行经 ``resolve_codex_argv``
+        解析（env > 配置 > 默认，决策 24）；③ 非零退出/超时抛 ``TOOL_EXECUTION_FAILED``。
+
+        **不走 ToolGateway**：workflow YAML 由人书写、``trm workflow run`` 由人输入，
+        与人类终端命令同口径（决策 18）；事件触发那条路已被上面的闸门挡住。
+        """
+        triggered_by = str(context.get("triggered_by") or "")
+        if triggered_by != "manual":
+            raise TrimumError(
+                TRMErrorCode.TOOL_EXECUTION_FAILED,
+                message=(
+                    f"codex node '{node.id}' 只允许人工激活（决策 18 G-3）："
+                    f"triggered_by={triggered_by or 'unknown'}"
+                ),
+            )
+
+        prompt = str(node.config.get("instruction") or "").strip()
+        if not prompt:
+            raise TrimumError(
+                TRMErrorCode.WORKFLOW_VALIDATION_FAILED,
+                message=f"codex node '{node.id}' has no instruction (prompt for codex)",
+            )
+
+        argv = resolve_codex_argv(prompt)
+        env = {**os.environ}
+        env["TRIMUM_WORKFLOW_ID"] = str(wf_id)
+        env["TRIMUM_WORKFLOW_NODE"] = str(node.id)
+        cwd = node.config.get("cwd") or None
+        timeout = float(node.timeout_seconds or 30.0)
+
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            cwd=str(cwd) if cwd else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise TrimumError(
+                TRMErrorCode.TOOL_EXECUTION_FAILED,
+                message=f"codex node '{node.id}' timed out after {timeout}s",
+                context={"command": argv[0], "timeout_seconds": timeout},
+            )
+
+        output = (stdout or b"").decode("utf-8", errors="replace")
+        exit_code = int(proc.returncode or 0)
+        if exit_code != 0:
+            raise TrimumError(
+                TRMErrorCode.TOOL_EXECUTION_FAILED,
+                message=(
+                    f"codex node '{node.id}' failed (exit={exit_code}) "
+                    f"{_clip(output, 400)}"
+                ).strip(),
+                context={
+                    "command": argv[0],
+                    "exit_code": exit_code,
+                    "output": _clip(output, 400),
+                },
+            )
+
+        return {
+            "success": True,
+            "agent_type": "codex",
+            "command": argv[0],
+            "exit_code": exit_code,
+            "output": _clip(output, 4000),
+            "workflow_id": wf_id,
+        }
+
 
 __all__ = [
     "DEFAULT_MAX_RUNS",
@@ -979,6 +1069,7 @@ __all__ = [
     "REVIEW_AGENT",
     "RegisteredWorkflow",
     "SHELL_AGENT_ALIASES",
+    "CODEX_AGENT_ALIASES",
     "WorkflowRunRecord",
     "WorkflowRuntime",
     "workflow_enabled",
