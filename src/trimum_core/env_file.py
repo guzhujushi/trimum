@@ -19,6 +19,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from .paths import trimum_path
+
 log = logging.getLogger("trimum_core.env_file")
 
 ENV_FILE_VAR = "TRIMUM_ENV_FILE"
@@ -35,9 +37,15 @@ def candidate_paths() -> list[Path]:
     home = os.environ.get("TRIMUM_HOME", "").strip()
     if home:
         paths.append(Path(home).expanduser() / ".env")
-    paths.append(Path.home() / ".trimum" / ".env")
+    paths.append(trimum_path(".env"))
     paths.append(Path.cwd() / ".env")
-    return paths
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            unique.append(path)
+    return unique
 
 
 def parse_env_file(text: str) -> dict[str, str]:

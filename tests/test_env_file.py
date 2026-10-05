@@ -88,8 +88,13 @@ def test_candidate_order(tmp_path, monkeypatch):
     paths = [str(p) for p in env_file.candidate_paths()]
     assert paths[0] == str(tmp_path / "a.env")
     assert paths[1] == str(tmp_path / "home" / ".env")
-    assert any(p.endswith(".trimum" + os.sep + ".env") or p.endswith(".trimum/.env") for p in paths[2:])
     assert paths[-1].endswith(".env")
+
+    # TRIMUM_HOME 未设时，默认安装落点 ~/.trimum/.env 仍必须出现在候选里
+    monkeypatch.delenv("TRIMUM_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "host"))
+    fallback = [str(p) for p in env_file.candidate_paths()]
+    assert str(tmp_path / "host" / ".trimum" / ".env") in fallback
 
 
 def test_missing_file_is_a_noop(tmp_path, monkeypatch):

@@ -217,9 +217,11 @@ def get_daemon_status(config: Any) -> dict[str, Any]:
 
 def read_pid_file(config: Any) -> int | None:
     """Return a daemon PID from a conventional pid file, if available."""
+    from ..paths import trimum_path
+
     candidates = [
-        Path.home() / ".trimum" / "trimum.pid",
-        Path.home() / ".trimum" / "trmd.pid",
+        trimum_path("trimum.pid"),
+        trimum_path("trmd.pid"),
         Path("/run/trimum/trimum.pid"),
         Path("/tmp/trimum.pid"),
     ]

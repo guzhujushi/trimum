@@ -174,3 +174,62 @@ def test_agents_root_env_and_default(tmp_path, monkeypatch):
 
     monkeypatch.setenv("TRIMUM_AGENTS_DIR", str(tmp_path / "a-env"))
     assert al.agents_root() == tmp_path / "a-env"
+
+
+def test_xdg_data_dir_env_and_default(tmp_path, monkeypatch):
+    """xdg_data_dir(): env 覆盖 > 默认（Path.home() 兜底属允许项）。"""
+    from trimum_core.paths import xdg_data_dir
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    assert xdg_data_dir("agents") == tmp_path / "xdg" / "trimum" / "agents"
+
+    monkeypatch.delenv("XDG_DATA_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path / "host"))
+    assert xdg_data_dir() == tmp_path / "host" / ".local" / "share" / "trimum"
+
+
+def test_read_pid_file_follows_trimum_home(tmp_path, monkeypatch):
+    """read_pid_file：配置 daemon.pid_path 最优先 > TRIMUM_HOME > 缺文件 None。"""
+    from trimum_core.cli._utils import read_pid_file
+
+    class _Cfg:
+        def get(self, key, default=None):
+            return default
+
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir(parents=True)
+    pid_file = tmp_path / "home" / "trimum.pid"
+    pid_file.write_text("4242\n", encoding="utf-8")
+    assert read_pid_file(_Cfg()) == 4242
+
+    configured = tmp_path / "cfg.pid"
+    configured.write_text("777\n", encoding="utf-8")
+
+    class _CfgWithPid:
+        def get(self, key, default=None):
+            if key == "daemon.pid_path":
+                return str(configured)
+            return default
+
+    assert read_pid_file(_CfgWithPid()) == 777
+
+    class _CfgEmpty:
+        def get(self, key, default=None):
+            return default
+
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path / "empty"))
+    assert read_pid_file(_CfgEmpty()) is None
+
+
+def test_plan_for_uses_shared_xdg_helper(tmp_path, monkeypatch):
+    """sandbox_exec 数据目录走 paths.xdg_data_dir helper 而不是就地拼路径。"""
+    from trimum_core import sandbox_exec as sx
+
+    sentinel = str(tmp_path / "sentinel-data")
+    monkeypatch.setattr(sx, "xdg_data_dir", lambda *a: sentinel)
+    sx.reset_cache()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path / "home"))
+    plan = sx.plan_for(None, cwd=str(tmp_path), mode="readonly")
+    assert sentinel in set(plan.sources) | {entry["path"] for entry in plan.skipped}

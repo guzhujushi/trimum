@@ -43,7 +43,7 @@ from typing import Any, Iterable, Optional, Sequence
 
 from . import seccomp_exec
 from .logger import get_logger
-from .paths import trimum_home
+from .paths import trimum_home, xdg_data_dir
 
 logger = get_logger("trimum_core.sandbox_exec")
 
@@ -952,7 +952,7 @@ def plan_for(
                 })
 
     data_root = str(trimum_home())
-    trimum_data_dir = str(Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "trimum")
+    trimum_data_dir = str(xdg_data_dir())
 
     # 读面候选：(路径, 来源)。顺序与改动前**逐条一致**，只是每条多带一个来源标签。
     declared_read_tagged = [(path, SOURCE_MANIFEST) for path in declared_read]
