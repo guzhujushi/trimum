@@ -115,3 +115,15 @@ def test_ensure_loaded_runs_once(tmp_path, monkeypatch):
     os.environ.pop("TRIMUM_TEST_ONCE")
     env_file.ensure_loaded()
     assert "TRIMUM_TEST_ONCE" not in os.environ, "第二次调用不该重复加载"
+
+
+def test_candidate_paths_are_deduplicated(tmp_path, monkeypatch):
+    """cfg2b 遗留护栏：TRIMUM_HOME 设定时第 2/3 条候选同源，必须去重。
+
+    删掉 candidate_paths() 的去重段 ⇒ 本用例必须变红。
+    """
+    monkeypatch.setenv("TRIMUM_ENV_FILE", str(tmp_path / "a.env"))
+    monkeypatch.setenv("TRIMUM_HOME", str(tmp_path / "home"))
+    paths = env_file.candidate_paths()
+    assert len(paths) == len(set(paths)), f"候选有重复项：{paths}"
+    assert str(tmp_path / "home" / ".env") in [str(p) for p in paths]
