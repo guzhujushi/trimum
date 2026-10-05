@@ -55,6 +55,7 @@ from . import sandbox_exec
 from .audit_store import AuditStore
 from .tool_dispatchers import DispatcherRegistry
 from .paths import data_dir
+from .approvals import match_allow_rules
 from .tool_file_loader import is_enabled, scan_tools
 from .sec_monitor import OpContextClassifier, SecMonitor
 from .sec_executor import SecExecutor, SecurityRuntime
@@ -878,7 +879,9 @@ class ToolGateway:
         if action is Action.CONFIRM and not self.interactive and self._approval_store is not None:
             _cwd = request.cwd or self.work_dir or ""
             _tool = request.tool.value if hasattr(request.tool, "value") else str(request.tool)
-            if self._approval_store.preauthorized(tool=_tool, cwd=_cwd):
+            if self._approval_store.preauthorized(tool=_tool, cwd=_cwd) or match_allow_rules(
+                getattr(request, "approval_rules", None), tool=_tool, cwd=_cwd
+            ):
                 action = Action.AUTO
                 reason = f"[preauthorized] {reason}"
                 self._record_audit(

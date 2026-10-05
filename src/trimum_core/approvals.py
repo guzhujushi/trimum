@@ -112,6 +112,26 @@ def load_allow_rules(config: Any = None) -> list[dict[str, Any]]:
     return [rule for rule in raw if isinstance(rule, dict)]
 
 
+def match_allow_rules(rules: Any, *, tool: str = "", cwd: str = "") -> bool:
+    """声明式放行匹配：tool 精确（空=任意）+ cwd 前缀（空=任意）；非 list / 异常 ⇒ False（fail-closed）。"""
+    if not isinstance(rules, list):
+        return False
+    try:
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            rule_tool = rule.get("tool", "") or ""
+            if rule_tool and rule_tool != tool:
+                continue
+            rule_cwd = rule.get("cwd", "")
+            if not (cwd or "").startswith(rule_cwd):
+                continue
+            return True
+        return False
+    except Exception:
+        return False
+
+
 class ApprovalStore:
     """一次性审批请求的文件存储（web/API/workflow 与 CLI 共用同一份落盘）。"""
 
@@ -260,16 +280,7 @@ class ApprovalStore:
         """声明式放行：tool 精确（空=任意）+ cwd 前缀（空=任意）；无规则/异常 ⇒ False（fail-closed）。"""
         try:
             cfg = config if config is not None else self._config
-            rules = load_allow_rules(cfg)
-            for rule in rules:
-                rule_tool = rule.get("tool", "") or ""
-                if rule_tool and rule_tool != tool:
-                    continue
-                rule_cwd = rule.get("cwd", "")
-                if not (cwd or "").startswith(rule_cwd):
-                    continue
-                return True
-            return False
+            return match_allow_rules(load_allow_rules(cfg), tool=tool, cwd=cwd)
         except Exception:
             return False
 
@@ -343,6 +354,7 @@ __all__ = [
     "ApprovalRequest",
     "ApprovalStore",
     "load_allow_rules",
+    "match_allow_rules",
     "DEFAULT_TTL_SECONDS",
     "STATUS_PENDING",
     "STATUS_APPROVED",

@@ -1040,6 +1040,7 @@ class WorkflowDefV2(BaseModel):
     description: str = ""
     steps: list[WorkflowStep] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
+    approvals: dict[str, Any] = Field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # 文件化加载
@@ -1120,6 +1121,16 @@ class WorkflowDefV2(BaseModel):
 
         return result
 
+    def resolve_approval_rules(self, task: "AgentTask") -> list[dict[str, Any]]:
+        """节点级 `approvals` 非空 ⇒ 整体覆盖顶层（不是逐键合并）；否则用顶层。取 `allow` 里的 dict 元素。"""
+        effective = task.approvals if getattr(task, "approvals", None) else self.approvals
+        if not isinstance(effective, dict):
+            return []
+        allow = effective.get("allow", [])
+        if not isinstance(allow, list):
+            return []
+        return [rule for rule in allow if isinstance(rule, dict)]
+
     def to_workflow_definition(self) -> "WorkflowDefinition":
         """把 v2 定义（监听器 → 执行组）编译成可执行的 Node/Edge 定义。
 
@@ -1152,6 +1163,10 @@ class WorkflowDefV2(BaseModel):
                     config.setdefault("input_data", dict(task.input_data))
                 if step.trigger.event_type:
                     config.setdefault("trigger_event", step.trigger.event_type)
+
+                rules = self.resolve_approval_rules(task)
+                if rules:
+                    config["approval_rules"] = rules
 
                 nodes.append(NodeDefinition(
                     id=node_id,

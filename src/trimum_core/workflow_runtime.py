@@ -934,6 +934,7 @@ class WorkflowRuntime:
             agent_id=self._agent_id,
             timeout_seconds=node.timeout_seconds,
             source_type=self._source_type,
+            approval_rules=list(node.config.get("approval_rules") or []),
         )
         response = await gateway.execute(request)
 

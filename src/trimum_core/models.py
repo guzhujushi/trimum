@@ -434,6 +434,8 @@ class ExecuteRequest(BaseModel):
     source_type: SourceType = SourceType.UNKNOWN
     # JIT 授权令牌
     jit_token: Optional[str] = None
+    # workflow 节点声明的放行规则（cfm1c）：空 list ⇒ 与现在逐字节一致
+    approval_rules: list[dict[str, Any]] = Field(default_factory=list)
     # 原始命令（执行前保留，用于审计/脱敏）
     raw_command: str = ""
     # 是否跳过 cwd jail 检查（默认不跳过）
@@ -643,6 +645,7 @@ class AgentTask(BaseModel):
     input_data: dict[str, Any] = Field(default_factory=dict)  # 上层/前驱节点的输出
     input_from: list[str] = Field(default_factory=list)  # 依赖的前驱节点 ID 列表
     config: dict[str, Any] = Field(default_factory=dict)
+    approvals: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: float = 120.0
 
 
