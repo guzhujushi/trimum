@@ -68,6 +68,25 @@ PolicyEngine 规则匹配
                         └── normal  → allow
 ```
 
+### 非交互 confirm：一次性审批通道（`trm approve`，2026-10-05）
+
+`confirm（弹窗）` 只有 CLI 有人值守时可用。web / API / workflow / agent-sdk 这些非交互通道
+（`interactive=False`）拿不到弹窗，**不再直接执行**：
+
+1. 先查声明式放行表 `approvals.allow`（元素 `{tool, cwd}`；`tool` 精确匹配、`cwd` 前缀匹配，空串 = 任意）；
+2. 命中 ⇒ 放行（审计事件 `approval_preauthorized`）；
+3. 未命中 ⇒ 落一条 pending 请求（`<TRIMUM_HOME>/approvals/<id>.json`，原子写 0600）并**拒执行**（fail-closed），
+   错误信息里带 `trm approve <id>`；人在 CLI 批准 / 拒绝后由调用方 `consume()` 一次性取走结果，TTL 过期不放行。
+
+| 配置项 | 环境变量 | 默认 | 说明 |
+|---|---|---|---|
+| `approvals.allow` | — | `[]` | 声明式放行表（列表，元素 `{tool, cwd}`）；缺失 / 类型不对 / 坏 YAML ⇒ 视为无规则（fail-closed） |
+| `approvals.ttl_seconds` | `TRIMUM_APPROVAL_TTL` | `300` | pending 超时秒数；显式参数 > 环境变量 > 配置 > 默认，解析失败或 `<=0` 回 300 |
+| `paths.approvals` | `TRIMUM_APPROVALS_DIR` | `~/.trimum/approvals` | pending 文件落点（一请求一 `<id>.json`） |
+
+CLI：`trm approve <id>`（批准）/ `trm approve <id> --deny`（拒绝）/ `trm approve --list`（列出 pending）。
+**默认不配规则 ⇒ 非交互 confirm 一律拒绝**；`interactive=True` 的弹窗路径不受影响。
+
 ## Behavior Monitor 检测项
 
 | 检测 | 方法 | 阈值 |
