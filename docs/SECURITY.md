@@ -87,6 +87,22 @@ PolicyEngine 规则匹配
 CLI：`trm approve <id>`（批准）/ `trm approve <id> --deny`（拒绝）/ `trm approve --list`（列出 pending）。
 **默认不配规则 ⇒ 非交互 confirm 一律拒绝**；`interactive=True` 的弹窗路径不受影响。
 
+workflow 定义也能声明放行（cfm1c）：**顶层** `approvals.allow` 生效于该 workflow 的所有节点，
+**节点级**同名键（`steps[].execute[].approvals`）非空时**整体覆盖**顶层（不是逐键合并）；都未声明 ⇒ 不注入任何规则。
+
+```yaml
+id: deploy
+approvals:
+  allow:
+    - {tool: shell, cwd: /srv/repo}   # 该 workflow 的所有 shell 节点在 /srv/repo 前缀下放行
+steps:
+  - trigger: {event_type: workflow.request}
+    execute:
+      - agent_type: shell
+        instruction: git pull
+        approvals: {allow: []}        # 该节点整体覆盖顶层（空 = 不放行，收紧到默认 fail-closed）
+```
+
 ## Behavior Monitor 检测项
 
 | 检测 | 方法 | 阈值 |
