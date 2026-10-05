@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from trimum_core import sandbox_state
+from trimum_core.paths import trimum_home
 from .._utils import check_env_keys, emit
 
 
@@ -55,7 +56,7 @@ def _check_packages() -> dict:
 
 
 def _check_directories() -> dict:
-    base = Path.home() / ".trimum"
+    base = trimum_home()
     expected = ["agents", "tools", "memory", "logs", "config.yaml"]
     entries: list[dict] = []
     ok = True

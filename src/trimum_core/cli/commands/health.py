@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from .._utils import check_env_keys, emit
+from trimum_core.paths import trimum_path
 
 
 _CORE_MODULES = (
@@ -54,7 +55,7 @@ def _check_config() -> dict:
 
     config = Config()
     configured = config.config_path
-    windows_fallback = Path.home() / ".trimum" / "config.yaml"
+    windows_fallback = trimum_path("config.yaml")
     exists = configured.exists() or windows_fallback.exists()
     return {
         "path": str(configured),

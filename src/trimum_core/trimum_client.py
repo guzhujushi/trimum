@@ -26,6 +26,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .paths import xdg_data_dir
+
 
 #: 系统级 daemon 的 socket 位置（trmd.service 的 RuntimeDirectory=trimum）。
 SYSTEM_RUNTIME_SOCKET = Path("/run/trimum/trimum.sock")
@@ -61,10 +63,7 @@ def socket_candidates() -> list[Path]:
     if hasattr(os, "getuid"):
         candidates.append(Path("/run") / "user" / str(os.getuid()) / "trimum.sock")
 
-    data_home = os.environ.get("XDG_DATA_HOME") or str(
-        Path.home() / ".local" / "share"
-    )
-    candidates.append(Path(data_home) / "trimum" / "trimum.sock")
+    candidates.append(xdg_data_dir("trimum.sock"))
     return candidates
 
 

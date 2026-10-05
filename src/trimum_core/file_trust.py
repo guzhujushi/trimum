@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import FileTrustLevel
+from .paths import trimum_path
 
 
 class FileTrustTracker:
@@ -27,10 +28,9 @@ class FileTrustTracker:
 
     def __init__(self, db_path: Optional[Path] = None):
         if db_path is None:
-            home = Path.home()
-            data_dir = home / ".trimum" / "data"
-            data_dir.mkdir(parents=True, exist_ok=True)
-            db_path = data_dir / "file_trust.db"
+            trust_dir = trimum_path("data")
+            trust_dir.mkdir(parents=True, exist_ok=True)
+            db_path = trust_dir / "file_trust.db"
         self.db_path = db_path
         self.conn = sqlite3.connect(str(db_path))
         self._init_db()

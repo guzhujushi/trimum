@@ -17,6 +17,7 @@ from .models import (
     FileTrustLevel,
     AgentSecurityConfig,
 )
+from .paths import trimum_path
 
 DEFAULT_SECURITY_YAML = """
 # trimum 安全等级体系
@@ -132,9 +133,8 @@ class SecurityConfig:
 
     @staticmethod
     def _default_path() -> Path:
-        """返回默认配置路径 ~/.trimum/security.yaml"""
-        home = Path.home()
-        return home / ".trimum" / "security.yaml"
+        """返回默认配置路径（默认 ``~/.trimum/security.yaml``，随 ``TRIMUM_HOME`` 变）"""
+        return trimum_path("security.yaml")
 
     def load(self) -> "SecurityConfig":
         """从配置文件加载。文件不存在时用内置默认值。"""

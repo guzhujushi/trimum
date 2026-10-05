@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .._utils import emit, fail, run_async
+from trimum_core.paths import trimum_path
 
 
 def add_subparsers(subparsers: argparse._SubParsersAction) -> None:
@@ -70,7 +71,7 @@ def _resolve_memory_root(config) -> Path:
     env_path = os.environ.get("TRIMUM_MEMORY_DIR")
     if env_path:
         candidates.append(Path(env_path))
-    candidates.append(Path.home() / ".trimum" / "memory")
+    candidates.append(trimum_path("memory"))
     candidates.append(Path(config.context_db_path).parent / "memory")
     candidates.append(Path(tempfile.gettempdir()) / "trimum-memory")
 

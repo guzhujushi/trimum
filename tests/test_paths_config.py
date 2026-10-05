@@ -9,6 +9,7 @@ touches the real ``~/.trimum``.
 from __future__ import annotations
 
 from pathlib import Path
+import types
 
 
 def test_data_dir_default(tmp_path, monkeypatch):
@@ -233,3 +234,77 @@ def test_plan_for_uses_shared_xdg_helper(tmp_path, monkeypatch):
     monkeypatch.setenv("TRIMUM_HOME", str(tmp_path / "home"))
     plan = sx.plan_for(None, cwd=str(tmp_path), mode="readonly")
     assert sentinel in set(plan.sources) | {entry["path"] for entry in plan.skipped}
+
+
+def test_security_config_default_path_follows_trimum_home(tmp_path, monkeypatch):
+    """SecurityConfig 默认路径走 paths helper，随 TRIMUM_HOME 变。"""
+    from trimum_core.security_config import SecurityConfig
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("TRIMUM_HOME", str(home))
+    assert SecurityConfig._default_path() == home / "security.yaml"
+
+    explicit = tmp_path / "explicit.yaml"
+    assert SecurityConfig(path=explicit).path == explicit
+
+
+def test_file_trust_default_db_path_follows_trimum_home(tmp_path, monkeypatch):
+    """FileTrustTracker 默认 db 路径走 paths helper，且父目录被创建。"""
+    from trimum_core.file_trust import FileTrustTracker
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("TRIMUM_HOME", str(home))
+    tracker = FileTrustTracker()
+    assert tracker.db_path == home / "data" / "file_trust.db"
+    assert (home / "data").is_dir()
+
+
+def test_memory_root_follows_trimum_home(tmp_path, monkeypatch):
+    """memory root 候选随 TRIMUM_HOME 变。"""
+    from trimum_core.cli.commands.memory import _resolve_memory_root
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("TRIMUM_HOME", str(home))
+    monkeypatch.delenv("TRIMUM_MEMORY_DIR", raising=False)
+    cfg = types.SimpleNamespace(context_db_path=str(tmp_path / "ctx" / "context.db"))
+    assert _resolve_memory_root(cfg) == home / "memory"
+
+
+def test_client_socket_candidates_follow_xdg_data(tmp_path, monkeypatch):
+    """trimum_client 的数据目录候选：① 跟随 XDG_DATA_HOME；② 调用点真的接的是 paths helper。
+
+    判别力在 ②：spy 掉模块里的 ``xdg_data_dir`` 后，它必须被调用、且返回值进候选列表；
+    把调用点改回就地拼 ``XDG_DATA_HOME/trimum/trimum.sock`` ⇒ 本用例必红。
+    """
+    from trimum_core import trimum_client
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    assert tmp_path / "xdg" / "trimum" / "trimum.sock" in trimum_client.socket_candidates()
+
+    sentinel = tmp_path / "sentinel" / "trimum.sock"
+    monkeypatch.setattr(trimum_client, "xdg_data_dir", lambda *a: sentinel)
+    assert sentinel in trimum_client.socket_candidates()
+
+
+def test_doctor_directories_follow_trimum_home(tmp_path, monkeypatch):
+    """doctor 目录检查的 base 随 TRIMUM_HOME 变。"""
+    from trimum_core.cli.commands.doctor import _check_directories
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("TRIMUM_HOME", str(home))
+    assert _check_directories()["base"] == str(home)
+
+
+def test_health_config_fallback_follows_trimum_home(tmp_path, monkeypatch):
+    """health 配置检查的 fallback 路径随 TRIMUM_HOME 变。"""
+    monkeypatch.setattr(
+        "trimum_core.config.Config",
+        lambda *a, **k: types.SimpleNamespace(config_path=tmp_path / "missing.yaml"),
+    )
+    from trimum_core.cli.commands.health import _check_config
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("TRIMUM_HOME", str(home))
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.yaml").write_text("{}", encoding="utf-8")
+    assert _check_config()["exists"] is True
