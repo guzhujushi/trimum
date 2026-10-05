@@ -159,8 +159,10 @@ class TrimumAgent:
                     # 触发弹窗，如果没实现就拒绝
                     confirm_result = await self._security.confirm(decision)
                     if confirm_result.action != "allow":
+                        _aid = (getattr(decision, "metadata", None) or {}).get("approval_id", "")
                         raise PermissionError(
                             f"Security Agent denied (user): {decision.reason}"
+                            + (f" — pending approval id={_aid}; run `trm approve {_aid}`" if _aid else "")
                         )
 
             # 3. 发布事件（如果有 Event Bus）
@@ -210,8 +212,10 @@ class TrimumAgent:
                 if not confirmed:
                     confirm_result = await self._security.confirm(decision)
                     if confirm_result.action != "allow":
+                        _aid = (getattr(decision, "metadata", None) or {}).get("approval_id", "")
                         raise PermissionError(
                             f"Security Agent denied (user): {decision.reason}"
+                            + (f" — pending approval id={_aid}; run `trm approve {_aid}`" if _aid else "")
                         )
 
             return await fn(*args, **kwargs)

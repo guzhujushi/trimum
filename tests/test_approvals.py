@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from trimum_core.approvals import (  # noqa: E402
     ApprovalStore,
+    load_allow_rules,
     DEFAULT_TTL_SECONDS,
     STATUS_APPROVED,
     STATUS_CONSUMED,
@@ -123,3 +124,99 @@ def test_missing_request_returns_none(tmp_path, monkeypatch):
     assert store.get("nope") is None
     assert store.decide("nope", approved=True) is None
     assert store.consume("nope") is None
+
+
+def test_load_allow_rules_missing_and_broken(monkeypatch):
+    # 无配置（Config 文件不存在）⇒ []
+    class NoConfig:
+        def get(self, key, default=None):
+            return default
+
+    assert load_allow_rules(NoConfig()) == []
+
+    # approvals.allow 不是 list（字符串）⇒ []
+    class BadTypeConfig:
+        def get(self, key, default=None):
+            assert key == "approvals.allow"
+            return "not-a-list"
+
+    assert load_allow_rules(BadTypeConfig()) == []
+
+    # 列表里混入非 dict 元素 ⇒ 只留 dict
+    class MixedConfig:
+        def get(self, key, default=None):
+            assert key == "approvals.allow"
+            return [{"tool": "shell"}, "str", 3, None, {"tool": "shell", "cwd": "/srv"}]
+
+    rules = load_allow_rules(MixedConfig())
+    assert rules == [{"tool": "shell"}, {"tool": "shell", "cwd": "/srv"}]
+
+    # 坏配置（get 抛异常）⇒ []（不许抛）
+    class ExplodingConfig:
+        def get(self, key, default=None):
+            raise RuntimeError("bad config")
+
+    assert load_allow_rules(ExplodingConfig()) == []
+
+    # 缺省参数 + 无真实配置文件 ⇒ []（惰性导入的是 trimum_core.config.Config，patch 掉避免碰 ~/.trimum）
+    import trimum_core.config as config_module
+
+    monkeypatch.setattr(config_module, "Config", NoConfig)
+    assert load_allow_rules() == []
+
+
+def test_preauthorized_matching(tmp_path):
+    class Cfg:
+        def __init__(self, allow):
+            self._allow = allow
+
+        def get(self, key, default=None):
+            assert key == "approvals.allow"
+            return self._allow
+
+    # tool 精确命中 + cwd 前缀命中 / 不命中
+    store = ApprovalStore(tmp_path / "s", config=Cfg([{"tool": "shell", "cwd": "/srv/repo"}]))
+    assert store.preauthorized(tool="shell", cwd="/srv/repo/sub") is True
+    assert store.preauthorized(tool="git", cwd="/srv/repo/sub") is False
+    assert store.preauthorized(tool="shell", cwd="/var") is False
+
+    # 空串 = 任意：单独一条 {"tool": "", "cwd": ""} 命中任意
+    any_store = ApprovalStore(tmp_path / "s_any", config=Cfg([{"tool": "", "cwd": ""}]))
+    assert any_store.preauthorized(tool="anything", cwd="/wherever") is True
+
+    # 只有 tool 规则（空 cwd = 任意目录）
+    store2 = ApprovalStore(tmp_path / "s2", config=Cfg([{"tool": "shell"}]))
+    assert store2.preauthorized(tool="shell", cwd="/any/dir") is True
+    assert store2.preauthorized(tool="shell", cwd="") is True
+    assert store2.preauthorized(tool="git", cwd="/any/dir") is False
+
+    # 没有任何规则 ⇒ False
+    store3 = ApprovalStore(tmp_path / "s3", config=Cfg([]))
+    assert store3.preauthorized(tool="shell", cwd="/any/dir") is False
+    assert store3.preauthorized() is False
+
+
+def test_preauthorized_bad_config_is_false(tmp_path):
+    class ExplodingConfig:
+        def get(self, key, default=None):
+            raise RuntimeError("bad config")
+
+    store = ApprovalStore(tmp_path / "s", config=ExplodingConfig())
+    # 异常一律 False（fail-closed，不许抛）
+    assert store.preauthorized(tool="shell", cwd="/x") is False
+
+    # 返回坏结构（dict 而非 list）⇒ False
+    class BadStructConfig:
+        def get(self, key, default=None):
+            return {"tool": "shell"}
+
+    store2 = ApprovalStore(tmp_path / "s", config=BadStructConfig())
+    assert store2.preauthorized(tool="shell", cwd="/x") is False
+
+    # 规则里 cwd 不是字符串 ⇒ startswith 抛异常 ⇒ False
+    class WeirdRuleConfig:
+        def get(self, key, default=None):
+            return [{"tool": "shell", "cwd": None}]
+
+    store3 = ApprovalStore(tmp_path / "s", config=WeirdRuleConfig())
+    assert store3.preauthorized(tool="shell", cwd="/x") is False

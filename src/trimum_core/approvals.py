@@ -97,6 +97,21 @@ class ApprovalRequest:
         return cls(**{key: data[key] for key in _KNOWN_FIELDS if key in data})
 
 
+def load_allow_rules(config: Any = None) -> list[dict[str, Any]]:
+    """读配置 ``approvals.allow`` 声明式放行表。缺失/坏配置/类型不对 ⇒ []（静默走默认，不许抛）。"""
+    try:
+        if config is None:
+            from .config import Config
+
+            config = Config()
+        raw = config.get("approvals.allow", None)
+    except Exception:
+        return []
+    if not isinstance(raw, list):
+        return []
+    return [rule for rule in raw if isinstance(rule, dict)]
+
+
 class ApprovalStore:
     """一次性审批请求的文件存储（web/API/workflow 与 CLI 共用同一份落盘）。"""
 
@@ -106,6 +121,7 @@ class ApprovalStore:
         *,
         default_ttl: float | None = None,
         clock: Any = None,
+        config: Any = None,
     ) -> None:
         # directory 为 None ⇒ 走配置口径（env > config > 默认），配置缺失静默走默认。
         self._directory = (
@@ -115,6 +131,7 @@ class ApprovalStore:
         )
         self._default_ttl = default_ttl
         self._clock = clock or time.time
+        self._config = config
 
     @property
     def directory(self) -> Path:
@@ -239,6 +256,23 @@ class ApprovalStore:
             records.append(record)
         return records
 
+    def preauthorized(self, *, tool: str = "", cwd: str = "", config: Any = None) -> bool:
+        """声明式放行：tool 精确（空=任意）+ cwd 前缀（空=任意）；无规则/异常 ⇒ False（fail-closed）。"""
+        try:
+            cfg = config if config is not None else self._config
+            rules = load_allow_rules(cfg)
+            for rule in rules:
+                rule_tool = rule.get("tool", "") or ""
+                if rule_tool and rule_tool != tool:
+                    continue
+                rule_cwd = rule.get("cwd", "")
+                if not (cwd or "").startswith(rule_cwd):
+                    continue
+                return True
+            return False
+        except Exception:
+            return False
+
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
@@ -266,9 +300,11 @@ class ApprovalStore:
 
     def _config_ttl(self) -> Any:
         try:
-            from .config import Config
+            if self._config is None:
+                from .config import Config
 
-            return Config().get("approvals.ttl_seconds", None)
+                self._config = Config()
+            return self._config.get("approvals.ttl_seconds", None)
         except Exception:
             return None
 
@@ -306,6 +342,7 @@ class ApprovalStore:
 __all__ = [
     "ApprovalRequest",
     "ApprovalStore",
+    "load_allow_rules",
     "DEFAULT_TTL_SECONDS",
     "STATUS_PENDING",
     "STATUS_APPROVED",

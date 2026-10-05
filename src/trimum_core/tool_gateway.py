@@ -461,6 +461,7 @@ class ToolGateway:
         llm_policy: Optional[LlmPolicyEngine] = None,
         security_config: Optional[SecurityConfig] = None,
         file_trust_tracker: Optional[FileTrustTracker] = None,
+        approval_store: Optional[Any] = None,
     ) -> None:
         self.policy = policy_engine or PolicyEngine()
         self.llm_policy = llm_policy
@@ -511,6 +512,7 @@ class ToolGateway:
         self.audit_store = audit_store
         self.learning_engine = learning_engine
         self._audit_tasks: set[asyncio.Task] = set()
+        self._approval_store = approval_store
 
         # MCP 分发器需要审计下沉 + EventBus 来做 `mcp.call` 事件（其余分发器不需要）：
         # 审计对象在网关里才存在，所以在这里回填，而不是在 DispatcherRegistry 构造时。
@@ -871,6 +873,38 @@ class ToolGateway:
                 command=cmd_str,
                 token=(request.jit_token[:8] + "...") if request.jit_token else "none",
             )
+
+        # 非交互 confirm：没有弹窗通道 ⇒ 先查声明式放行，否则落 pending 请求并 fail-closed
+        if action is Action.CONFIRM and not self.interactive and self._approval_store is not None:
+            _cwd = request.cwd or self.work_dir or ""
+            _tool = request.tool.value if hasattr(request.tool, "value") else str(request.tool)
+            if self._approval_store.preauthorized(tool=_tool, cwd=_cwd):
+                action = Action.AUTO
+                reason = f"[preauthorized] {reason}"
+                self._record_audit(
+                    "approval_preauthorized", request,
+                    ExecuteResponse(execution_id=execution_id, status="allowed", risk=risk,
+                                    action=Action.AUTO, reason=reason),
+                )
+            else:
+                _req = None
+                try:
+                    _req = self._approval_store.request(
+                        agent_id=request.agent_id or "", tool=_tool, command=cmd_str,
+                        cwd=_cwd, risk_level=risk.value, reason=reason,
+                    )
+                except Exception:
+                    logger.warning("gateway.approval_request_failed", exc_info=True)
+                _aid = getattr(_req, "id", "") or ""
+                _resp = ExecuteResponse(
+                    execution_id=execution_id,
+                    status="approval_required",
+                    error=(f"approval required: run `trm approve {_aid}`" if _aid
+                           else "approval required (approval store unavailable)"),
+                    exit_code=1, risk=risk, action=Action.CONFIRM, reason=reason,
+                )
+                self._record_audit("approval_required", request, _resp)
+                return _resp
 
         status = "allowed" if action == Action.AUTO else "confirmed"
 

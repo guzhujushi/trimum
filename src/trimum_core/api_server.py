@@ -28,6 +28,7 @@ from .models import (
     ToolType,
 )
 from .tool_gateway import ToolGateway
+from .approvals import ApprovalStore
 from .behavior_monitor import BehaviorMonitor
 from .audit_store import AuditStore
 from .learning_engine import LearningEngine
@@ -85,6 +86,7 @@ class AppState:
             event_bus=self.event_bus,
             audit_store=self.audit_store,
             learning_engine=self.learning_engine,
+            approval_store=ApprovalStore(),
         )
         self.agent_manager = AgentManager(
             max_agents=config.max_agents,
