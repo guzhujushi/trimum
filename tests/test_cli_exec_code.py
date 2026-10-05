@@ -212,8 +212,8 @@ def test_command_surface_unchanged():
     cmds = collect_commands()
     assert not any(c.path == ("code",) for c in cmds)
     assert any(c.path == ("exec",) for c in cmds)
-    assert len({c.path[0] for c in cmds}) == 24  # 2026-10-02 加 trm events
-    assert len(cmds) == 86  # 同步 trm events（原 85）
+    assert len({c.path[0] for c in cmds}) == 25  # 2026-10-05 加 trm approve（原 24，2026-10-02 加 trm events）
+    assert len(cmds) == 87  # 同步 trm approve（原 86，同步 trm events）
 
 
 def test_render_code_shows_changes_and_verifications(monkeypatch, tmp_path, capsys):

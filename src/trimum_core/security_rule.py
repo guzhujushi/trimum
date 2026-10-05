@@ -70,6 +70,7 @@ class SecurityRule:
         enable_blocking: bool = True,
         sandbox_id: str = "default",
         enforce_resource_limits: bool = True,
+        approval_store: Any = None,
     ) -> None:
         self._policy = policy_engine or PolicyEngine()
         self._monitor = behavior_monitor
@@ -79,6 +80,7 @@ class SecurityRule:
         # 的默认阈值量的是当前进程），因此网关会关掉这一项，配额交给
         # AgentManager / cgroup 层。
         self._enforce_resource_limits = enforce_resource_limits
+        self._approval_store = approval_store
 
         # 跨 Agent 白名单（同一工作流内的 Agent 默认允许通信）
         self._workflow_peers: dict[str, set[str]] = {}
@@ -215,23 +217,44 @@ class SecurityRule:
             )
 
         if monitor_verdict == "anomaly":
+            approval_id = self._request_approval(
+                agent_id=agent_id,
+                command=command,
+                cwd=sandbox,
+                risk_level="high",
+                reason="behavior anomaly detected for command",
+            )
+            metadata = {"monitor_verdict": monitor_verdict}
+            if approval_id is not None:
+                metadata["approval_id"] = approval_id
             return DecisionResult(
                 "confirm",
                 f"behavior anomaly detected for command",
                 risk_level="high",
                 requires_confirmation=True,
-                metadata={"monitor_verdict": monitor_verdict},
+                metadata=metadata,
             )
 
         if action == Action.DENY:
             return DecisionResult("deny", reason, risk_level=risk.value)
 
         if action == Action.CONFIRM:
+            approval_id = self._request_approval(
+                agent_id=agent_id,
+                command=command,
+                cwd=sandbox,
+                risk_level=risk.value,
+                reason=reason,
+            )
+            metadata = None
+            if approval_id is not None:
+                metadata = {"approval_id": approval_id}
             return DecisionResult(
                 "confirm",
                 reason,
                 risk_level=risk.value,
                 requires_confirmation=True,
+                metadata=metadata,
             )
 
         return DecisionResult("allow", reason, risk_level=risk.value)
@@ -331,6 +354,27 @@ class SecurityRule:
             requires_confirmation=True,
             metadata=decision.metadata,
         )
+
+    def _request_approval(
+        self,
+        *,
+        agent_id: str,
+        command: str,
+        cwd: str,
+        risk_level: str,
+        reason: str,
+    ) -> Optional[str]:
+        """把一次 confirm 决策落成待批请求，返回 approval_id；没挂 store 或失败 ⇒ None。"""
+        if self._approval_store is None:
+            return None
+        try:
+            return self._approval_store.request(
+                agent_id=agent_id, tool="shell", command=command, cwd=cwd,
+                risk_level=risk_level, reason=reason,
+            ).id
+        except Exception:
+            log.warning("security_rule.approval_request_failed", exc_info=True)
+            return None
 
     # ------------------------------------------------------------------
     # Landlock 接口（Phase 4 存根）

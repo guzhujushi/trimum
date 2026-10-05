@@ -24,6 +24,7 @@ HOME_ENV = "TRIMUM_HOME"
 #: fallback skill target used when no third-party harness is installed at all.
 DATA_SUBDIRS = (
     "agents",
+    "approvals",
     "agent-skills",
     "certs",
     "config",
