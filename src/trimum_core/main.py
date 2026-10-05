@@ -16,9 +16,14 @@ import os
 import signal
 import socket
 import sys
+import threading
 
 # 启动预检失败（端口 / socket 被占）的退出码，与 systemd 的 exit 3 对齐
 EXIT_STARTUP_PRECONDITION = 3
+
+#: 启动初始化阶段的看门狗超时（秒）。env > 配置 core.startup_timeout_seconds > 默认。
+STARTUP_TIMEOUT_ENV = "TRIMUM_STARTUP_TIMEOUT_SECONDS"
+DEFAULT_STARTUP_TIMEOUT = 60.0
 
 
 def check_tcp_port(host: str, port: int) -> str | None:
@@ -78,6 +83,52 @@ def abort_startup(reason: str, hint: str, *, hard: bool = False) -> None:
         os._exit(EXIT_STARTUP_PRECONDITION)
 
     sys.exit(EXIT_STARTUP_PRECONDITION)
+
+
+def _startup_timeout(config) -> float:
+    """看门狗超时：env > 配置 `core.startup_timeout_seconds` > 60。缺失/坏值/<=0 静默走默认。"""
+    raw = os.environ.get(STARTUP_TIMEOUT_ENV)
+    if raw is None or not str(raw).strip():
+        raw = config.get("core.startup_timeout_seconds", None)
+    if raw is None:
+        return DEFAULT_STARTUP_TIMEOUT
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_STARTUP_TIMEOUT
+    return value if value > 0 else DEFAULT_STARTUP_TIMEOUT
+
+
+def _on_startup_timeout(timeout: float) -> None:
+    """看门狗触发：初始化没在超时内完成 ⇒ 立刻硬退（§9.3.8：这条路上可能已有非 daemon 线程）。"""
+    abort_startup(
+        f"启动超时：{timeout:g}s 内安全组件没有初始化完成",
+        "多半是 aiosqlite / 外部依赖吊住；看日志定位，或调大 "
+        f"`{STARTUP_TIMEOUT_ENV}` / 配置 `core.startup_timeout_seconds`",
+        hard=True,
+    )
+
+
+def _arm_startup_watchdog(config) -> threading.Timer:
+    """启动看门狗：daemon Timer；正常起来后由 `_attach_watchdog_disarm` 拆掉。"""
+    timer = threading.Timer(_startup_timeout(config), _on_startup_timeout,
+                            args=(_startup_timeout(config),))
+    timer.daemon = True
+    timer.name = "trmd-startup-watchdog"
+    timer.start()
+    return timer
+
+
+def _attach_watchdog_disarm(app, timer: threading.Timer) -> None:
+    """把 `timer.cancel` 挂到 app 的 lifespan startup 上 —— 服务真起来才拆看门狗。
+
+    挂不上（`router.on_startup` 不存在等）⇒ 立即手动 cancel（fail-soft：宁可少一层
+    保护，也不能让看门狗在正常运行时把 daemon 打死）。
+    """
+    try:
+        app.router.on_startup.append(timer.cancel)
+    except Exception:  # noqa: BLE001
+        timer.cancel()
 
 
 async def _serve_without_http(app, config) -> None:
@@ -217,7 +268,16 @@ def run() -> None:
         logger.info("security_components_ready", monitor=type(sec_monitor).__name__)
         return app, logger
 
-    app, logger = asyncio.run(_init())
+    watchdog = _arm_startup_watchdog(config)
+    try:
+        app, logger = asyncio.run(_init())
+    except BaseException as exc:  # noqa: BLE001
+        abort_startup(
+            f"安全组件初始化失败（{type(exc).__name__}: {exc}）",
+            "看日志定位后重启 `trmd`；这条路上可能有非 daemon 线程吊住解释器，故意硬退",
+            hard=True,
+        )
+    _attach_watchdog_disarm(app, watchdog)
 
     if not config.http_enabled:
         logger.info("starting_ipc_only_daemon", socket=config.socket_path)
@@ -240,13 +300,29 @@ def run() -> None:
     # uvicorn 0.52.4 中 Server.startup() 在手动调用 config.load()
     # 之前不创建 lifespan 属性；server.serve() 也可能因 create_server
     # 卡住。uvicorn.run() 是官方推荐入口，自带完整生命周期管理。
-    uvicorn.run(
-        app,
-        host=config.host,
-        port=config.port,
-        log_level=config.log_level.lower(),
-        reload=False,
-    )
+    try:
+        uvicorn.run(
+            app,
+            host=config.host,
+            port=config.port,
+            log_level=config.log_level.lower(),
+            reload=False,
+        )
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+        if code:
+            abort_startup(
+                f"HTTP 面启动失败（uvicorn 退出码 {code}）",
+                "看日志定位；uvicorn 自己的 sys.exit 可能被非 daemon 线程吊住，这条路上硬退",
+                hard=True,
+            )
+        raise
+    except Exception as exc:  # noqa: BLE001
+        abort_startup(
+            f"HTTP 面异常退出（{type(exc).__name__}: {exc}）",
+            "看日志定位后重启 `trmd`",
+            hard=True,
+        )
 
 
 
