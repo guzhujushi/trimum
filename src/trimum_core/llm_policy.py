@@ -295,3 +295,22 @@ class LlmPolicyEngine:
         else:
             for cache in self._cache.values():
                 cache.clear()
+
+
+def build_default_llm_policy(policy_engine: Optional[PolicyEngine] = None) -> "LlmPolicyEngine":
+    """按「配置缺失走默认」口径造一个 LlmPolicyEngine。
+
+    `policy_engine` 缺省 ⇒ `PolicyEngine()`；`security.yaml` 坏/缺失、乃至 `load()`
+    直接抛异常都**不抛**，一律走内置默认（balanced，决策 24）。
+    """
+    sec_cfg = SecurityConfig()
+    try:
+        sec_cfg.load()
+    except Exception:
+        log.warning("llm_policy: security config load failed; 走默认", exc_info=True)
+        # 标记「已加载」：否则 LlmPolicyEngine.__init__ → get_llm_config() 会**二次触发**
+        # load() 再抛一次，把工厂变成可抛的；坏配置一律静默走默认。
+        sec_cfg._loaded = True
+        if not isinstance(getattr(sec_cfg, "_raw", None), dict):
+            sec_cfg._raw = {}
+    return LlmPolicyEngine(policy_engine or PolicyEngine(), sec_cfg)

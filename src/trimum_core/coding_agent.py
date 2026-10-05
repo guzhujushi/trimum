@@ -29,6 +29,7 @@ from .instruction_loader import (
     render_injection,
 )
 from .llm_router import LlmCallError, ROLE_AGENT
+from .llm_policy import build_default_llm_policy
 from .models import TRMErrorCode, ExecuteRequest, SourceType, ToolType, TrimumError
 from .paths import trimum_path
 from .tool_gateway import ToolGateway
@@ -247,9 +248,17 @@ class CodingSession:
         self.hook = hook or EditPreviewHook(roots=self.roots)
         self.specs = list(specs) if specs is not None else None
 
-    async def run(self) -> SessionRecord:
+    def _ensure_gateway(self) -> None:
+        """懒建网关（AI 发起 ⇒ 接 LlmPolicyEngine，走唯一闸门）。"""
         if self.gateway is None:
-            self.gateway = ToolGateway(interactive=False, audit_store=AuditStore())
+            self.gateway = ToolGateway(
+                interactive=False,
+                audit_store=AuditStore(),
+                llm_policy=build_default_llm_policy(),
+            )
+
+    async def run(self) -> SessionRecord:
+        self._ensure_gateway()
 
         record = SessionRecord(
             task=self.task,

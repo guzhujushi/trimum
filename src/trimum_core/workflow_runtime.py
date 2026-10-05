@@ -896,12 +896,14 @@ class WorkflowRuntime:
         """拿网关：daemon 注入的是共享实例，CLI 一次性执行时按 ``trm exec`` 口径自建。"""
         if self._gateway is None:
             from .audit_store import AuditStore
+            from .llm_policy import build_default_llm_policy
             from .tool_gateway import ToolGateway
 
             self._gateway = ToolGateway(
                 interactive=False,
                 audit_store=AuditStore(),
                 event_bus=self._bus,
+                llm_policy=build_default_llm_policy(),
             )
         return self._gateway
 

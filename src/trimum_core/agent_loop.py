@@ -143,18 +143,6 @@ class AgentLoop:
         compaction_policy: Optional[CompactionPolicy] = None,
     ):
         self.event_bus = event_bus or EventBus()
-        # 审计落盘 + 广播：与 daemon 一致，方便 `trm log audit` 统一查询
-        self.gateway = gateway or ToolGateway(
-            interactive=False,
-            event_bus=self.event_bus,
-            audit_store=AuditStore(),
-        )
-        self.console = console or LiveConsole(self.event_bus)
-        self.agent_name = agent_name
-        self.stream_output = bool(stream_output)
-        self.context_manager = context_manager
-        # 上下文窗口管理（P0）：工具输出限长 + 滑窗 + 早期步骤摘要
-        self.compactor = compactor or ContextCompactor(compaction_policy)
 
         # 安全组件
         sec_config = SecurityConfig()
@@ -171,6 +159,20 @@ class AgentLoop:
 
         # 默认安全等级
         self.mode: SecurityMode = sec_config.get_mode(agent_name)
+
+        # 审计落盘 + 广播：与 daemon 一致，方便 `trm log audit` 统一查询
+        self.gateway = gateway or ToolGateway(
+            interactive=False,
+            event_bus=self.event_bus,
+            audit_store=AuditStore(),
+            llm_policy=self.llm_policy,
+        )
+        self.console = console or LiveConsole(self.event_bus)
+        self.agent_name = agent_name
+        self.stream_output = bool(stream_output)
+        self.context_manager = context_manager
+        # 上下文窗口管理（P0）：工具输出限长 + 滑窗 + 早期步骤摘要
+        self.compactor = compactor or ContextCompactor(compaction_policy)
 
         # 循环配置（默认 full interactive）
         self.loop_config: InteractiveLoopConfig = InteractiveLoopConfig()
