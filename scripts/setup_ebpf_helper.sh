@@ -13,18 +13,27 @@
 #     冒烟 / 自检看到 available:false 是**正确**表现，不是失败。
 #   * 红线：--rollback **只删 MANAGED / MANAGED_DIRS 里登记过的路径**，删别的（哪怕看起来是 trimum 的）一律拒绝。
 #   * 不许静默降级：装不上 / 冒烟失败 ⇒ 回滚并 exit 非 0，绝不「装一半说成功」。
+#
+# 客户端组（2026-10-06 真机实测的坑，别删）：
+#   单元的 capability 只有 CAP_BPF / CAP_PERFMON，**没有 CAP_DAC_OVERRIDE / CAP_DAC_READ_SEARCH**
+#   ⇒ uid 0 也一样守文件权限位。于是单元必须 `Group=<客户端组>`：① 否则 /opt/trimum（drwxr-x--- 客户端用户:组）
+#   连 helper 自己的代码都 import 不了（实测 ModuleNotFoundError → 反复重启 → is-active=activating、socket 不出现）；
+#   ② RuntimeDirectory 与 priv.sock 也随之成 root:<客户端组>，非 root 的 daemon 才连得上。
+#   组不写死：按 trmd.service 的 User= 推导；可用 TRIMUM_BPF_CLIENT_USER / TRIMUM_BPF_CLIENT_GROUP 覆盖。
+#   装前有 DAC 预检（dac_preflight），读不到就在碰系统之前 exit 1。
 set -euo pipefail
 
 UNIT=trimum-bpf-helper
 MODE=dryrun
-DEPLOY_ROOT=/opt/trimum
-VENV_PY=/opt/trimum/venv/bin/python
+# 部署根：显式 env > 默认（换机器 / 测试里指向合成树时用 TRIMUM_BPF_DEPLOY_ROOT 覆盖）。
+DEPLOY_ROOT="${TRIMUM_BPF_DEPLOY_ROOT:-/opt/trimum}"
+VENV_PY="${DEPLOY_ROOT}/venv/bin/python"
 SRC_MAIN="${DEPLOY_ROOT}/src/trimum_core/bpf_helper_main.py"
 UNIT_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../deploy/trimum-bpf-helper.service"
 
 # 本次会碰的**全部**文件 / socket 路径（--rollback 只删这些；红线：删别的一律拒绝）。
 MANAGED=(
-  "/opt/trimum/bpf"
+  "${DEPLOY_ROOT}/bpf"
   "/etc/trimum/bpf-manifest.txt"
   "/etc/systemd/system/trimum-bpf-helper.service"
   "/run/trimum/priv.sock"
@@ -42,10 +51,74 @@ SOCK=/run/trimum/priv.sock
 SOCK_DIR=/run/trimum
 LAST_STEP="(未开始)"
 
+# 客户端（发动词的那一方）＝ trmd.service 的 User。理由见 deploy/trimum-bpf-helper.service 顶部：
+# 单元的 capability 集里没有 CAP_DAC_OVERRIDE / CAP_DAC_READ_SEARCH ⇒ **uid 0 也守 DAC 权限位**，
+# helper 必须以「客户端组」身份跑：① 才读得到 /opt/trimum（helper 自己代码在这儿）；② /run/trimum 与
+# priv.sock 才会是 root:<客户端组>，非 root 的 daemon 才连得上。组名不写死在本脚本 / 单元里，按机器推导。
+CLIENT_USER="${TRIMUM_BPF_CLIENT_USER:-$(systemctl show trmd -p User --value 2>/dev/null || true)}"
+CLIENT_GROUP="${TRIMUM_BPF_CLIENT_GROUP:-}"
+if [ -z "$CLIENT_GROUP" ] && [ -n "$CLIENT_USER" ]; then
+  CLIENT_GROUP="$(id -gn "$CLIENT_USER" 2>/dev/null || true)"
+fi
+# 单元里的占位**注释**行（必须是注释：这样 `systemd-analyze verify` 直接验模板仍是合法单元）。
+UNIT_GROUP_MARKER="# TRIMUM_UNIT_GROUP_PLACEHOLDER"
+
 PASS=0; FAIL=0; SKIP=0
 ok()   { printf '  [OK]   %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  [FAIL] %s\n' "$1"; FAIL=$((FAIL+1)); }
 skip() { printf '  [SKIP] %s —— %s\n' "$1" "$2"; SKIP=$((SKIP+1)); }
+
+# helper 的 DAC 视角检查：helper = **uid 0** + gid $3，cap 集里没有 CAP_DAC_OVERRIDE / CAP_DAC_READ_SEARCH
+# ⇒ **全按权限位算**（uid 0 没有豁免）。逐段判 $1：中间段要 x（目录也要 x）；末段是文件则要 r。
+# 命中哪一类只认两条（红线，2026-10-06 验收抓的错）：
+#   `属主 == root`（uid 0 才是 owner 类）→ u 位；`属组 == 客户端组` → g 位；其余 → o 位。
+#   **别把「属主 == 客户端用户」当 owner 类**：helper 不是那个 uid，那样会把这个检查变成恒真。
+# 可读返回 0；不可读返回 1 并打印卡点（$2 只用于报错文案）。
+dac_readable() { # <path> <client_user> <client_group>
+  local path="$1" cu="$2" cg="$3" cur="" seg meta owner group oct d parts i n
+  IFS='/' read -r -a parts <<< "${path#/}"
+  n=${#parts[@]}; i=0
+  for seg in "${parts[@]}"; do
+    i=$((i + 1)); cur="$cur/$seg"
+    if ! meta="$(stat -c '%U %G %a' "$cur" 2>/dev/null)"; then
+      printf '  卡点：%s（不存在或读不到）\n' "$cur" >&2; return 1
+    fi
+    read -r owner group oct <<< "$meta"
+    oct="${oct: -3}"            # 去掉 setuid/setgid/sticky 位；剩下三位八进制数字本身就是位掩码（r=4 w=2 x=1）
+    if [ "$owner" = root ]; then d="${oct:0:1}"
+    elif [ "$group" = "$cg" ]; then d="${oct:1:1}"
+    else d="${oct:2:1}"; fi
+    d=$((10#$d))
+    if [ "$i" -lt "$n" ] || [ -d "$cur" ]; then
+      if [ $((d & 1)) -eq 0 ]; then
+        printf '  卡点：%s（mode %s，属主 %s:%s；helper 是 uid 0 + 组 %s，该类无 x 就穿不过去）\n' "$cur" "$oct" "$owner" "$group" "$cg" >&2
+        return 1
+      fi
+    elif [ $((d & 4)) -eq 0 ]; then
+      printf '  卡点：%s（mode %s，属主 %s:%s；helper 是 uid 0 + 组 %s，该类无 r 就读不到）\n' "$cur" "$oct" "$owner" "$group" "$cg" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
+# helper 从 exec 到「能 import 自己的代码」要穿过的路径（含 editable 安装的 .pth；python 版本号不钉死）。
+dac_preflight() { # <client_user> <client_group>
+  local cu="$1" cg="$2" p f sp rc=0
+  local paths=(
+    "$DEPLOY_ROOT" "$DEPLOY_ROOT/src" "$DEPLOY_ROOT/src/trimum_core" "$SRC_MAIN"
+    "$DEPLOY_ROOT/venv" "$DEPLOY_ROOT/venv/bin" "$VENV_PY"
+  )
+  for sp in "$DEPLOY_ROOT"/venv/lib/python3*/site-packages; do
+    [ -d "$sp" ] || continue
+    paths+=("$sp")
+    for f in "$sp"/*.pth; do [ -e "$f" ] && paths+=("$f"); done
+  done
+  for p in "${paths[@]}"; do
+    dac_readable "$p" "$cu" "$cg" || { rc=1; break; }   # 首个卡点就停，别刷屏
+  done
+  return "$rc"
+}
 
 usage() { sed -n '2,12p' "$0"; exit 0; }
 
@@ -201,6 +274,33 @@ do_selfcheck() {
     skip "root 被拒 peer_denied" "需 root 且 socket 存在；装好后用 root 发 bpf.stats 应回 peer_denied"
   fi
 
+  # 9. 部署树对 helper 可读（真机真因：丢 CAP_DAC_* 后 uid 0 也守权限位；纯 stat，非 root 也能查）
+  if [ -n "$CLIENT_GROUP" ] && [ -d "$DEPLOY_ROOT" ]; then
+    if dac_preflight "$CLIENT_USER" "$CLIENT_GROUP" 2>/dev/null; then
+      ok "部署树对 helper 可读（uid 0 + 组 ${CLIENT_GROUP} 能穿过 ${DEPLOY_ROOT} 到 bpf_helper_main.py）"
+    else
+      bad "部署树对 helper 可读（组 ${CLIENT_GROUP} 读不到；卡点如下）"
+      dac_preflight "$CLIENT_USER" "$CLIENT_GROUP" >&2 || true
+      echo "  → 修：sudo chgrp ${CLIENT_GROUP} ${DEPLOY_ROOT} && sudo chmod g+rx ${DEPLOY_ROOT}（或 sudo chmod o+x ${DEPLOY_ROOT}）" >&2
+    fi
+  else
+    skip "部署树对 helper 可读" "取不到客户端组（systemctl show trmd -p User / id -gn 都没结果）或 ${DEPLOY_ROOT} 不在本机"
+  fi
+
+  # 10. 非 root 客户端能连上 socket 并拿到**协议应答**（证明 /run/trimum 与 priv.sock 的组/位对；root 才能 runuser）
+  if [ "$canconn" -eq 1 ] && [ -n "$CLIENT_USER" ]; then
+    local r10; r10="$(send_priv_as "$CLIENT_USER" bpf.stats)"
+    case "$r10" in
+      peer_denied) ok "客户端（${CLIENT_USER}）能连 socket 并拿到应答 peer_denied —— 权限面对；该 uid 不在允许列表（生产要配 security.bpf_helper_allowed_uids）" ;;
+      *available*) ok "客户端（${CLIENT_USER}）能连 socket 并拿到 bpf.stats 应答（${r10}）" ;;
+      "")          bad "客户端（${CLIENT_USER}）连 socket 拿不到应答（空）—— 权限面不通或单元没起来" ;;
+      ERR*)        bad "客户端（${CLIENT_USER}）连 socket 失败（实际：${r10}）" ;;
+      *)           bad "客户端（${CLIENT_USER}）应答异常（实际：${r10}）" ;;
+    esac
+  else
+    skip "非 root 客户端连 socket" "需 root 且 socket 存在（以 ${CLIENT_USER:-<客户端用户>} 身份发 bpf.stats）"
+  fi
+
   echo
   printf '  小结：OK=%d  FAIL=%d  SKIP=%d\n' "$PASS" "$FAIL" "$SKIP"
   if [ "$FAIL" -eq 0 ]; then
@@ -235,6 +335,34 @@ print(r.get("error") or ("OK data=" + json.dumps(r.get("data"), ensure_ascii=Fal
 PY
 }
 
+# 以指定**非 root 客户端**身份发一条 verb（root 才能 runuser）：证明「目录/socket 权限面」对非 root 是通的。
+# 拿得到协议应答（peer_denied / available:false / …）就算通；ERR 或空 ⇒ 权限面不通（EACCES / ENOENT）。
+send_priv_as() { # <user> <verb>
+  runuser -u "$1" -- "$VENV_PY" - "$2" "$SOCK" <<'PY' 2>/dev/null || true
+import json, socket, sys
+import trimum_core.bpf_helper_protocol as P
+verb, sock = sys.argv[1], sys.argv[2]
+req = json.dumps({"verb": verb}).encode()
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(5)
+try:
+    s.connect(sock)
+    s.sendall(req)
+    data = s.recv(65536)
+except Exception as e:
+    print("ERR", e)
+    sys.exit(0)
+finally:
+    s.close()
+try:
+    r = P.parse_response(data)
+except Exception:
+    print(data.decode("utf-8", "replace").strip())
+    sys.exit(0)
+print(r.get("error") or ("OK data=" + json.dumps(r.get("data"), ensure_ascii=False)))
+PY
+}
+
 # 备份已存在的同名件到 $BK（目录不存在就先建）。
 backup_path() {
   local p="$1"
@@ -264,6 +392,23 @@ do_smoke() {
     ok "root 发 bpf.stats 被拒 peer_denied（uid 门真的在起作用；默认允许 uid 里没有 root）"
   else
     bad "root 发 bpf.stats 应被拒 peer_denied（实际：${r:-<空>}；**root 不该被放行**）"
+  fi
+  # socket 属组＝客户端组（丢了这条，非 root 的 daemon 连不上：RuntimeDirectory 会把组写进目录与 socket）
+  if [ -S "$SOCK" ] && [ -n "$CLIENT_GROUP" ]; then
+    local sg; sg="$(stat -c '%G' "$SOCK" 2>/dev/null || true)"
+    if [ "$sg" = "$CLIENT_GROUP" ]; then ok "socket 属组=客户端组（${sg}）"
+    else bad "socket 属组（实际 ${sg:-?}，期望 ${CLIENT_GROUP}；单元是不是没插 Group=？）"; fi
+  fi
+  # 非 root 客户端真发一条：拿得到协议应答才算「权限面通了」（EACCES/ENOENT 会走 ERR 分支）
+  if [ -S "$SOCK" ] && [ -n "$CLIENT_USER" ]; then
+    local rc; rc="$(send_priv_as "$CLIENT_USER" bpf.stats)"
+    case "$rc" in
+      peer_denied) ok "客户端（${CLIENT_USER}）能连 socket 并拿到应答 peer_denied" ;;
+      *available*) ok "客户端（${CLIENT_USER}）能连 socket 并拿到 bpf.stats 应答（${rc}）" ;;
+      "")          bad "客户端（${CLIENT_USER}）连 socket 拿不到应答（空）" ;;
+      ERR*)        bad "客户端（${CLIENT_USER}）连 socket 失败（实际：${rc}）" ;;
+      *)           bad "客户端（${CLIENT_USER}）应答异常（实际：${rc}）" ;;
+    esac
   fi
   [ "$FAIL" -eq 0 ]
 }
@@ -340,9 +485,23 @@ if [ "$MODE" = dryrun ]; then
     if [ -e "$p" ] || [ -S "$p" ]; then echo "       - 备份已存在：$p"; else echo "       - 新建：$p"; fi
   done
   echo "    2) 建 /opt/trimum/bpf（放 eBPF 产物，下一单 ebpf1e）+ 空 manifest /etc/trimum/bpf-manifest.txt"
-  echo "    3) 装单元 /etc/systemd/system/${UNIT}.service（模板：deploy/trimum-bpf-helper.service）"
+  echo "    3) 装单元 /etc/systemd/system/${UNIT}.service（模板 deploy/trimum-bpf-helper.service；把占位注释换成 Group=${CLIENT_GROUP:-<取不到！>}）"
   echo "    4) systemctl daemon-reload && systemctl enable --now ${UNIT}"
-  echo "    5) 冒烟：active + socket mode 0660 + root 发 bpf.stats 必须 peer_denied；失败自动回滚"
+  echo "    5) 冒烟：active + socket 0660 且属组=${CLIENT_GROUP:-?}（客户端组）+ root 发 bpf.stats 必须 peer_denied"
+  echo "       + 非 root 客户端能连上拿到协议应答；失败自动回滚"
+  echo "  客户端组：按 trmd.service 的 User= 推导（CLIENT_USER=${CLIENT_USER:-<取不到>}）；"
+  echo "           可用 TRIMUM_BPF_CLIENT_USER=<用户> / TRIMUM_BPF_CLIENT_GROUP=<组> 覆盖。"
+  if [ -n "$CLIENT_GROUP" ] && [ -d "$DEPLOY_ROOT" ]; then
+    if dac_preflight "$CLIENT_USER" "$CLIENT_GROUP" 2>/dev/null; then
+      echo "  [预检] 部署树对 helper 可读：OK（uid 0 + 组 ${CLIENT_GROUP}）"
+    else
+      echo "  [预检] 部署树对 helper 可读：**--apply 会失败**（组 ${CLIENT_GROUP} 读不到）；卡点："
+      { dac_preflight "$CLIENT_USER" "$CLIENT_GROUP" 2>&1 || true; } | sed 's/^/           /'
+      echo "         → 先修：sudo chgrp ${CLIENT_GROUP} ${DEPLOY_ROOT} && sudo chmod g+rx ${DEPLOY_ROOT}"
+    fi
+  else
+    echo "  [预检] 部署树对 helper 可读：跳过（取不到客户端组或 ${DEPLOY_ROOT} 不在本机）"
+  fi
   echo "  只看自检：  sudo bash scripts/setup_ebpf_helper.sh --self-check"
   echo "  真装：      sudo bash scripts/setup_ebpf_helper.sh --apply"
   echo "  卸干净：    sudo bash scripts/setup_ebpf_helper.sh --rollback"
@@ -360,6 +519,23 @@ if [ ! -f "$UNIT_SRC" ]; then
   echo "缺单元模板 ${UNIT_SRC}" >&2; exit 1
 fi
 
+# 硬前提（真机实测踩过）：单元的 capability 集里没有 CAP_DAC_OVERRIDE / CAP_DAC_READ_SEARCH ⇒ uid 0 也守
+# DAC 权限位。先证明「helper 的身份真读得到自己那份代码」，不满足就**早退**，别装出一个 crash-loop 的单元
+# （实测表现：is-active 一直 activating、socket 永不出现、自检三连 FAIL 再自动回滚）。
+LAST_STEP="dac-preflight"
+if [ -z "$CLIENT_GROUP" ]; then
+  echo "取不到客户端组：systemctl show trmd -p User / id -gn 都没结果（现在 CLIENT_USER='${CLIENT_USER:-<空>}'）" >&2
+  echo "  → 显式指定：TRIMUM_BPF_CLIENT_USER=<用户> 或 TRIMUM_BPF_CLIENT_GROUP=<组> 再跑 --apply" >&2
+  exit 1
+fi
+if dac_preflight "$CLIENT_USER" "$CLIENT_GROUP"; then
+  ok "部署树对 helper 可读（uid 0 + 组 ${CLIENT_GROUP}）"
+else
+  bad "部署树对 helper 可读（组 ${CLIENT_GROUP} 读不到；卡点见上）"
+  echo "  → 修：sudo chgrp ${CLIENT_GROUP} ${DEPLOY_ROOT} && sudo chmod g+rx ${DEPLOY_ROOT}（或 sudo chmod o+x ${DEPLOY_ROOT}）" >&2
+  exit 1
+fi
+
 # ---- apply ----
 LAST_STEP="backup"
 install -d -m 0755 "$BK"
@@ -367,7 +543,7 @@ for p in "${MANAGED[@]}"; do backup_path "$p"; done
 echo "  备份目录：$BK（本次会碰的路径都在 MANAGED / MANAGED_DIRS 里登记）"
 
 LAST_STEP="mkdir+manifest"
-install -d -m 0755 /opt/trimum/bpf
+install -d -m 0755 "${DEPLOY_ROOT}/bpf"
 if [ ! -f /etc/trimum/bpf-manifest.txt ]; then
   install -d -m 0755 /etc/trimum
   : > /etc/trimum/bpf-manifest.txt
@@ -377,8 +553,16 @@ fi
 ok "建目录 /opt/trimum/bpf + manifest 就位"
 
 LAST_STEP="install-unit"
-install -m 0644 "$UNIT_SRC" /etc/systemd/system/${UNIT}.service
-ok "已装单元 /etc/systemd/system/${UNIT}.service"
+RENDERED="${BK}/trimum-bpf-helper.service.rendered"
+if ! grep -qF "$UNIT_GROUP_MARKER" "$UNIT_SRC"; then
+  echo "单元模板缺占位注释「${UNIT_GROUP_MARKER}」：${UNIT_SRC}" >&2; exit 1
+fi
+sed "s|^${UNIT_GROUP_MARKER}\$|Group=${CLIENT_GROUP}|" "$UNIT_SRC" > "$RENDERED"
+if ! grep -qx "Group=${CLIENT_GROUP}" "$RENDERED"; then
+  echo "渲染后的单元里没有 Group=${CLIENT_GROUP}（占位替换没生效）：${RENDERED}" >&2; exit 1
+fi
+install -m 0644 "$RENDERED" /etc/systemd/system/${UNIT}.service
+ok "已装单元 /etc/systemd/system/${UNIT}.service（Group=${CLIENT_GROUP}；渲染件留存：${RENDERED}）"
 
 LAST_STEP="daemon-reload"
 if systemctl daemon-reload; then ok "systemd daemon-reload"

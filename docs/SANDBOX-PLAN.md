@@ -309,6 +309,18 @@ daemon 没有 `CAP_CHOWN`/`CAP_SETUID`，这些调用对它本来就什么都做
 而 helper **不接受命令**，即使被打穿也只能做那四个动词。这条同时满足裁决 4（daemon 保持非特权）。
 **落地时机**：**S5-①**（排在 S2/S3 之后）—— helper 的审计格式要复用 S2 建立的那一套。
 
+**补充（2026-10-06，`ebpf1d` 真机安装实测）**：`CapabilityBoundingSet=CAP_BPF CAP_PERFMON` 付的代价不只是
+「拿不到 `CAP_SYS_ADMIN`」——它还**丢掉了 `CAP_DAC_OVERRIDE` / `CAP_DAC_READ_SEARCH`**，于是 **uid 0 也照样受文件权限位约束**
+（root 的「读写无敌」是那两枚能力给的，不是 uid 0 自带的）。因此单元必须带 `Group=<客户端组>`（由安装脚本按 `trmd.service`
+的 `User=` 推导后插入，不写死在 public 仓库）：
+① 部署树 `/opt/trimum` 是 `drwxr-x--- <客户端用户>:<组>`，helper 拿不到组身份连自己的代码都 import 不了
+（实测：`ModuleNotFoundError: No module named 'trimum_core'` → `Restart=on-failure` 反复重启 →`is-active` 停 `activating`、
+`priv.sock` 永不出现）；
+② `RuntimeDirectory=` 与其中 bind 的 `priv.sock` 会随之变成 `root:<客户端组>`，**非 root 的 daemon** 才进得去 `/run/trimum`、
+连得上 socket —— 这正是上表「socket `root:<客户端组>` 0660」的落地口径。
+安装脚本在碰系统之前做 DAC 预检（`dac_preflight`：按位逐段验「uid 0 + 客户端组」能不能穿到 `bpf_helper_main.py`），
+读不到就 `exit 1`，不装出一个 crash-loop 的单元。
+
 
 ## 7. 真机还需要装什么（工具链）
 

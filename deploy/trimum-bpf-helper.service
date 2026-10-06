@@ -11,6 +11,17 @@
 #   helper 只对 unix socket 说话（daemon 在 /run/trimum/priv.sock 连它），
 #   不需要任何网络。把地址族限制到 AF_UNIX 后，socket(AF_INET/AF_INET6/...) 会直接 EPERM，
 #   helper 物理上连不出网——被攻破也当不了跳板。
+#
+# 为什么必须带客户端组（`Group=`，由安装脚本插在 `User=root` 之后）：
+#   本单元的 capability 边界集只有 CAP_BPF / CAP_PERFMON，**没有 CAP_DAC_OVERRIDE / CAP_DAC_READ_SEARCH**
+#   ⇒ uid 0 也一样守文件权限位。于是：
+#     ① `/opt/trimum` 是 `drwxr-x--- <客户端用户>:<客户端组>`，helper 拿不到组身份连自己的代码
+#        都 import 不了（真机实测：`ModuleNotFoundError: No module named 'trimum_core'` → 反复重启
+#        → `systemctl is-active` 一直停 `activating`、socket 永不出现）；
+#     ② `RuntimeDirectory=` 与它里面 bind 出来的 `priv.sock` 会随之变成 `root:<客户端组>`，
+#        **非 root** 的 daemon 才进得去 `/run/trimum`、连得上 socket（即 §6.7 写的「socket root:客户端组 0660」）。
+#   组名不写死（public 仓库、可能换机器）：由 `scripts/setup_ebpf_helper.sh` 按 `trmd.service` 的
+#   `User=` 推导后插入，可用 `TRIMUM_BPF_CLIENT_USER` / `TRIMUM_BPF_CLIENT_GROUP` 覆盖。
 [Unit]
 Description=trimum eBPF privileged helper (CAP_BPF/CAP_PERFMON only)
 ConditionPathExists=/opt/trimum/src/trimum_core/bpf_helper_main.py
@@ -18,6 +29,7 @@ ConditionPathExists=/opt/trimum/src/trimum_core/bpf_helper_main.py
 [Service]
 Type=simple
 User=root
+# TRIMUM_UNIT_GROUP_PLACEHOLDER
 WorkingDirectory=/opt/trimum
 Environment=PATH=/opt/trimum/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=TRIMUM_BPF_SOCKET=/run/trimum/priv.sock
