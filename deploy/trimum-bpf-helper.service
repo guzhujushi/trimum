@@ -1,0 +1,58 @@
+# trimum eBPF 特权 helper（由 scripts/setup_ebpf_helper.sh 安装；别手改，重跑脚本即可）
+#
+# 为什么是 CAP_BPF 而不是 full root：
+#   加载 eBPF 程序 / 挂 BPF map 只需要 CAP_BPF；读 trace / 事件流只需要 CAP_PERFMON。
+#   这两枚能力已覆盖 helper 的全部内核面，因此**不给 full root**：helper 拿不到
+#   CAP_SYS_ADMIN / CAP_NET_ADMIN 等，也就没法改网络、挂文件系统、做命名空间操作。
+#   CapabilityBoundingSet 把两枚之外的能力从边界集里直接划掉，进程（含它 exec 的任何子进程）
+#   永远拿不到；AmbientCapabilities 让这个以 root 身份运行的 python 进程启动时就带着这两枚。
+#
+# 为什么 RestrictAddressFamilies=AF_UNIX（不联网）：
+#   helper 只对 unix socket 说话（daemon 在 /run/trimum/priv.sock 连它），
+#   不需要任何网络。把地址族限制到 AF_UNIX 后，socket(AF_INET/AF_INET6/...) 会直接 EPERM，
+#   helper 物理上连不出网——被攻破也当不了跳板。
+[Unit]
+Description=trimum eBPF privileged helper (CAP_BPF/CAP_PERFMON only)
+ConditionPathExists=/opt/trimum/src/trimum_core/bpf_helper_main.py
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/trimum
+Environment=PATH=/opt/trimum/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=TRIMUM_BPF_SOCKET=/run/trimum/priv.sock
+ExecStart=/opt/trimum/venv/bin/python -m trimum_core.bpf_helper_main
+RuntimeDirectory=trimum
+RuntimeDirectoryMode=0750
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# ── 最小权限四件 ───────────────────────────────────────────
+# 能力边界集：只保留 CAP_BPF / CAP_PERFMON，其余全部划掉（含 full root 的其它能力）。
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON
+# 让 root 进程启动即持有这两枚（配合 NoNewPrivileges，不能再多）。
+AmbientCapabilities=CAP_BPF CAP_PERFMON
+# 不再允许提权（setuid / capability 增益都失效）：两枚 Ambient 之外的能力永远拿不到。
+NoNewPrivileges=yes
+# 整个文件系统只读（helper 只读 manifest + 只写 /run/trimum，不碰任何持久化面）。
+ProtectSystem=strict
+# ── 只读与不可 exec ───────────────────────────────────────
+# 只放行这两条读路径：eBPF 产物目录 + 程序清单；其余文件系统都只读（ProtectSystem=strict 已覆盖）。
+ReadOnlyPaths=/opt/trimum/bpf /etc/trimum/bpf-manifest.txt
+# /home 与 /root 对 helper 不可见（它不需要任何用户数据）。
+ProtectHome=yes
+# 私有 /tmp（helper 不写临时文件，纯为隔离）。
+PrivateTmp=yes
+# 不允许加载 / 操作内核模块（eBPF 加载走 bpf(2)，不需要 modprobe）。
+ProtectKernelModules=yes
+# /proc/sys 等内核可调项只读（不许动内核参数）。
+ProtectKernelTunables=yes
+# 只允许 AF_UNIX socket（不联网，见文件顶部注释）。
+RestrictAddressFamilies=AF_UNIX
+# 系统服务白名单 syscall；白名单外的 syscall 一律返回 EPERM（不是杀进程，helper 可如实降级报不可用）。
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
