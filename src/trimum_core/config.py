@@ -145,6 +145,21 @@ DEFAULT_SOCKET_PATH = default_socket_path()
 WINDOWS_CONFIG_DIR = Path.home() / ".trimum"
 
 
+def _path_exists(path: Path) -> bool:
+    """`Path.exists()` 的静默版：**读不到（EACCES）也当不存在**。
+
+    为什么不能用 `Path.exists()`：它只吞 ENOENT / ENOTDIR / EBADF / ELOOP，`EACCES` 会原样抛出。
+    以 root 跑、又开了 `ProtectHome=yes` 的服务里，默认路径 `~/.config/trimum/config.yaml` 就是
+    `/root/.config/...`（整个 /root 不可达）⇒ `Config()` 直接抛 `PermissionError` 把进程带走
+    （真机实测：`trimum-bpf-helper` 反复重启、`is-active` 停 `activating`）。
+    口径按 AGENTS.md「配置缺失 / 配置坏 / 读不到 ⇒ 静默走默认，不许抛」。
+    """
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
 DEFAULT_CONFIG = {
     "core": {
         "host": "127.0.0.1",
@@ -187,10 +202,10 @@ class Config:
     def _load_file(self) -> None:
         """Load config from YAML file, merging with defaults."""
         path = self.config_path
-        if not path.exists():
+        if not _path_exists(path):
             # Try Windows fallback
             win_path = WINDOWS_CONFIG_DIR / "config.yaml"
-            if win_path.exists():
+            if _path_exists(win_path):
                 path = win_path
             else:
                 return  # No config file, use defaults
@@ -319,10 +334,10 @@ class PolicyLoader:
     def load(self) -> list[dict]:
         """Load policy rules from YAML. Returns default rules on error."""
         path = self.path
-        if not path.exists():
+        if not _path_exists(path):
             # Try Windows fallback
             win_path = WINDOWS_CONFIG_DIR / "policy.yaml"
-            if win_path.exists():
+            if _path_exists(win_path):
                 path = win_path
             else:
                 return self._get_default_rules()

@@ -321,6 +321,14 @@ daemon 没有 `CAP_CHOWN`/`CAP_SETUID`，这些调用对它本来就什么都做
 安装脚本在碰系统之前做 DAC 预检（`dac_preflight`：按位逐段验「uid 0 + 客户端组」能不能穿到 `bpf_helper_main.py`），
 读不到就 `exit 1`，不装出一个 crash-loop 的单元。
 
+**再补一条同源的（同日第二轮实测）**：`ProtectHome=yes` 把 `/root` 整个挡掉，而 **uid 0 的默认配置路径
+`~/.config/trimum/config.yaml` 就在 `/root/.config/` 下** —— 于是 hardened 的 root 服务既要面对「读不到任何配置」，
+还要面对 `Path.exists()` 的坑：它只吞 `ENOENT`/`ENOTDIR` 一类，**`EACCES` 会原样抛出** ⇒ `Config()` 抛 `PermissionError`
+把进程带走（`trimum-bpf-helper` 第二轮 crash-loop 就是这么来的）。两条对策同时要：
+① 单元里 `Environment=XDG_CONFIG_HOME=/etc`，系统级配置统一放 `/etc/trimum/config.yaml`（与 `bpf-manifest.txt` 同目录，
+root:root 0644 即可读）；② `trimum_core.config` 用 `_path_exists()`（`OSError` ⇒ 当不存在），把「读不到」并入
+「缺失 ⇒ 静默走默认」这条既有口径（`Config._load_file` 与 `PolicyLoader.load` 都走它）。
+
 
 ## 7. 真机还需要装什么（工具链）
 

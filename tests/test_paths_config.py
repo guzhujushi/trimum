@@ -9,7 +9,10 @@ touches the real ``~/.trimum``.
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import types
+
+import pytest
 
 
 def test_data_dir_default(tmp_path, monkeypatch):
@@ -308,3 +311,45 @@ def test_health_config_fallback_follows_trimum_home(tmp_path, monkeypatch):
     home.mkdir(parents=True, exist_ok=True)
     (home / "config.yaml").write_text("{}", encoding="utf-8")
     assert _check_config()["exists"] is True
+
+
+# ---- 配置**读不到**（EACCES）⇒ 静默走默认，不许抛 --------------------------------
+#
+# 真机场景（2026-10-06 `trimum-bpf-helper` 实测）：以 root 跑 + systemd `ProtectHome=yes` 的服务里，
+# 默认配置路径 `~/.config/trimum/config.yaml` 就是 `/root/.config/...`（整个 /root 不可达），
+# 而 `Path.exists()` 只吞 ENOENT 一类，`EACCES` 会原样抛 ⇒ `Config()` 把进程带走、单元 crash-loop。
+
+def _blocked_config_file(tmp_path: Path, text: str, name: str = "config.yaml") -> Path:
+    """写一份配置再把**父目录**设成 0000：对非 root 进程，stat 其下任何路径都是 EACCES。"""
+    if os.geteuid() == 0:
+        pytest.skip("root 不受目录权限限制，模拟不出 EACCES")
+    d = tmp_path / "blocked"
+    d.mkdir()
+    p = d / name
+    p.write_text(text, encoding="utf-8")
+    os.chmod(d, 0o000)
+    return p
+
+
+def test_config_unreadable_path_falls_back_to_defaults(tmp_path):
+    """读不到（EACCES）的配置文件 ⇒ 不抛异常，且**不**套用它里面的值。"""
+    from trimum_core.config import Config
+
+    p = _blocked_config_file(tmp_path, "core:\n  port: 9999\n")
+    try:
+        cfg = Config(config_path=p)          # 旧行为：PermissionError
+        assert cfg.get("core.port") != 9999  # 读不到的那份不该生效
+    finally:
+        os.chmod(p.parent, 0o755)
+
+
+def test_policy_loader_unreadable_path_uses_default_rules(tmp_path):
+    """policy 也走同一条静默口径，别在装/起服务时炸。"""
+    from trimum_core.config import PolicyLoader
+
+    p = _blocked_config_file(tmp_path, "rules:\n  - name: nope\n", name="policy.yaml")
+    try:
+        rules = PolicyLoader(p).load()       # 旧行为：PermissionError
+        assert isinstance(rules, list)
+    finally:
+        os.chmod(p.parent, 0o755)

@@ -22,6 +22,13 @@
 #        **非 root** 的 daemon 才进得去 `/run/trimum`、连得上 socket（即 §6.7 写的「socket root:客户端组 0660」）。
 #   组名不写死（public 仓库、可能换机器）：由 `scripts/setup_ebpf_helper.sh` 按 `trmd.service` 的
 #   `User=` 推导后插入，可用 `TRIMUM_BPF_CLIENT_USER` / `TRIMUM_BPF_CLIENT_GROUP` 覆盖。
+#
+# 为什么 `XDG_CONFIG_HOME=/etc`（不让 root 用 `~/.config`）：
+#   `ProtectHome=yes` 把 `/root` 整个挡掉，而 uid 0 的默认配置路径 `~/.config/trimum/config.yaml`
+#   就在 `/root/.config/` 下 ⇒ ① 永远读不到配置；② `Path.exists()` 遇到 `EACCES` 会**抛**
+#   （真机实测：`Config()` 抛 `PermissionError` → 单元 crash-loop、socket 永不出现）。
+#   指到 `/etc` 后系统级配置统一放 `/etc/trimum/config.yaml`（与 `bpf-manifest.txt` 同目录，
+#   root:root 0644 就够 helper 读）；文件缺失则走默认（helper 默认 allowed_uids 为空 = fail-closed）。
 [Unit]
 Description=trimum eBPF privileged helper (CAP_BPF/CAP_PERFMON only)
 ConditionPathExists=/opt/trimum/src/trimum_core/bpf_helper_main.py
@@ -33,6 +40,7 @@ User=root
 WorkingDirectory=/opt/trimum
 Environment=PATH=/opt/trimum/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=TRIMUM_BPF_SOCKET=/run/trimum/priv.sock
+Environment=XDG_CONFIG_HOME=/etc
 ExecStart=/opt/trimum/venv/bin/python -m trimum_core.bpf_helper_main
 RuntimeDirectory=trimum
 RuntimeDirectoryMode=0750

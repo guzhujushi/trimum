@@ -47,6 +47,17 @@ def test_unit_explains_why_group_is_required():
     assert "/opt/trimum" in text and "RuntimeDirectory" in text
 
 
+def test_unit_sets_xdg_config_home_because_protecthome_hides_root():
+    """`ProtectHome=yes` 把 /root 挡掉 ⇒ uid 0 的默认配置路径 /root/.config/... 读不到，
+    `Path.exists()` 还会因 EACCES 抛出（真机实测 crash-loop）⇒ 单元必须把配置目录指到保护之外。"""
+    text = _unit_text()
+    assert "ProtectHome=yes" in text
+    xdg = [ln for ln in text.splitlines() if ln.startswith("Environment=XDG_CONFIG_HOME=")]
+    assert len(xdg) == 1, "单元必须且只能给一条 Environment=XDG_CONFIG_HOME="
+    value = xdg[0].split("=", 2)[2]
+    assert value and not value.startswith(("/root", "/home")), value
+
+
 def test_setup_script_renders_marker_and_fails_loud():
     text = _setup_text()
     assert MARKER in text

@@ -205,6 +205,20 @@ do_selfcheck() {
     skip "CapabilityBoundingSet 只有两枚" "需 root 读单元文件 /etc/systemd/system/trimum-bpf-helper.service；非 root 读不到"
   fi
 
+  # 2b. 单元必须给 XDG_CONFIG_HOME（ProtectHome=yes 下 /root 不可达 ⇒ uid 0 的 ~/.config 读不到还会抛 EACCES）
+  if [ -r "/etc/systemd/system/${UNIT}.service" ]; then
+    local xdg; xdg="$(grep -E '^Environment=XDG_CONFIG_HOME=' "/etc/systemd/system/${UNIT}.service" | head -1 | sed 's/^Environment=XDG_CONFIG_HOME=//')"
+    if [ -n "$xdg" ]; then
+      ok "单元给了 XDG_CONFIG_HOME=${xdg}（helper 的系统级配置放 ${xdg}/trimum/config.yaml）"
+    else
+      bad "单元给了 XDG_CONFIG_HOME（缺这行 ⇒ ProtectHome=yes 下 /root 不可达，Config() 抛 EACCES → crash-loop）"
+    fi
+  elif is_root; then
+    bad "单元给了 XDG_CONFIG_HOME（单元文件不存在：/etc/systemd/system/${UNIT}.service）"
+  else
+    skip "单元给了 XDG_CONFIG_HOME" "需 root 读单元文件 /etc/systemd/system/${UNIT}.service；非 root 读不到"
+  fi
+
   # 3. NoNewPrivs 与 Seccomp（读运行中进程的 /proc/Pid/status）
   if is_root; then
     local pid; pid="$(systemctl show "$UNIT" -p MainPID --value 2>/dev/null || true)"
@@ -489,6 +503,8 @@ if [ "$MODE" = dryrun ]; then
   echo "    4) systemctl daemon-reload && systemctl enable --now ${UNIT}"
   echo "    5) 冒烟：active + socket 0660 且属组=${CLIENT_GROUP:-?}（客户端组）+ root 发 bpf.stats 必须 peer_denied"
   echo "       + 非 root 客户端能连上拿到协议应答；失败自动回滚"
+  echo "    6) helper 的系统级配置在 /etc/trimum/config.yaml（单元里 XDG_CONFIG_HOME=/etc；ProtectHome=yes 下不能用 /root/.config）"
+  echo "       要放行客户端 uid，就在那文件里写：security.bpf_helper_allowed_uids: [<uid>]（缺文件=空集=fail-closed）"
   echo "  客户端组：按 trmd.service 的 User= 推导（CLIENT_USER=${CLIENT_USER:-<取不到>}）；"
   echo "           可用 TRIMUM_BPF_CLIENT_USER=<用户> / TRIMUM_BPF_CLIENT_GROUP=<组> 覆盖。"
   if [ -n "$CLIENT_GROUP" ] && [ -d "$DEPLOY_ROOT" ]; then
@@ -583,6 +599,10 @@ if do_smoke; then
   echo
   echo "== 装好 =="
   echo "  bpf.stats 现在会**如实**回 available:false（真 loader 未实现，ebpf1e 才换）——这是正确表现。"
+  echo "  放行客户端：写 /etc/trimum/config.yaml"
+  echo "    security:"
+  echo "      bpf_helper_allowed_uids: [$(id -u "${CLIENT_USER:-root}" 2>/dev/null || echo '<客户端 uid>')]     # ${CLIENT_USER:-<客户端用户>}"
+  echo "  （现在为空集，所有对端都会被拒 —— fail-closed，不是故障）"
   echo "  自检：  sudo bash scripts/setup_ebpf_helper.sh --self-check"
   echo "  回滚：  sudo bash scripts/setup_ebpf_helper.sh --rollback"
   exit 0
