@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 把源码同步到部署树 /opt/trimum（真机、需要 root）
 #
-#   sudo bash /tmp/sync_opt_tree.sh              # 同步 src/ config/ tests/ scripts/ + 顶层文件
+#   sudo bash /tmp/sync_opt_tree.sh              # 同步 src/ config/ tests/ scripts/ deploy/ + 顶层文件
 #   sudo bash /tmp/sync_opt_tree.sh --fix-home   # 额外修 /home/guzhujushi/trimum/src 的 root 属主，并用源补齐缺文件
 #   sudo bash /tmp/sync_opt_tree.sh --dry-run    # 只报告将要做什么
 #   sudo bash /tmp/sync_opt_tree.sh --from-home  # 强制用开发树当源（默认优先用 /tmp/trimum-sync.tar）
@@ -290,10 +290,10 @@ fi
 # 2. 代码与配置
 # ---------------------------------------------------------------------------
 STEP="[2/5] 代码与配置"
-echo "== [2/5] src/ config/ tests/ scripts/ =="
+echo "== [2/5] src/ config/ tests/ scripts/ deploy/ =="
 if [[ $DRY_RUN -eq 0 ]]; then
     install -d -o "$OWNER_USER" -g "$OWNER_GROUP" -m 0755 \
-        "$APP_DIR/src" "$APP_DIR/config" "$APP_DIR/tests" "$APP_DIR/scripts"
+        "$APP_DIR/src" "$APP_DIR/config" "$APP_DIR/tests" "$APP_DIR/scripts" "$APP_DIR/deploy"
 fi
 
 sync_tree() {
@@ -315,6 +315,7 @@ sync_tree src 0644
 sync_tree config 0644
 sync_tree tests 0644
 sync_tree scripts 0755
+sync_tree deploy 0644
 
 # ---------------------------------------------------------------------------
 # 3. 顶层文件（沿用目标目录既有属主）
