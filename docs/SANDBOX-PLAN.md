@@ -351,6 +351,11 @@ ring buffer 由后台线程按间隔吸干 → ① `bpf.tail` 能看到的内存
 | `security.bpf_alerts_max_bytes` | `TRIMUM_BPF_ALERTS_MAX_BYTES` | `4194304` | 回灌文件上限；超了留最后一半（daemon 侧 tailer 见到截断会重读） |
 | `security.bpf_recent_events` | `TRIMUM_BPF_RECENT_EVENTS` | `1024` | `bpf.tail` 内存环长度 |
 
+**daemon 侧回灌轮询（`ebpf1f`，2026-10-08 加）**：`trmd` 起来时先 `seek_end()`（**不重放历史**），之后按间隔读
+`security.bpf_alerts` 指向的文件 → `security.ebpf_alert` 事件 + `AuditStore`。间隔键 `security.bpf_alert_interval`
+（env `TRIMUM_BPF_ALERT_INTERVAL`，默认 `2.0` 秒）；缺失 / 空 / 非数字 / 非正 **静默走默认**（不许忙等）。
+观测失败只 `log.warning`，**不许**让 daemon 起来失败或轮询器退出。
+
 **两个配置文件别搞混**：helper 读 `/etc/trimum/config.yaml`（单元里 `XDG_CONFIG_HOME=/etc`）；
 `trmd`（daemon，非 root）读 `~/.config/trimum/config.yaml`。放行 uid 要写**前者**。
 

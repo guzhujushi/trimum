@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 
 import pytest
 
@@ -414,3 +415,195 @@ def test_tailer_seek_end_missing_file_returns_zero(tmp_path):
     tailer = B.BpfAlertTailer(tmp_path / "absent.jsonl")
     assert tailer.seek_end() == 0
     assert tailer.poll() == []
+
+
+# ---- alert_interval（ebpf1f：显式 > env > config > 默认） ----
+
+class _Cfg:
+    def __init__(self, value):
+        self._value = value
+
+    def get(self, key):
+        return self._value
+
+
+def test_alert_interval_explicit_wins(monkeypatch):
+    monkeypatch.setenv(B.ALERT_INTERVAL_ENV, "9")
+    cfg = _Cfg(7)
+    assert B.alert_interval(explicit=3.5, config=cfg) == 3.5
+
+
+def test_alert_interval_explicit_int_and_float():
+    assert B.alert_interval(explicit=2) == 2.0
+    assert B.alert_interval(explicit=0.25) == 0.25
+
+
+@pytest.mark.parametrize("bad", ["abc", 0, -1.5, True])
+def test_alert_interval_explicit_bad_falls_through_to_env(monkeypatch, bad):
+    monkeypatch.setenv(B.ALERT_INTERVAL_ENV, "4")
+    assert B.alert_interval(explicit=bad) == 4.0
+
+
+def test_alert_interval_env_when_no_explicit(monkeypatch):
+    monkeypatch.delenv(B.ALERT_INTERVAL_ENV, raising=False)
+    monkeypatch.setenv(B.ALERT_INTERVAL_ENV, "6.5")
+    assert B.alert_interval() == 6.5
+
+
+@pytest.mark.parametrize("raw", ["", "abc"])
+def test_alert_interval_env_empty_or_bad_falls_to_config(monkeypatch, raw):
+    monkeypatch.setenv(B.ALERT_INTERVAL_ENV, raw)
+    assert B.alert_interval(config=_Cfg(5)) == 5.0
+
+
+@pytest.mark.parametrize("raw", ["0", "-1"])
+def test_alert_interval_env_non_positive_falls_to_config(monkeypatch, raw):
+    monkeypatch.setenv(B.ALERT_INTERVAL_ENV, raw)
+    assert B.alert_interval(config=_Cfg(5)) == 5.0
+
+
+def test_alert_interval_config_value():
+    cfg = _Cfg(7.5)
+    assert B.alert_interval(config=cfg) == 7.5
+
+
+@pytest.mark.parametrize("bad", [True, "7", 0, -2, None])
+def test_alert_interval_config_bad_falls_to_default(monkeypatch, bad):
+    monkeypatch.delenv(B.ALERT_INTERVAL_ENV, raising=False)
+    assert B.alert_interval(config=_Cfg(bad)) == B.DEFAULT_POLL_INTERVAL_SECONDS
+
+
+def test_alert_interval_config_raises_falls_to_default(monkeypatch):
+    monkeypatch.delenv(B.ALERT_INTERVAL_ENV, raising=False)
+
+    class _Boom:
+        def get(self, key):
+            raise RuntimeError("boom")
+
+    assert B.alert_interval(config=_Boom()) == B.DEFAULT_POLL_INTERVAL_SECONDS
+
+
+def test_alert_interval_all_missing_falls_to_default(monkeypatch):
+    monkeypatch.delenv(B.ALERT_INTERVAL_ENV, raising=False)
+    assert B.alert_interval() == 2.0
+    assert B.DEFAULT_POLL_INTERVAL_SECONDS == 2.0
+
+
+# ---- BpfAlertPoller（ebpf1f：seek_end 跳历史 + 轮询发布） ----
+
+@pytest.mark.asyncio
+async def test_poller_seek_end_then_poll_once_publishes_only_new(tmp_path):
+    p = tmp_path / "alerts.jsonl"
+    p.write_bytes(_line({"kind": "bpf_attach", "pid": 11}))
+    bus = _FakeBus()
+    store = _FakeAuditStore()
+    poller = B.BpfAlertPoller(bus=bus, audit_store=store, path=p, interval=60.0)
+    assert poller.tailer.seek_end() > 0
+    assert await poller.poll_once() == 0
+    assert bus.calls == []
+    p.write_bytes(p.read_bytes() + _line({"kind": "exec", "pid": 22, "comm": "bash", "detail": "x"}))
+    assert await poller.poll_once() == 1
+    assert bus.calls == [
+        (B.EVENT_SEC_EBPF, B.EVENT_SOURCE, {"kind": "exec", "pid": 22, "comm": "bash", "detail": "x"})
+    ]
+    assert len(store.events) == 1
+    assert store.events[0].event_type == B.EVENT_SEC_EBPF
+    assert store.events[0].details == {"kind": "exec", "pid": 22, "comm": "bash", "detail": "x"}
+    assert store.events[0].risk == "high"
+    assert store.events[0].action == "alert"
+
+
+@pytest.mark.asyncio
+async def test_poller_poll_once_swallows_publish_failure(tmp_path):
+    p = tmp_path / "alerts.jsonl"
+    p.write_bytes(b"")  # 空文件：构造时 seek_end 推到 0
+    poller = B.BpfAlertPoller(
+        bus=_FakeBus(raise_on_emit=True),
+        audit_store=_FakeAuditStore(raise_on_append=True),
+        path=p,
+        interval=60.0,
+    )
+    # 构造后追加 2 行（对 poller 来说是「新」行，不是历史）
+    p.write_bytes(p.read_bytes() + _line({"kind": "prog_load", "pid": 1}) + _line({"kind": "map_write", "pid": 2}))
+    assert await poller.poll_once() == 2
+
+
+@pytest.mark.asyncio
+async def test_poller_poll_once_missing_file_returns_zero(tmp_path):
+    bus = _FakeBus()
+    store = _FakeAuditStore()
+    poller = B.BpfAlertPoller(
+        bus=bus,
+        audit_store=store,
+        path=tmp_path / "nope.jsonl",
+        interval=60.0,
+    )
+    assert await poller.poll_once() == 0
+    assert bus.calls == []
+
+
+def test_poller_defaults_path_from_alert_path(monkeypatch):
+    monkeypatch.delenv(B.ALERT_INTERVAL_ENV, raising=False)
+    poller = B.BpfAlertPoller()
+    assert poller.path == B.alert_path()
+
+
+@pytest.mark.asyncio
+async def test_poller_defaults_path_and_poll_no_side_effect(tmp_path, monkeypatch):
+    monkeypatch.delenv(B.ALERT_INTERVAL_ENV, raising=False)
+    poller = B.BpfAlertPoller(bus=None, audit_store=None)
+    assert poller.path == B.alert_path()
+    assert await poller.poll_once() == 0
+
+
+def test_poller_interval_from_explicit_config_and_env(monkeypatch):
+    # 显式优先：env 设了 1.5、config 给 3，但传了 interval=0.5 ⇒ 仍是 0.5
+    monkeypatch.setenv(B.ALERT_INTERVAL_ENV, "1.5")
+    assert B.BpfAlertPoller(interval=0.5).interval == 0.5
+    assert B.BpfAlertPoller(interval=0.5, config=_Cfg(3)).interval == 0.5
+    # 不传 interval：去掉 env 后落到 config ⇒ 3.0
+    monkeypatch.delenv(B.ALERT_INTERVAL_ENV, raising=False)
+    assert B.BpfAlertPoller(config=_Cfg(3)).interval == 3.0
+
+
+@pytest.mark.asyncio
+async def test_poller_run_forever_no_replay_and_reads_new(tmp_path):
+    p = tmp_path / "alerts.jsonl"
+    p.write_bytes(_line({"kind": "bpf_attach", "pid": 1}))
+    bus = _FakeBus()
+    store = _FakeAuditStore()
+    poller = B.BpfAlertPoller(bus=bus, audit_store=store, path=p, interval=0.01)
+    task = asyncio.create_task(poller.run_forever())
+    await asyncio.sleep(0.05)  # 让首轮 seek_end 跑完
+    p.write_bytes(p.read_bytes() + _line({"kind": "map_write", "pid": 5}))
+    deadline = time.monotonic() + 3.0
+    while len(store.events) < 1 and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+    assert len(store.events) == 1
+    assert store.events[0].details["kind"] == "map_write"
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_poller_run_forever_survives_publish_failure(tmp_path):
+    p = tmp_path / "alerts.jsonl"
+    p.write_bytes(_line({"kind": "prog_load", "pid": 1}))
+    poller = B.BpfAlertPoller(
+        bus=_FakeBus(raise_on_emit=True),
+        audit_store=None,
+        path=p,
+        interval=0.01,
+    )
+    task = asyncio.create_task(poller.run_forever())
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    p.write_bytes(p.read_bytes() + _line({"kind": "map_write", "pid": 2}))
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass

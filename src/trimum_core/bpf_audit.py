@@ -1,6 +1,7 @@
 """eBPF 审计源（daemon 侧）：把特权 helper 的回灌转成 `security.ebpf_alert`（观测失败只 log，不上抛）。"""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -16,6 +17,9 @@ from .models import AuditEvent
 DEFAULT_ALERT_PATH: str = "/run/trimum/bpf-alerts.jsonl"
 ALERT_PATH_ENV: str = "TRIMUM_BPF_ALERTS"
 ALERT_PATH_CONFIG_KEY: str = "security.bpf_alerts"
+DEFAULT_POLL_INTERVAL_SECONDS: float = 2.0
+ALERT_INTERVAL_ENV: str = "TRIMUM_BPF_ALERT_INTERVAL"
+ALERT_INTERVAL_CONFIG_KEY: str = "security.bpf_alert_interval"
 EVENT_SOURCE: str = "bpf-helper"
 #: helper 回灌里认得的 kind。前四个是 `bpf_guard` 的产物；`exec` 是 `exec_guard` 的产物
 #: （kind 数值表见 `bpf/trimum_bpf.h` ⇄ `bpf_loader.KINDS`）。不在这个表里的一律丢。
@@ -263,3 +267,125 @@ class BpfAlertTailer:
             return []
         self._offset = new_offset
         return alerts
+
+
+def alert_interval(
+    *,
+    explicit: float | None = None,
+    config: object | None = None,
+) -> float:
+    """回灌轮询间隔（秒）。优先级 **显式 > env `TRIMUM_BPF_ALERT_INTERVAL` >
+    `config.get("security.bpf_alert_interval")` > 默认 `DEFAULT_POLL_INTERVAL_SECONDS`**。
+    任一层「缺失 / 空 / 非数字 / 非正数 / 取值抛异常」⇒ 记一句 `log.warning` 后**落到下一层**，
+    底层是默认值。**不许抛、不许返回 <= 0**（0 会让轮询忙等）。`bool` 不算数字（`True` 要当坏值）。
+    """
+    if explicit is not None:
+        if (
+            isinstance(explicit, (int, float))
+            and not isinstance(explicit, bool)
+            and explicit > 0
+        ):
+            return float(explicit)
+        log.warning("bpf_audit.bad_interval_explicit: %r", explicit)
+
+    raw = os.environ.get(ALERT_INTERVAL_ENV, "")
+    raw = raw.strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = None
+        if value is not None and value > 0:
+            return value
+        log.warning("bpf_audit.bad_interval_env: %r", raw)
+
+    if config is not None:
+        try:
+            value = config.get(ALERT_INTERVAL_CONFIG_KEY)
+        except Exception:
+            value = None
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value > 0
+        ):
+            return float(value)
+
+    return DEFAULT_POLL_INTERVAL_SECONDS
+
+
+class BpfAlertPoller:
+    """把 `BpfAlertTailer`（增量读回灌文件）接上 `publish_alert`（事件 + 审计）的常驻轮询器。
+
+    形状照 `audit_watchdog.AuditWatchdog`：构造存引用 + `seek_end()`（**不回放历史**）；
+    `run_forever()` 循环 `poll_once()` → `sleep(interval)`；`CancelledError` 放行。
+    """
+
+    def __init__(
+        self,
+        *,
+        bus: object | None = None,
+        audit_store: object | None = None,
+        tailer: BpfAlertTailer | None = None,
+        interval: float | None = None,
+        config: object | None = None,
+        path: "str | os.PathLike[str] | None" = None,
+    ) -> None:
+        """`tailer` 给了就用它（此时 `path` 忽略）；否则 `BpfAlertTailer(path, config=config)`。
+        `self.interval = alert_interval(explicit=interval, config=config)`（**一切走这一个函数，别自己写 float()**）。
+        `self._bus` / `self._audit_store` 原样存（可以是 None）。"""
+        self._bus = bus
+        self._audit_store = audit_store
+        self._tailer: BpfAlertTailer = (
+            tailer
+            if tailer is not None
+            else BpfAlertTailer(path, config=config)
+        )
+        self.interval: float = alert_interval(explicit=interval, config=config)
+        # 构造即 seek_end：把历史跳过。放构造里（同步、无 to_thread）是因为
+        # `run_forever` 是 `create_task` 调度的协程，测试里「startup 返回后立即写新行」
+        # 会跑在 `seek_end` 之前 ⇒ 首轮 poll 读到历史。构造里同步做，时序就稳了。
+        self._tailer.seek_end()
+
+    @property
+    def tailer(self) -> BpfAlertTailer:
+        return self._tailer
+
+    @property
+    def path(self) -> Path:
+        return self._tailer.path
+
+    async def poll_once(self) -> int:
+        """读一轮并逐条发出去；返回本轮 alert 条数。**绝不向上抛。**
+
+        口径（逐条）：
+        - `alerts = await asyncio.to_thread(self._tailer.poll)` —— `poll()` 是同步文件 IO（整份读），
+          **必须**丢线程，不许在事件循环里直跑；
+        - `to_thread` 抛（理论上不会，但兜住）⇒ `log.warning("bpf_audit.poll_failed", ...)` 后 `return 0`；
+        - 否则按顺序 `for alert in alerts: await publish_alert(alert, bus=self._bus, audit_store=self._audit_store)`
+          （`publish_alert` 自己吞异常）；
+        - 返回 `len(alerts)`。
+        """
+        try:
+            alerts = await asyncio.to_thread(self._tailer.poll)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("bpf_audit.poll_failed: %s (path=%s)", exc, self.path)
+            return 0
+        for alert in alerts:
+            await publish_alert(alert, bus=self._bus, audit_store=self._audit_store)
+        return len(alerts)
+
+    async def run_forever(self) -> None:
+        """`while True:` → `await self.poll_once()` → `await asyncio.sleep(self.interval)`。
+        `asyncio.CancelledError` 必须 `raise`（关停靠它）；其它异常兜底
+        `log.warning("bpf_audit.poller_crashed", ...)` 后继续循环（轮询器自己不许死）。
+        **不做 `interval <= 0` 的特殊分支**（`alert_interval` 已保证 > 0）。
+        历史已在 `__init__` 里 `seek_end()` 跳过，这里直接进增量循环。"""
+        while True:
+            try:
+                await self.poll_once()
+                await asyncio.sleep(self.interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                log.warning("bpf_audit.poller_crashed: %s", exc)

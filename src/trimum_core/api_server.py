@@ -105,6 +105,10 @@ class AppState:
         self.audit_watchdog_task: Optional[asyncio.Task] = None
         self.system_monitor: Optional[Any] = None
         self.system_monitor_task: Optional[asyncio.Task] = None
+        # eBPF 告警回灌（ebpf1f）：helper 写回灌文件，这里常驻 tail 它 →
+        # `security.ebpf_alert` 事件 + 审计。没装 helper 时该文件不存在，每轮空读、无副作用。
+        self.bpf_alert_poller: Optional[Any] = None
+        self.bpf_alert_task: Optional[asyncio.Task] = None
         # 记忆链（§6 解冻第一件）：MemoryBridge 订阅 memory.* → 落 ContextManager；
         # ExperienceLearner 订阅 event.*.failed → 调 LLM 沉淀经验 → 经上面那座桥落盘。
         self.memory_bridge: Optional[Any] = None
@@ -670,6 +674,24 @@ def create_app(config: Config) -> FastAPI:
         state.system_monitor_task = asyncio.create_task(state.system_monitor.start_collecting())
         logger.info("system_monitor_started", interval=state.system_monitor.interval)
 
+        # eBPF 告警回灌（ebpf1f）：观测线，不许因为起不来就拦住 daemon（同 memory_chain 口径）。
+        try:
+            from .bpf_audit import BpfAlertPoller
+
+            state.bpf_alert_poller = BpfAlertPoller(
+                bus=state.event_bus,
+                audit_store=state.audit_store,
+                config=state.config,
+            )
+            state.bpf_alert_task = asyncio.create_task(state.bpf_alert_poller.run_forever())
+            logger.info(
+                "bpf_alert_poller_started",
+                interval=state.bpf_alert_poller.interval,
+                path=str(state.bpf_alert_poller.path),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("bpf_alert_poller_start_failed", error=str(e))
+
         # MCP 连接池（M4）：共享池 + 空闲回收器。接线放在 IPC 之前，这样
         # `trm mcp status` 一连上看到的就是真实状态。接不上也不拦启动。
         try:
@@ -876,6 +898,8 @@ def create_app(config: Config) -> FastAPI:
             state.audit_watchdog_task.cancel()
         if state.system_monitor_task:
             state.system_monitor_task.cancel()
+        if state.bpf_alert_task:
+            state.bpf_alert_task.cancel()
         if state.mcp_pool is not None:
             # 池子先停回收器，再逐个关掉 server 子进程
             await state.mcp_pool.close_all()

@@ -8,6 +8,7 @@
 
 import asyncio
 import os
+import time
 import sys
 from pathlib import Path
 
@@ -46,6 +47,8 @@ async def run_shutdown(app) -> None:
 async def teardown(app, state) -> None:
     if state.learning_task is not None:
         state.learning_task.cancel()
+    if getattr(state, "bpf_alert_task", None) is not None:
+        state.bpf_alert_task.cancel()
     await state.agent_manager.stop_health_check()
     if state.ipc is not None:
         await state.ipc.stop()
@@ -216,3 +219,83 @@ class TestHealthVersion:
         assert {k: v for k, v in rpc_body.items() if k != "uptime"} == {
             k: v for k, v in body.items() if k != "uptime"
         }
+
+
+class _Recorder:
+    """假 AuditStore：只记 append 进来的事件（本文件不做真落盘）。"""
+
+    def __init__(self):
+        self.events = []
+
+    def append(self, event):
+        self.events.append(event)
+
+
+class TestBpfAlertPollerWiring:
+    """ebpf1f：daemon startup 必须把 BpfAlertPoller 常驻跑起来，shutdown 必须把它收掉。"""
+
+    @pytest.mark.asyncio
+    async def test_startup_wires_the_bpf_alert_poller(self, tmp_path):
+        config = build_config(tmp_path)
+        config.set("security.bpf_alerts", str(tmp_path / "bpf-alerts.jsonl"))
+        config.set("security.bpf_alert_interval", 0.25)
+        app = create_app(config)
+        state = app.state.trimum
+        try:
+            await run_startup(app)
+            assert state.bpf_alert_poller is not None
+            assert isinstance(state.bpf_alert_task, asyncio.Task)
+            assert not state.bpf_alert_task.done()
+            assert str(state.bpf_alert_poller.path) == str(tmp_path / "bpf-alerts.jsonl")
+            assert state.bpf_alert_poller.interval == 0.25
+        finally:
+            if state.bpf_alert_task is not None:
+                state.bpf_alert_task.cancel()
+            await teardown(app, state)
+
+    @pytest.mark.asyncio
+    async def test_replay_file_lands_in_audit_store_end_to_end(self, tmp_path):
+        """/run 换成 tmp 文件：历史行不许发，新行必须经 publish_alert 落审计。"""
+        alerts = tmp_path / "bpf-alerts.jsonl"
+        alerts.write_bytes(b'{"kind":"bpf_attach","pid":1}\n')  # 历史
+        config = build_config(tmp_path)
+        config.set("security.bpf_alerts", str(alerts))
+        config.set("security.bpf_alert_interval", 0.01)
+        app = create_app(config)
+        state = app.state.trimum
+        fake = _Recorder()
+        state.audit_store = fake  # 起任务前换掉
+        try:
+            await run_startup(app)
+            with open(alerts, "ab") as fh:
+                fh.write(b'{"kind":"exec","pid":42,"comm":"bash","detail":"d"}\n')
+            deadline = time.monotonic() + 3.0
+            while len(fake.events) < 1 and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+            assert len(fake.events) == 1, fake.events  # 恰好 1 条：历史没重放
+            event = fake.events[0]
+            assert event.event_type == "security.ebpf_alert"
+            assert event.details == {"kind": "exec", "pid": 42, "comm": "bash", "detail": "d"}
+        finally:
+            if state.bpf_alert_task is not None:
+                state.bpf_alert_task.cancel()
+            await teardown(app, state)
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cancels_the_bpf_alert_task(self, tmp_path):
+        config = build_config(tmp_path)
+        config.set("security.bpf_alerts", str(tmp_path / "bpf-alerts.jsonl"))
+        config.set("security.bpf_alert_interval", 0.25)
+        app = create_app(config)
+        state = app.state.trimum
+        try:
+            await run_startup(app)
+            assert state.bpf_alert_task is not None
+            await run_shutdown(app)
+            with pytest.raises(asyncio.CancelledError):
+                await state.bpf_alert_task
+            assert state.bpf_alert_task.cancelled()
+        finally:
+            if state.bpf_alert_task is not None and not state.bpf_alert_task.done():
+                state.bpf_alert_task.cancel()
+            await teardown(app, state)
