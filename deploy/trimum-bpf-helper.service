@@ -70,9 +70,15 @@ ProtectKernelModules=yes
 ProtectKernelTunables=yes
 # 只允许 AF_UNIX socket（不联网，见文件顶部注释）。
 RestrictAddressFamilies=AF_UNIX
-# 系统服务白名单 syscall；白名单外的 syscall 一律返回 EPERM（不是杀进程，helper 可如实降级报不可用）。
-SystemCallFilter=@system-service
+# syscall 白名单：@system-service **不含** bpf(2)（它在 systemd 的 @privileged 组里），
+# 也不含 perf_event_open(2)（@debug 组）——而这两个正是 loader 的唯一内核面
+# （bpf 加载程序/map，perf_event_open 挂 tracepoint）。少了它们，加载会被 seccomp 判 EPERM，
+# loader 就只能如实报失败（2026-10-08 对照 `systemd-analyze syscall-filter` 逐项核过）。
+SystemCallFilter=@system-service bpf perf_event_open memfd_create
 SystemCallErrorNumber=EPERM
+# libbpf 启动时会自己 bump RLIMIT_MEMLOCK（内核 6.8 起内存记账走 memcg，已不强制），
+# 放开上限只是消掉 libbpf 的告警，顺带对老内核更稳。
+LimitMEMLOCK=infinity
 
 [Install]
 WantedBy=multi-user.target

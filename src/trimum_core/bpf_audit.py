@@ -17,7 +17,9 @@ DEFAULT_ALERT_PATH: str = "/run/trimum/bpf-alerts.jsonl"
 ALERT_PATH_ENV: str = "TRIMUM_BPF_ALERTS"
 ALERT_PATH_CONFIG_KEY: str = "security.bpf_alerts"
 EVENT_SOURCE: str = "bpf-helper"
-HELPER_ALERT_KINDS: tuple[str, ...] = ("bpf_attach", "bpf_detach", "prog_load", "map_write")
+#: helper 回灌里认得的 kind。前四个是 `bpf_guard` 的产物；`exec` 是 `exec_guard` 的产物
+#: （kind 数值表见 `bpf/trimum_bpf.h` ⇄ `bpf_loader.KINDS`）。不在这个表里的一律丢。
+HELPER_ALERT_KINDS: tuple[str, ...] = ("bpf_attach", "bpf_detach", "prog_load", "map_write", "exec")
 MAX_LINE_BYTES: int = 4096
 MAX_COMM_LEN: int = 64
 MAX_DETAIL_LEN: int = 500

@@ -196,7 +196,7 @@ def serve(sock: "str | os.PathLike[str]", *, loader: object,
     - 监听前：若路径已存在**先 `unlink`**（残留 socket）；`bind` 后 `os.chmod(path, SOCKET_MODE)`；
     - 每个连接：`conn.settimeout(RECV_TIMEOUT_SECONDS)` → `recv(MAX_REQUEST_BYTES)` 一次拿一条请求 →
       用 `conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))` 取对端 uid
-      （`struct.unpack("3i", ...)[0]`）→ `handle_request(...)` → `conn.sendall(resp)` → 关连接；
+      （`struct ucred` = `{pid, uid, gid}` ⇒ **下标 1**）→ `handle_request(...)` → `conn.sendall(resp)` → 关连接；
     - 连接层异常（对端早退 / 超时 / recv 失败）只 `log.debug`，**继续 accept**；
     - `max_requests` 非 None 且已处理够 ⇒ 退出循环；
     - 退出时：关监听 socket、`unlink` 路径（不存在就忽略）；返回处理计数。`bind`/`chmod` 失败**要抛**（这是启动失败，不许静默）。
@@ -232,7 +232,10 @@ def serve(sock: "str | os.PathLike[str]", *, loader: object,
                     continue
                 peer_cred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
                                             struct.calcsize("3i"))
-                peer_uid = struct.unpack("3i", peer_cred)[0]
+                # struct ucred { pid_t pid; uid_t uid; gid_t gid; } ⇒ 下标 1 才是 uid，**不是** 0。
+                # 2026-10-08 真机冒烟抓到：原来取 [0] 等于拿对端 **pid** 当 uid ⇒ 白名单永远匹配不上，
+                # 连放行 uid 都被判 peer_denied（表现为「装了但全拒」，且日志里的 peer_uid 是百万级的 pid）。
+                peer_uid = struct.unpack("3i", peer_cred)[1]
                 response = handle_request(raw, loader=loader, peer_uid=peer_uid,
                                           allowed_uids=allowed_uids, on_denied=on_denied)
                 conn.sendall(response)

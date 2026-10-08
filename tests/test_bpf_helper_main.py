@@ -14,6 +14,7 @@ if str(_SRC) not in sys.path:
 import pytest  # noqa: E402
 
 from trimum_core.bpf_helper import LoaderError  # noqa: E402
+from trimum_core import bpf_helper_main as BPF_MAIN  # noqa: E402
 from trimum_core.bpf_helper_main import (  # noqa: E402
     UnavailableLoader, build_loader, main,
 )
@@ -65,18 +66,52 @@ def test_tail_raises_loadererror_with_message():
     assert str(ei.value).strip()
 
 
-# ---- build_loader：现在恒返回一个带四方法的 loader ----
+# ---- build_loader：默认给真 loader（ebpf1e），拿不到才回退 UnavailableLoader ----
 
-def test_build_loader_returns_unavailable_loader():
+def test_build_loader_returns_real_loader_with_four_methods():
+    loader = build_loader()
+    assert not isinstance(loader, UnavailableLoader), "默认应当给真 loader（bpf_loader.BpfLoader）"
+    for name in ("load", "unload", "stats", "tail"):
+        assert callable(getattr(loader, name))
+    stats = loader.stats()
+    assert isinstance(stats["available"], bool)          # 有没有 libbpf 都必须是 bool，不许抛
+
+
+def test_build_loader_falls_back_when_construction_fails(monkeypatch):
+    from trimum_core import bpf_loader as L
+
+    def boom(*_a, **_kw):
+        raise L.LoaderError("nope")
+
+    monkeypatch.setattr(L, "BpfLoader", boom)
     loader = build_loader()
     assert isinstance(loader, UnavailableLoader)
-    for name in ("load", "unload", "stats", "tail"):
-        assert hasattr(loader, name)
-        assert callable(getattr(loader, name))
+    assert loader.stats()["available"] is False
 
 
-def test_build_loader_stats_unavailable():
-    assert build_loader().stats()["available"] is False
+def test_build_loader_passes_config_through():
+    """配置对象必须落到 loader 里（漏传 ⇒ helper 只认 env + 默认，`/etc/trimum/config.yaml` 白写）。"""
+    from trimum_core import bpf_loader as L
+
+    class Cfg:
+        def get(self, key):
+            if key == L.DRAIN_INTERVAL_CONFIG_KEY:
+                return 50
+            if key == L.PROGRAM_DIR_CONFIG_KEY:
+                return "/tmp/trm-bpf-from-config"
+            return None
+
+    loader = build_loader(config=Cfg())
+    stats = loader.stats()
+    assert stats["drain"]["interval_ms"] == 50
+    assert str(loader._program_dir()) == "/tmp/trm-bpf-from-config"
+
+
+def test_build_loader_falls_back_when_import_fails(monkeypatch):
+    monkeypatch.setitem(sys.modules, "trimum_core.bpf_loader", None)
+    loader = build_loader()
+    assert isinstance(loader, UnavailableLoader)
+    assert loader.stats()["available"] is False
 
 
 # ---- main：纯逻辑（serve 注入假实现，不真起服务）----
@@ -107,11 +142,28 @@ def test_main_without_once_max_requests_none(tmp_path):
     assert fake.calls[0]["max_requests"] is None
 
 
-def test_main_loader_injected_and_available_flag_false(tmp_path):
+def test_main_passes_loader_with_unavailable_flag(tmp_path, monkeypatch):
+    # 把 build_loader 换成兜底 loader：`main` 必须把它原样交给 serve，且如实报不可用。
+    # 顺带钉住「main 把配置对象传给 build_loader」（漏传 ⇒ helper 读不到 /etc/trimum/config.yaml）。
+    seen: list[dict] = []
+
+    def fake_build_loader(**kwargs):
+        seen.append(kwargs)
+        return UnavailableLoader()
+
+    monkeypatch.setattr(BPF_MAIN, "build_loader", fake_build_loader)
     fake = FakeServe(return_value=0)
     sock_file = tmp_path / "priv.sock"
     main(["--socket", str(sock_file)], serve_fn=fake)
     assert fake.calls[0]["loader"].stats()["available"] is False
+    assert seen and seen[0].get("config") is not None
+
+
+def test_main_passes_real_loader_by_default(tmp_path):
+    fake = FakeServe(return_value=0)
+    sock_file = tmp_path / "priv.sock"
+    main(["--socket", str(sock_file)], serve_fn=fake)
+    assert isinstance(fake.calls[0]["loader"].stats()["available"], bool)
 
 
 def test_main_serve_raises_returns_one(tmp_path):

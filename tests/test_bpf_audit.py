@@ -123,13 +123,21 @@ def test_alert_path_all_missing_falls_to_default(monkeypatch):
 # ---- ② parse_alert_line ----
 
 @pytest.mark.parametrize("kind", list(B.HELPER_ALERT_KINDS))
-def test_parse_happy_four_kinds(kind):
+def test_parse_happy_alert_kinds(kind):
     a = B.parse_alert_line(_line({"kind": kind, "pid": 42, "comm": "trm", "detail": "x"}))
     assert a is not None
     assert a.kind == kind
     assert a.pid == 42
     assert a.comm == "trm"
     assert a.detail == "x"
+
+
+def test_helper_alert_kinds_cover_both_programs():
+    """`bpf_guard` 的四个 kind + `exec_guard` 的 `exec` 都要认得（否则 exec 事件被静默丢弃）。"""
+    assert set(B.HELPER_ALERT_KINDS) == {"bpf_attach", "bpf_detach", "prog_load", "map_write", "exec"}
+    alert = B.parse_alert_line(_line({"kind": "exec", "pid": 3, "comm": "bash",
+                                      "detail": "/usr/bin/ls"}))
+    assert alert is not None and alert.kind == "exec" and alert.detail == "/usr/bin/ls"
 
 
 def test_parse_accepts_bytes_input():

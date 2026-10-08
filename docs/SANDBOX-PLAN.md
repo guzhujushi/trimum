@@ -330,6 +330,81 @@ root:root 0644 即可读）；② `trimum_core.config` 用 `_path_exists()`（`O
 「缺失 ⇒ 静默走默认」这条既有口径（`Config._load_file` 与 `PolicyLoader.load` 都走它）。
 
 
+**补（2026-10-08，`ebpf1e` 真 loader + 配置面）**：helper 侧的 `bpf.load/unload/stats/tail` 现在真的挂着
+`libbpf`（ctypes，不装 pip 包）：产物 `/opt/trimum/bpf/<程序名>.bpf.o`（root:root 0444，**仓库里只放源码**，
+`--apply` 现场 clang 编译）、清单 `/etc/trimum/bpf-manifest.txt`（sha256）在装载前逐字节校验；
+ring buffer 由后台线程按间隔吸干 → ① `bpf.tail` 能看到的内存环（最近 N 条）② 追加
+`/run/trimum/bpf-alerts.jsonl`（0640 root:客户端组；`ebpf1b` 的 `BpfAlertTailer` 读它）。**只有 attach 成功才叫可用**，
+校验/加载失败一律 `ok:false`（fail-closed，不降级、不假装在监控）。
+
+**helper 侧可配置键**（真源 `src/trimum_core/bpf_loader.py` / `bpf_helper_protocol.py` / `bpf_helper.py`；
+统一口径 **显式参数 > env > 配置文件 > 默认**，缺失/坏值**静默走默认**）：
+
+| 键（`/etc/trimum/config.yaml`） | env | 默认 | 作用 |
+|---|---|---|---|
+| `security.bpf_program_dir` | `TRIMUM_BPF_PROGRAM_DIR` | 包上一级的 `bpf/`（真机 `/opt/trimum/bpf`） | eBPF 产物目录（只读） |
+| `security.bpf_manifest` | `TRIMUM_BPF_MANIFEST` | `/etc/trimum/bpf-manifest.txt` | 装载前的 sha256 清单 |
+| `security.bpf_socket` | `TRIMUM_BPF_SOCKET` | `/run/trimum/priv.sock` | helper 的 unix socket |
+| `security.bpf_helper_allowed_uids` | `TRIMUM_BPF_ALLOWED_UIDS` | 空集（**全拒**） | 允许发动词的对端 uid（逗号/空白分隔或列表） |
+| `security.bpf_alerts` | `TRIMUM_BPF_ALERTS` | `/run/trimum/bpf-alerts.jsonl` | 事件回灌文件（daemon 侧读同一个键） |
+| `security.bpf_drain_interval_ms` | `TRIMUM_BPF_DRAIN_INTERVAL_MS` | `200` | 排水线程轮询间隔 |
+| `security.bpf_alerts_max_bytes` | `TRIMUM_BPF_ALERTS_MAX_BYTES` | `4194304` | 回灌文件上限；超了留最后一半（daemon 侧 tailer 见到截断会重读） |
+| `security.bpf_recent_events` | `TRIMUM_BPF_RECENT_EVENTS` | `1024` | `bpf.tail` 内存环长度 |
+
+**两个配置文件别搞混**：helper 读 `/etc/trimum/config.yaml`（单元里 `XDG_CONFIG_HOME=/etc`）；
+`trmd`（daemon，非 root）读 `~/.config/trimum/config.yaml`。放行 uid 要写**前者**。
+
+**一键上线脚本（2026-10-08 加）**：`scripts/apply_ebpf1e.sh` 把「写 `/etc/trimum/config.yaml` →
+`sync_opt_tree.sh --from-home` → `setup_ebpf_helper.sh --apply` → `--self-check` 必须 `FAIL=0`」串成一条
+`sudo bash scripts/apply_ebpf1e.sh --apply`。默认 **dry-run**（只打计划，不动手、不需要 root）；
+`--print-config` 回显解析值 + 将要写的 YAML；`--self-check` / `--rollback` 分别只跑第 4 步、只走卸载。
+
+**为什么值得专门写个脚本**：这份配置手写是真会写坏的 —— 真机上原来是
+`security:` + `bpf_helper_allowed_uids:[1000]`（**冒号后漏了空格**），在 PyYAML 里是 `ScannerError`：
+整份文件被判无效 ⇒ `security.bpf_helper_allowed_uids` 拿不到 ⇒ 白名单静默退回空集（=全拒，表现为「装了但没生效」；
+`Config` 侧「坏配置 ⇒ 静默走默认」的口径让它连一行报错都没有）。脚本改用 **PyYAML 渲染**：旧文件先备份到
+`/var/backups/trimum/ebpf1e-<时间戳>/`（连同 sha256）再原子替换（`root:root 0644`），写完**回读校验**键值；
+已有配置里的其他键保留。客户端 uid 不写死：按 `systemctl show trmd -p User --value` 推导，`--uid` /
+`TRIMUM_BPF_ALLOWED_UID` / `TRIMUM_BPF_CLIENT_USER` 可覆盖；配置目录 / 备份根 / 部署根 / 源码目录分别可用
+`TRIMUM_BPF_ETC_DIR` / `TRIMUM_BPF_BACKUP_ROOT` / `TRIMUM_BPF_DEPLOY_ROOT` / `TRIMUM_BPF_SRC_DIR` 覆盖。
+脚本输出**全英文 ASCII**（真机是无中文字形的文字控制台）；被包的两个脚本的输出改为落盘到同一个 run dir 的
+`ebpf1e.log`，控制台只打 ASCII 判词（`OK=/FAIL=/SKIP=`、`[ok]/[FAIL]`）。假跑/CI 的接缝（真跑不设）：
+`TRIMUM_BPF_SYNC_SH` / `TRIMUM_BPF_SETUP_SH`（换掉被包脚本）、`TRIMUM_BPF_ALLOW_NONROOT=1`（把「需要 root」
+与前置检查降级成告警，口径同 `sync_opt_tree.sh` 的 `TRIMUM_ALLOW_NONROOT`）。
+用例 `tests/test_ebpf1e_apply_script.py`（**26 条**，不碰 `/etc`、不用 sudo）：只读面 + 用 stub 假脚本跑通
+`--apply` 全链（调用顺序 / `FAIL=0` 判定 / sync 失败即停 / `--skip-sync` / 旧配置进备份 / 二次运行零改动）。
+
+**内核策略前置：`perf_event_open(2)` 要 `CAP_SYS_ADMIN`（2026-10-08 真机定案，`ebpf1e` 上线卡住的最后一条）**：
+Ubuntu 的 6.8 内核按 `CONFIG_SECURITY_PERF_EVENTS_RESTRICT=y` 构建（`/boot/config-$(uname -r)` 里可验），
+只要 `kernel.perf_event_paranoid >= 4`（**Ubuntu 默认就是 4**；上游默认 2），**任何** `perf_event_open(2)`
+都必须有 `CAP_SYS_ADMIN` —— 连最宽松的「自己进程 + 用户态软件事件」也一样（uid 1000 实测 EACCES(13)；
+root 只带 `CAP_BPF|CAP_PERFMON` 也 EACCES）。libbpf 挂 tracepoint 用的正是这个系统调用，所以 helper 会以
+`bpf_program__attach failed: Permission denied` 收场。**判据**：这是 **EACCES(13)**，不是 seccomp 过滤器
+那种 **EPERM(1)** —— 把「沙箱挡了」和「内核策略挡了」分开就看这个数字（helper 的 `/proc/<pid>/status`
+当时是 `CapEff=0xc000000000`，即 `CAP_PERFMON|CAP_BPF` 已生效，能力没给错）。
+- **裁决：不给 helper 加 `CAP_SYS_ADMIN`**（那等于把它变成 full root，直接推翻 `ebpf1d` 的最小能力集）。
+  改为把 `kernel.perf_event_paranoid` 降到 `3`：`scripts/apply_ebpf1e.sh` 新增 **step 0** 写
+  `/etc/sysctl.d/60-trimum-perf.conf` 并 `sysctl --system`，此后 helper 的 `CAP_BPF+CAP_PERFMON` 就够用
+  （**单元一行没改**）。内核里 `3` 与 `2` 行为完全一致（门限都是 `>1` / `>0` / `>-1`），`3` 只是看起来更保守。
+- **代价（写清楚，别当没发生）**：本机**非特权用户**可以用 perf 观测**自己**的进程（用户态）；内核侧
+  profiling、tracepoint、非特权 BPF 仍然全禁（`perfmon_capable()` 门 + `unprivileged_bpf_disabled=2`）。
+  即把发行版的「最严一档」放回上游默认档；除 `kernel.perf_event_paranoid` 外没有别的改动，删掉 drop-in
+  即回滚。诊断/回滚用法：`bash scripts/apply_ebpf1e.sh`（dry-run 就会打印 gate 状态）；
+  单跑一份临时探测（跑完自动还原 sysctl）见 `tmp/ebpf1e_perf_gate.sh`（gitignore，不随仓库走）。
+- **不改主机策略的替代路（没做，留档）**：把 attach 从 `perf_event_open` 换成纯 `bpf(2)` ——
+  `fentry/__x64_sys_bpf`（BTF trampoline）或 `raw_tp/sys_enter`（程序里按 syscall 号自己筛）。两者都要改
+  `bpf/*.bpf.c` + loader + 测试；而且真机 `kallsyms` 里只有 `__bpf_trace_sys_enter`/`sys_exit`（**没有**
+  per-syscall 的 `sys_enter_bpf` 这类 raw_tp 名）⇒ `raw_tp` 只能在**类级** `sys_enter` 上挂，等于**每个**
+  syscall 都跑一次程序，代价明显。
+- **自检口径**：`setup_ebpf_helper.sh --self-check` 端到端失败时会自己追加一条 ASCII 的
+  `-- LIKELY CAUSE: ...`（中文控制台与 `print_fail_lines` 都过得去）；`apply_ebpf1e.sh --self-check`
+  在 gate 仍生效时也会直接给出修法。
+
+**与 §6.7 的有意偏差（`ebpf1e` 仍未做）**：AppArmor 定向 profile 还没写（只有 capability 集 +
+`NoNewPrivileges` + `SystemCallFilter` + `ProtectSystem=strict` 这一套）；`exec_guard` 的事件 kind 是 `exec`
+（已同时加进 `bpf_audit.HELPER_ALERT_KINDS`，否则会被 daemon 静默丢弃）——它是**高频**源，只在真要看
+exec 流时 `bpf.load exec_guard`。
+
 ## 7. 真机还需要装什么（工具链）
 
 **结论：沙箱主干（Landlock + seccomp + systemd 用户级 + cgroup）几乎不需要新装任何东西。**
@@ -340,17 +415,23 @@ root:root 0644 即可读）；② `trimum_core.config` 用 `_path_exists()`（`O
 | 档 | 包 | 用途 | 真机现状 |
 |---|---|---|---|
 | core | `build-essential` `python3-dev` `python3-venv` | 编译与 venv（Python 侧依赖的底座） | ✅ 已装 |
-| core | `pkg-config` | C 构建系统的探测入口 | ❌ 缺 |
-| core | `cmake` `ninja-build` `meson` | 构建 C/C++ 沙箱工具 | ❌ 缺 |
-| core | `clang` `llvm` | 编译 eBPF C 程序；LLVM 工具的 BPF 后端 | ❌ 缺 |
-| core | `libseccomp-dev` `libcap-dev` `libbpf-dev` | C 侧头文件（Python 侧有 `libseccomp2` 就够，写 C helper / BPF 程序才要） | ❌ 缺 |
-| core | `linux-tools-generic` | 版本匹配的 `perf` / `bpftool` | ❌ 缺 |
-| ops | `shellcheck` | 仓库里脚本多，统一 lint | ❌ 缺 |
-| ops | `apparmor-utils` | `aa-status` / `aa-complain`（查改 profile，userns 限制的处置要用） | ❌ 缺 |
-| ops | `auditd` | 内核审计（syscall 级取证、审计断链） | ❌ 缺 |
+| core | `pkg-config` | C 构建系统的探测入口 | ✅ 已装（2026-10-08 复核） |
+| core | `cmake` `ninja-build` `meson` | 构建 C/C++ 沙箱工具 | ✅ 已装（2026-10-08 复核） |
+| core | `clang` `llvm` | 编译 eBPF C 程序；LLVM 工具的 BPF 后端 | ✅ 已装（clang 18.1.3 / `llvm-config` / `llvm-strip` / `llvm-objcopy`） |
+| core | `libseccomp-dev` `libcap-dev` `libbpf-dev` | C 侧头文件（Python 侧有 `libseccomp2` 就够，写 C helper / BPF 程序才要） | ✅ 已装（`/usr/include/bpf/bpf_helpers.h` + `libbpf.so.1.3.0`） |
+| core | `linux-tools-generic` | 版本匹配的 `perf` / `bpftool` | ✅ `bpftool` 在 `/usr/sbin/bpftool`（`perf` 未核） |
+| core | `linux-headers-$(uname -r)` | 编译 BPF 程序要 `asm/types.h` 这一档 | ✅ 已装（`linux-headers-6.8.0-41-generic`） |
+| ops | `shellcheck` | 仓库里脚本多，统一 lint | ✅ 已装 |
+| ops | `apparmor-utils` | `aa-status` / `aa-complain`（查改 profile，userns 限制的处置要用） | ✅ 已装（profile 本身还没写，见 §6.7 补） |
+| ops | `auditd` | 内核审计（syscall 级取证、审计断链） | ✅ 已装 |
 | optional | `uidmap` `fuse-overlayfs` | rootless 容器前提 —— **但 userns 被禁，装了也用不上**，等裁决 | ❌ 缺 |
 | optional | `golang-go` | 写 Go 辅助程序才需要（当前无需求） | ❌ 缺 |
 
+> **本单（`ebpf1e`）实测：eBPF 侧一件都不用新装** —— `clang 18` / `llvm` / `libbpf-dev` / `bpftool` /
+> `linux-headers` / 内核 BTF（`/sys/kernel/btf/vmlinux`）全在；唯一缺的 `pahole` 本单用不到
+> （我们的程序不 deref 任何内核结构，也不需要 `vmlinux.h`/CO-RE —— tracepoint 上下文偏移是照内核 BTF
+> 核过的，见 `bpf/trimum_bpf.h` 的注释与 C 里的 `_Static_assert`）。
+>
 > **不需要装的**：`bubblewrap`（已装但被 userns 限制挡死）、`podman`（同上）、`nsjail`（非特权不可用 + 要一堆构建依赖）、`docker`（已装）、`ripgrep`/`fd-find`（已装，二进制名是 `rg`/`fdfind`）。
 > **Python 侧不需要 sudo**：`~/trimum/.venv` 与 `/opt/trimum/venv` 属主都是 `guzhujushi`。
 

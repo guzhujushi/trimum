@@ -2,15 +2,17 @@
 # trimum eBPF 特权 helper 的部署件：装 / 自检 / 回滚（默认 dry-run，不碰任何东西）
 #
 # 用法（--apply / --rollback 需要 sudo；dry-run 与 --self-check 不需要 root，非 root 自检会如实报 SKIP）：
-#   sudo bash scripts/setup_ebpf_helper.sh                 # dry-run（默认）：只打印将要做什么
-#   sudo bash scripts/setup_ebpf_helper.sh --apply         # 装：备份 → 建目录/manifest → 装单元 → daemon-reload → enable --now → 冒烟 → 失败自动回滚
+#   sudo bash scripts/setup_ebpf_helper.sh                 # dry-run（默认，同 --dry-run）：只打印将要做什么
+#   sudo bash scripts/setup_ebpf_helper.sh --dry-run       # 同上（显式写法；默认就是它）
+#   sudo bash scripts/setup_ebpf_helper.sh --apply         # 装：备份 → clang 构建 eBPF 产物 + 清单 → 装单元 → daemon-reload → enable --now → restart → 冒烟 → 失败自动回滚
 #   sudo bash scripts/setup_ebpf_helper.sh --self-check    # 只做自检（**非 root 也能跑**，缺权限的那几条如实报 SKIP/FAIL 并给出需要 root 的原因）
 #   sudo bash scripts/setup_ebpf_helper.sh --rollback      # 卸干净（只删登记过的路径）
 #
 # 口径（与 scripts/harden_trmd_unit.sh 同风格：dry-run / --apply / --rollback + ERR trap + 失败自动回滚）：
-#   * 本单**不写 eBPF 加载本身**：loader 是 UnavailableLoader，bpf.stats 会**如实**回
-#     available:false（reason=loader_not_implemented）。真 loader + eBPF C 程序是下一单 ebpf1e。
-#     冒烟 / 自检看到 available:false 是**正确**表现，不是失败。
+#   * eBPF 产物**不入库**（仓库里只放源码 bpf/*.bpf.c + trimum_bpf.h）：--apply 现场用 clang
+#     编 /opt/trimum/bpf/*.bpf.o（root:root 0444）并把 sha256 写进 /etc/trimum/bpf-manifest.txt；
+#     helper 侧 loader（src/trimum_core/bpf_loader.py）装载前逐字节校验 sha256。
+#     自检看 `bpf.stats` 回 available:true 是**正确**表现（真 loader 已装；没加载任何程序时 programs 为空）。
 #   * 红线：--rollback **只删 MANAGED / MANAGED_DIRS 里登记过的路径**，删别的（哪怕看起来是 trimum 的）一律拒绝。
 #   * 不许静默降级：装不上 / 冒烟失败 ⇒ 回滚并 exit 非 0，绝不「装一半说成功」。
 #
@@ -30,6 +32,11 @@ DEPLOY_ROOT="${TRIMUM_BPF_DEPLOY_ROOT:-/opt/trimum}"
 VENV_PY="${DEPLOY_ROOT}/venv/bin/python"
 SRC_MAIN="${DEPLOY_ROOT}/src/trimum_core/bpf_helper_main.py"
 UNIT_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../deploy/trimum-bpf-helper.service"
+# eBPF 程序**源码**目录（仓库里只放源码；.o 是构建产物，gitignore 掉了）。
+# 默认＝脚本同级的 ../bpf（即仓库里的 bpf/）；可用 TRIMUM_BPF_SRC_DIR 覆盖。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BPF_SRC_DIR="${TRIMUM_BPF_SRC_DIR:-${REPO_DIR}/bpf}"
 
 # 本次会碰的**全部**文件 / socket 路径（--rollback 只删这些；红线：删别的一律拒绝）。
 MANAGED=(
@@ -67,6 +74,21 @@ PASS=0; FAIL=0; SKIP=0
 ok()   { printf '  [OK]   %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  [FAIL] %s\n' "$1"; FAIL=$((FAIL+1)); }
 skip() { printf '  [SKIP] %s —— %s\n' "$1" "$2"; SKIP=$((SKIP+1)); }
+
+# 端到端失败的**归属诊断**（ASCII：这台机的控制台没有中文字形，apply_ebpf1e.sh 的 print_fail_lines
+# 还会把非 ASCII 字节换成 '?'，只有 ASCII 才过得去）。命中时给出「为什么」+「怎么修」。
+# 背景（2026-10-08 真机定案）：Ubuntu 内核带 CONFIG_SECURITY_PERF_EVENTS_RESTRICT=y ⇒ 只要
+# kernel.perf_event_paranoid >= 4（Ubuntu 默认），libbpf 挂 tracepoint 用的 perf_event_open(2)
+# 就**强制 CAP_SYS_ADMIN**；helper 按设计只给 CAP_BPF+CAP_PERFMON ⇒ EACCES / "Permission denied"。
+perf_gate_hint() {
+  local paranoid config
+  # 两个路径也可覆盖（同 apply_ebpf1e.sh 的口径）：/boot/config-* 在某些机器上读不到，测试也需要注入。
+  paranoid="$(tr -dc '0-9' <"${TRIMUM_BPF_PARANOID_FILE:-/proc/sys/kernel/perf_event_paranoid}" 2>/dev/null || true)"
+  [ -n "$paranoid" ] && [ "$paranoid" -ge 4 ] || return 0
+  config="${TRIMUM_BPF_KERNEL_CONFIG:-/boot/config-$(uname -r)}"
+  grep -qs '^CONFIG_SECURITY_PERF_EVENTS_RESTRICT=y' "$config" || return 0
+  printf ' -- LIKELY CAUSE: perf_event_open needs CAP_SYS_ADMIN here (CONFIG_SECURITY_PERF_EVENTS_RESTRICT=y + kernel.perf_event_paranoid=%s) but the helper only holds CAP_BPF+CAP_PERFMON; fix: sudo bash scripts/apply_ebpf1e.sh --apply (step 0 sets kernel.perf_event_paranoid<=3)' "$paranoid"
+}
 
 # helper 的 DAC 视角检查：helper = **uid 0** + gid $3，cap 集里没有 CAP_DAC_OVERRIDE / CAP_DAC_READ_SEARCH
 # ⇒ **全按权限位算**（uid 0 没有豁免）。逐段判 $1：中间段要 x（目录也要 x）；末段是文件则要 r。
@@ -132,6 +154,7 @@ trap err_trap ERR
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --dry-run) MODE=dryrun ;;
     --apply) MODE=apply ;;
     --self-check) MODE=selfcheck ;;
     --rollback) MODE=rollback ;;
@@ -150,7 +173,10 @@ sock_mode() { stat -c '%a' "$SOCK" 2>/dev/null || true; }
 # 以调用者 uid 发一条 verb 请求，打印应答里 "error":"..." 的值（拿不到就打印原始行）。
 send_priv() {
   local verb="$1"
-  "$VENV_PY" - "$verb" <<'PY' 2>/dev/null || true
+  # 第二个实参是 socket 路径：显式当 argv[2] 传进去（脚本里的取法是
+  # `sys.argv[2] if len(sys.argv) > 2 else 默认`）。之前这个实参被悄悄忽略、一直走默认值 ——
+  # 路径碰巧相同才没暴露；显式传递后换 TRIMUM_BPF_SOCKET / $SOCK 就不会各说各话。
+  "$VENV_PY" - "$verb" "${2:-$SOCK}" <<'PY' 2>/dev/null || true
 import json, socket, sys
 import trimum_core.bpf_helper_protocol as P
 verb = sys.argv[1]
@@ -315,6 +341,56 @@ do_selfcheck() {
     skip "非 root 客户端连 socket" "需 root 且 socket 存在（以 ${CLIENT_USER:-<客户端用户>} 身份发 bpf.stats）"
   fi
 
+  # 11. eBPF 产物 + 清单逐条对齐（纯静态检查，非 root 也能跑：/etc 清单 0644、/opt/trimum/bpf 0755）
+  local obj_glob=("${DEPLOY_ROOT}"/bpf/*.bpf.o)
+  if [ -e "${obj_glob[0]}" ] && [ -s /etc/trimum/bpf-manifest.txt ]; then
+    local obj_count name digest actual bad_count
+    obj_count="${#obj_glob[@]}"
+    bad_count=0
+    while read -r name digest; do
+      [ -n "$name" ] || continue
+      actual="$(sha256sum "${DEPLOY_ROOT}/bpf/${name}.bpf.o" 2>/dev/null | awk '{print $1}')"
+      if [ "$actual" != "$digest" ]; then
+        bad_count=$((bad_count+1))
+        bad "清单与产物不一致：${name}（manifest=${digest:0:12}… actual=${actual:0:12}…）"
+      fi
+    done < /etc/trimum/bpf-manifest.txt
+    if [ "$bad_count" -eq 0 ]; then
+      ok "eBPF 产物与清单一致（${obj_count} 个 .o，sha256 逐条对齐）"
+    fi
+  else
+    skip "eBPF 产物与清单" "没有 ${DEPLOY_ROOT}/bpf/*.bpf.o 或清单为空；跑 sudo bash $0 --apply 会 clang 现场构建"
+  fi
+
+  # 12. 端到端：以客户端身份 bpf.load → 内核**真的**挂上了（要客户端 uid 在允许列表里，否则跳过）
+  if [ "$canconn" -eq 1 ] && [ -n "$CLIENT_USER" ]; then
+    local r12
+    r12="$(send_priv_as "$CLIENT_USER" bpf.load bpf_guard)"
+    case "$r12" in
+      *"OK data="*)
+        ok "端到端 bpf.load bpf_guard 成功（客户端 uid 已放行，程序真的加载进内核）"
+        local r12b; r12b="$(send_priv_as "$CLIENT_USER" bpf.unload bpf_guard)"
+        case "$r12b" in
+          *"OK data="*) ok "端到端 bpf.unload bpf_guard 成功" ;;
+          *) bad "端到端 bpf.unload 应答异常（实际：${r12b:-<空>}）" ;;
+        esac ;;
+      peer_denied)
+        skip "端到端 bpf.load" "客户端 uid（${CLIENT_USER}）不在允许列表：写 /etc/trimum/config.yaml 的 security.bpf_helper_allowed_uids: [$(id -u "$CLIENT_USER" 2>/dev/null || echo '<uid>')]，再跑 --self-check" ;;
+      *hash_mismatch*)
+        bad "端到端 bpf.load：sha256 不匹配（产物与清单不同源；重跑 --apply）" ;;
+      *unknown_program*)
+        bad "端到端 bpf.load：清单里没有该程序（重跑 --apply）" ;;
+      "")
+        bad "端到端 bpf.load 拿不到应答（空：权限面不通 / 单元没起来）" ;;
+      ERR*)
+        bad "端到端 bpf.load 连接失败（实际：${r12}）" ;;
+      *)
+        bad "端到端 bpf.load 失败（实际：${r12}）—— 看 journalctl -u ${UNIT} 里 libbpf 的报错（seccomp 过滤器 / capability / 内核 BTF）$(perf_gate_hint)" ;;
+    esac
+  else
+    skip "端到端 bpf.load" "需 root 且 socket 存在（以 ${CLIENT_USER:-<客户端用户>} 身份真加载一次）"
+  fi
+
   echo
   printf '  小结：OK=%d  FAIL=%d  SKIP=%d\n' "$PASS" "$FAIL" "$SKIP"
   if [ "$FAIL" -eq 0 ]; then
@@ -350,13 +426,21 @@ PY
 }
 
 # 以指定**非 root 客户端**身份发一条 verb（root 才能 runuser）：证明「目录/socket 权限面」对非 root 是通的。
-# 拿得到协议应答（peer_denied / available:false / …）就算通；ERR 或空 ⇒ 权限面不通（EACCES / ENOENT）。
-send_priv_as() { # <user> <verb>
-  runuser -u "$1" -- "$VENV_PY" - "$2" "$SOCK" <<'PY' 2>/dev/null || true
+# 带可选 program（bpf.load / bpf.unload 要）。拿得到协议应答（peer_denied / OK data=… / 错误码）就算通；
+# ERR 或空 ⇒ 权限面不通（EACCES / ENOENT）。
+send_priv_as() { # <user> <verb> [program]
+  # `$3`（program）是**可选**的：bpf.stats / bpf.tail 不带 program，调用点只给两个实参。
+  # 裸写 `$3` 在 `set -u` 下会当场报「未绑定的变量」并**整条 runuser 命令都不执行** ——
+  # 2026-10-08 真机冒烟就是这么把「非 root 客户端能不能连上」判成 FAIL 的（脚本本身是好的，
+  # 命令根本没跑）。所以必须写 `${3:-}`，空串由下面的 `if program:` 兜住。
+  runuser -u "$1" -- "$VENV_PY" - "$2" "${3:-}" "$SOCK" <<'PY' 2>/dev/null || true
 import json, socket, sys
 import trimum_core.bpf_helper_protocol as P
-verb, sock = sys.argv[1], sys.argv[2]
-req = json.dumps({"verb": verb}).encode()
+verb, program, sock = sys.argv[1], sys.argv[2], sys.argv[3]
+body = {"verb": verb}
+if program:
+    body["program"] = program
+req = json.dumps(body).encode()
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.settimeout(5)
 try:
@@ -498,9 +582,10 @@ if [ "$MODE" = dryrun ]; then
   for p in "${MANAGED[@]}"; do
     if [ -e "$p" ] || [ -S "$p" ]; then echo "       - 备份已存在：$p"; else echo "       - 新建：$p"; fi
   done
-  echo "    2) 建 /opt/trimum/bpf（放 eBPF 产物，下一单 ebpf1e）+ 空 manifest /etc/trimum/bpf-manifest.txt"
+  echo "    2) clang 现场构建 eBPF 产物（源码在 ${BPF_SRC_DIR}）→ 装 /opt/trimum/bpf/*.bpf.o（root:root 0444）"
+  echo "       + 写 /etc/trimum/bpf-manifest.txt（每行「程序名  sha256」，root:root 0644）"
   echo "    3) 装单元 /etc/systemd/system/${UNIT}.service（模板 deploy/trimum-bpf-helper.service；把占位注释换成 Group=${CLIENT_GROUP:-<取不到！>}）"
-  echo "    4) systemctl daemon-reload && systemctl enable --now ${UNIT}"
+  echo "    4) systemctl daemon-reload && systemctl enable --now ${UNIT} && systemctl restart ${UNIT}"
   echo "    5) 冒烟：active + socket 0660 且属组=${CLIENT_GROUP:-?}（客户端组）+ root 发 bpf.stats 必须 peer_denied"
   echo "       + 非 root 客户端能连上拿到协议应答；失败自动回滚"
   echo "    6) helper 的系统级配置在 /etc/trimum/config.yaml（单元里 XDG_CONFIG_HOME=/etc；ProtectHome=yes 下不能用 /root/.config）"
@@ -558,15 +643,32 @@ install -d -m 0755 "$BK"
 for p in "${MANAGED[@]}"; do backup_path "$p"; done
 echo "  备份目录：$BK（本次会碰的路径都在 MANAGED / MANAGED_DIRS 里登记）"
 
-LAST_STEP="mkdir+manifest"
-install -d -m 0755 "${DEPLOY_ROOT}/bpf"
-if [ ! -f /etc/trimum/bpf-manifest.txt ]; then
-  install -d -m 0755 /etc/trimum
-  : > /etc/trimum/bpf-manifest.txt
-  chmod 0644 /etc/trimum/bpf-manifest.txt
-  echo "  建空 manifest /etc/trimum/bpf-manifest.txt（下一单 ebpf1e 填 sha256）"
+LAST_STEP="build-bpf"
+# 真机现场 clang 编译（仓库里**只放源码**，.o 是构建产物、不入库）⇒ 产物与源码永远同源。
+if [ ! -f "${BPF_SRC_DIR}/bpf_guard.bpf.c" ] || [ ! -f "${BPF_SRC_DIR}/exec_guard.bpf.c" ]; then
+  echo "  缺 eBPF 源码：${BPF_SRC_DIR}/bpf_guard.bpf.c（TRIMUM_BPF_SRC_DIR 可覆盖）" >&2
+  echo "  → 本脚本要在**仓库**里跑（bpf/ 与 scripts/ 同级）：sudo bash ~/trimum/scripts/setup_ebpf_helper.sh --apply" >&2
+  exit 1
 fi
-ok "建目录 /opt/trimum/bpf + manifest 就位"
+if [ ! -f "${SCRIPT_DIR}/build_bpf.sh" ]; then
+  echo "  缺构建脚本：${SCRIPT_DIR}/build_bpf.sh" >&2; exit 1
+fi
+install -d -m 0755 "${DEPLOY_ROOT}/bpf"
+install -d -m 0755 /etc/trimum
+rm -f "${DEPLOY_ROOT}"/bpf/*.bpf.o
+if bash "${SCRIPT_DIR}/build_bpf.sh" --out-dir "${DEPLOY_ROOT}/bpf" \
+        --manifest /etc/trimum/bpf-manifest.txt 2>&1 | sed 's/^/    /'; then
+  :
+else
+  bad "clang 构建 eBPF 产物失败（见上面 build_bpf.sh 的输出）"
+  echo "  → 自检工具链：bash scripts/build_bpf.sh --check" >&2
+  exit 1
+fi
+chown root:root "${DEPLOY_ROOT}"/bpf/*.bpf.o
+chmod 0444 "${DEPLOY_ROOT}"/bpf/*.bpf.o
+chown root:root /etc/trimum/bpf-manifest.txt
+chmod 0644 /etc/trimum/bpf-manifest.txt
+ok "已装 eBPF 产物（root:root 0444）+ 清单 /etc/trimum/bpf-manifest.txt（sha256 逐条登记）"
 
 LAST_STEP="install-unit"
 RENDERED="${BK}/trimum-bpf-helper.service.rendered"
@@ -588,6 +690,11 @@ LAST_STEP="enable-now"
 if systemctl enable --now "$UNIT"; then ok "systemctl enable --now ${UNIT}"
 else bad "enable --now ${UNIT}"; echo "  → 单元没起来，自动回滚" >&2; do_rollback; exit 1; fi
 
+# 重启一次：`enable --now` 对**已在跑**的单元是空操作，不重启就还是旧代码 / 旧产物。
+LAST_STEP="restart"
+if systemctl restart "$UNIT"; then ok "systemctl restart ${UNIT}（换上新代码 + 新产物）"
+else bad "restart ${UNIT}"; echo "  → 单元重启失败，自动回滚" >&2; do_rollback; exit 1; fi
+
 # 给 unit 一点时间把 socket bind 出来（enable --now 返回时可能还在起）。
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   [ -S "$SOCK" ] && break
@@ -598,7 +705,7 @@ LAST_STEP="smoke"
 if do_smoke; then
   echo
   echo "== 装好 =="
-  echo "  bpf.stats 现在会**如实**回 available:false（真 loader 未实现，ebpf1e 才换）——这是正确表现。"
+  echo "  bpf.stats 现在回 available:true（真 loader 已装；未加载任何程序时 programs 为空）——这是正确表现。"
   echo "  放行客户端：写 /etc/trimum/config.yaml"
   echo "    security:"
   echo "      bpf_helper_allowed_uids: [$(id -u "${CLIENT_USER:-root}" 2>/dev/null || echo '<客户端 uid>')]     # ${CLIENT_USER:-<客户端用户>}"

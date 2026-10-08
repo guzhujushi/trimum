@@ -397,3 +397,43 @@ def test_serve_smoke(tmp_path, monkeypatch):
     assert "error" not in result
     assert result.get("count") == 2
     assert not sock_file.exists()
+
+
+def test_serve_gate_uses_the_uid_field_not_the_pid_field(tmp_path):
+    """`serve()` 取 SO_PEERCRED 的 **uid**（`struct ucred` 下标 1 = {pid, uid, gid}），不是 pid（下标 0）。
+
+    回归（2026-10-08 真机冒烟抓到的真 bug）：原来取 `[0]` ⇒ 白名单里放的是 uid、实际拿到的是**对端 pid**
+    ⇒ 永远匹配不上 ⇒ 连放行 uid 都被判 peer_denied（表现成「helper 装了但全拒」，日志里 `peer_uid=` 是百万级 pid）。
+    判据：用 `{os.getuid()}` 放行**自己**（同进程发的连接）必须成功 —— 取成 pid 时除非 pid 恰好等于 uid，必被拒。
+    """
+    sock_file = tmp_path / "priv.sock"
+    loader = _FakeLoader({"available": True})
+    result: dict = {}
+
+    def _serve():
+        try:
+            result["count"] = H.serve(str(sock_file), loader=loader,
+                                      allowed_uids={os.getuid()}, max_requests=1)
+        except BaseException as exc:  # pragma: no cover - 断言/跳过用
+            result["error"] = exc
+
+    thread = threading.Thread(target=_serve, daemon=True)
+    thread.start()
+    deadline = time.time() + 10
+    while not sock_file.exists() and time.time() < deadline and "error" not in result:
+        time.sleep(0.02)
+    if not sock_file.exists():
+        thread.join(timeout=10)
+        exc = result.get("error")
+        if exc is not None:
+            pytest.skip(f"环境不许 bind AF_UNIX socket（{exc!r}）；本条只在能真起 socket 的环境里跑")
+        pytest.fail("socket 一直没出现，且 serve() 没报错")
+    try:
+        response = _client_send(str(sock_file), _req_bytes("bpf.stats"))
+    finally:
+        thread.join(timeout=10)
+    assert response.get("error") != "peer_denied", (
+        "本进程 uid == 放行 uid 却被拒 ⇒ 取的不是 uid 字段（取成 pid 了）")
+    assert response["ok"] is True and response["data"] == {"available": True}
+    assert result.get("count") == 1
+    assert not sock_file.exists()

@@ -130,9 +130,29 @@ TODO.md
 docs/OPERATIONS.md
 TODO-aliyun.md
 
+# 图形栈 / 远程桌面（含个人主机、tailnet 绑定与验收流程，2026-10-07 定）
+#   docs/GRAPHICS-STACK-PLAN.md     —— 计划真源（真机盘点 / 网络口径 / 自检与验收步骤）
+#   scripts/setup_gui_stack.sh      —— 一键脚本（G0 补装 + G1 本地屏 + G2 xrdp）
+#   tests/test_gui_stack_script.py  —— 上面那份脚本的用例（脚本不在库里，用例也不进）
+docs/GRAPHICS-STACK-PLAN.md
+scripts/setup_gui_stack.sh
+tests/test_gui_stack_script.py
+
+# eBPF 构建产物（仓库里只放源码 bpf/*.bpf.c + trimum_bpf.h；.o 是现场 clang 编出来的，2026-10-08 定）
+*.bpf.o
+bpf/.sha256.tmp
+
 # 机器本地 codex 配置（沙箱/审批策略随机器而异）
 .codex/
 docs/QWEN-PROMPTS.md
 
 # 机器/个人指令文件（含真机 IP / 拓扑线索，不入库，2026-10-03 定）
 AGENTS.md
+
+# 真机专属脚本（只有那台物理机上有意义，2026-10-08 收尾审计定）
+#   scripts/gui_session.sh         —— 图形栈「按需开」开关（G1 本地屏；与上面那份计划同族，2026-10-07 决策=图形栈整套不入库）
+#   scripts/ubuntu_slim_desktop.sh —— 省电 /「无桌面常驻」收敛（真机硬件专属）
+# 说明：这两份此前**已被跟踪**，光加 ignore 不够 ⇒ 本次同时 `git rm --cached`（本地文件保留、只是不再跟踪），
+#       下一次提交才会真正把它们从公开库 HEAD 移除（旧历史仍在，故本地私库/旧库口径不变）。
+scripts/gui_session.sh
+scripts/ubuntu_slim_desktop.sh
