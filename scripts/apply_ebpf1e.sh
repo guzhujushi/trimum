@@ -531,7 +531,7 @@ case "$MODE" in
     say "  log              : ${LOG}"
     say "  rollback (unit)  : sudo bash ${SETUP_SH} --rollback"
     say "  rollback (config): see the backup path printed in step 1"
-    say "  note: nothing in the daemon consumes the alerts yet (TODO 'ebpf1f': BpfAlertTailer has no caller)."
+    say "  note: the daemon consumes the alerts via BpfAlertPoller (ebpf1f); helper runtime dir = /run/trimum-bpf (ebpf1h)."
     ;;
 
   selfcheck)

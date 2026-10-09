@@ -296,7 +296,7 @@ daemon 没有 `CAP_CHOWN`/`CAP_SETUID`，这些调用对它本来就什么都做
 
 | 决定 | 具体做法 | 挡住什么 |
 |---|---|---|
-| **不给命令面，只给动词** | helper 监听 `/run/trimum/priv.sock`（`root:guzhujushi` 0660，用 `SO_PEERCRED` 校验对端 uid）；请求体是 `{verb, params}`，**verb 白名单硬编码**：`bpf.load` / `bpf.unload` / `bpf.stats` / `bpf.tail`。**不接受命令字符串、不接受路径参数**：程序名只能是枚举值，数值参数有上下界 | 「借 helper 执行任意命令」这条最危险的路**根本不存在** |
+| **不给命令面，只给动词** | helper 监听 `/run/trimum-bpf/priv.sock`（`root:guzhujushi` 0660，用 `SO_PEERCRED` 校验对端 uid）；请求体是 `{verb, params}`，**verb 白名单硬编码**：`bpf.load` / `bpf.unload` / `bpf.stats` / `bpf.tail`。**不接受命令字符串、不接受路径参数**：程序名只能是枚举值，数值参数有上下界 | 「借 helper 执行任意命令」这条最危险的路**根本不存在** |
 | **程序对象由 root 预置并校验** | 只加载 `/opt/trimum/bpf/<枚举名>.o`（`root:root 0444`）；装载前比对 sha256（清单 `/etc/trimum/bpf-manifest.txt`，root 私有）；helper 自身 `ReadOnlyPaths=/opt/trimum/bpf` | 「换掉 .o 就让 helper 加载任意内核程序」 |
 | **最小权限** | `CapabilityBoundingSet=CAP_BPF CAP_PERFMON` + `AmbientCapabilities=` 同两枚；`NoNewPrivileges=yes` | 拿到 root 就等于拿到整机；CAP_BPF 只够 eBPF 那点事 |
 | **AppArmor 定向 profile** | helper 只许 bind `priv.sock`、读 `/opt/trimum/bpf/**`、**不 exec 任何东西**；`aa-complain` 可一键回滚 | 万一 helper 被攻破，可做的事被钉死在 profile 里 |
@@ -316,7 +316,7 @@ daemon 没有 `CAP_CHOWN`/`CAP_SETUID`，这些调用对它本来就什么都做
 ① 部署树 `/opt/trimum` 是 `drwxr-x--- <客户端用户>:<组>`，helper 拿不到组身份连自己的代码都 import 不了
 （实测：`ModuleNotFoundError: No module named 'trimum_core'` → `Restart=on-failure` 反复重启 →`is-active` 停 `activating`、
 `priv.sock` 永不出现）；
-② `RuntimeDirectory=` 与其中 bind 的 `priv.sock` 会随之变成 `root:<客户端组>`，**非 root 的 daemon** 才进得去 `/run/trimum`、
+② `RuntimeDirectory=` 与其中 bind 的 `priv.sock` 会随之变成 `root:<客户端组>`，**非 root 的 daemon** 才进得去 `/run/trimum-bpf`、
 连得上 socket —— 这正是上表「socket `root:<客户端组>` 0660」的落地口径。
 安装脚本在碰系统之前做 DAC 预检（`dac_preflight`：按位逐段验「uid 0 + 客户端组」能不能穿到 `bpf_helper_main.py`），
 读不到就 `exit 1`，不装出一个 crash-loop 的单元。
@@ -334,7 +334,7 @@ root:root 0644 即可读）；② `trimum_core.config` 用 `_path_exists()`（`O
 `libbpf`（ctypes，不装 pip 包）：产物 `/opt/trimum/bpf/<程序名>.bpf.o`（root:root 0444，**仓库里只放源码**，
 `--apply` 现场 clang 编译）、清单 `/etc/trimum/bpf-manifest.txt`（sha256）在装载前逐字节校验；
 ring buffer 由后台线程按间隔吸干 → ① `bpf.tail` 能看到的内存环（最近 N 条）② 追加
-`/run/trimum/bpf-alerts.jsonl`（0640 root:客户端组；`ebpf1b` 的 `BpfAlertTailer` 读它）。**只有 attach 成功才叫可用**，
+`/run/trimum-bpf/bpf-alerts.jsonl`（0640 root:客户端组；`ebpf1b` 的 `BpfAlertTailer` 读它）。**只有 attach 成功才叫可用**，
 校验/加载失败一律 `ok:false`（fail-closed，不降级、不假装在监控）。
 
 **helper 侧可配置键**（真源 `src/trimum_core/bpf_loader.py` / `bpf_helper_protocol.py` / `bpf_helper.py`；
@@ -344,9 +344,9 @@ ring buffer 由后台线程按间隔吸干 → ① `bpf.tail` 能看到的内存
 |---|---|---|---|
 | `security.bpf_program_dir` | `TRIMUM_BPF_PROGRAM_DIR` | 包上一级的 `bpf/`（真机 `/opt/trimum/bpf`） | eBPF 产物目录（只读） |
 | `security.bpf_manifest` | `TRIMUM_BPF_MANIFEST` | `/etc/trimum/bpf-manifest.txt` | 装载前的 sha256 清单 |
-| `security.bpf_socket` | `TRIMUM_BPF_SOCKET` | `/run/trimum/priv.sock` | helper 的 unix socket |
+| `security.bpf_socket` | `TRIMUM_BPF_SOCKET` | `/run/trimum-bpf/priv.sock` | helper 的 unix socket |
 | `security.bpf_helper_allowed_uids` | `TRIMUM_BPF_ALLOWED_UIDS` | 空集（**全拒**） | 允许发动词的对端 uid（逗号/空白分隔或列表） |
-| `security.bpf_alerts` | `TRIMUM_BPF_ALERTS` | `/run/trimum/bpf-alerts.jsonl` | 事件回灌文件（daemon 侧读同一个键） |
+| `security.bpf_alerts` | `TRIMUM_BPF_ALERTS` | `/run/trimum-bpf/bpf-alerts.jsonl` | 事件回灌文件（daemon 侧读同一个键） |
 | `security.bpf_drain_interval_ms` | `TRIMUM_BPF_DRAIN_INTERVAL_MS` | `200` | 排水线程轮询间隔 |
 | `security.bpf_alerts_max_bytes` | `TRIMUM_BPF_ALERTS_MAX_BYTES` | `4194304` | 回灌文件上限；超了留最后一半（daemon 侧 tailer 见到截断会重读） |
 | `security.bpf_recent_events` | `TRIMUM_BPF_RECENT_EVENTS` | `1024` | `bpf.tail` 内存环长度 |
@@ -409,6 +409,12 @@ root 只带 `CAP_BPF|CAP_PERFMON` 也 EACCES）。libbpf 挂 tracepoint 用的�
 `NoNewPrivileges` + `SystemCallFilter` + `ProtectSystem=strict` 这一套）；`exec_guard` 的事件 kind 是 `exec`
 （已同时加进 `bpf_audit.HELPER_ALERT_KINDS`，否则会被 daemon 静默丢弃）——它是**高频**源，只在真要看
 exec 流时 `bpf.load exec_guard`。
+
+**helper 有自己的运行目录（`ebpf1h`，2026-10-08）**：helper 用 `/run/trimum-bpf`（单元 `RuntimeDirectory=trimum-bpf` +
+`TRIMUM_BPF_SOCKET` / `TRIMUM_BPF_ALERTS` 都指向它），**不与 `trmd` 的 `/run/trimum` 共用** —— systemd 在单元停止时会把
+整个 `RuntimeDirectory` 连内容一起删，共用就是「谁重启谁删对方的 socket / 回灌文件」。目录 `root:<客户端组> 0750`：
+非 root 的 daemon 能穿进去连 socket、读回灌文件，但**写不了**（特权 helper 的资产不被非特权进程改写）。
+`trmd` 侧的 `/run/trimum` + `trimum.sock` 不变。
 
 ## 7. 真机还需要装什么（工具链）
 

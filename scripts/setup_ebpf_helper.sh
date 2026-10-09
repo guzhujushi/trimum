@@ -43,7 +43,7 @@ MANAGED=(
   "${DEPLOY_ROOT}/bpf"
   "/etc/trimum/bpf-manifest.txt"
   "/etc/systemd/system/trimum-bpf-helper.service"
-  "/run/trimum/priv.sock"
+  "/run/trimum-bpf/priv.sock"
 )
 
 # 本次会建的**目录**（--rollback 对目录**只用 rmdir，仅当空**；非空一律不删、也不递归删）。
@@ -54,13 +54,13 @@ MANAGED_DIRS=(
 BACKUP_ROOT=/var/backups/trimum
 TS="$(date -u +%Y%m%d-%H%M%S)"
 BK="${BACKUP_ROOT}/ebpf-${TS}"
-SOCK=/run/trimum/priv.sock
-SOCK_DIR=/run/trimum
+SOCK=/run/trimum-bpf/priv.sock
+SOCK_DIR=/run/trimum-bpf
 LAST_STEP="(未开始)"
 
 # 客户端（发动词的那一方）＝ trmd.service 的 User。理由见 deploy/trimum-bpf-helper.service 顶部：
 # 单元的 capability 集里没有 CAP_DAC_OVERRIDE / CAP_DAC_READ_SEARCH ⇒ **uid 0 也守 DAC 权限位**，
-# helper 必须以「客户端组」身份跑：① 才读得到 /opt/trimum（helper 自己代码在这儿）；② /run/trimum 与
+# helper 必须以「客户端组」身份跑：① 才读得到 /opt/trimum（helper 自己代码在这儿）；② /run/trimum-bpf 与
 # priv.sock 才会是 root:<客户端组>，非 root 的 daemon 才连得上。组名不写死在本脚本 / 单元里，按机器推导。
 CLIENT_USER="${TRIMUM_BPF_CLIENT_USER:-$(systemctl show trmd -p User --value 2>/dev/null || true)}"
 CLIENT_GROUP="${TRIMUM_BPF_CLIENT_GROUP:-}"
@@ -184,7 +184,7 @@ req = json.dumps({"verb": verb}).encode()
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.settimeout(5)
 try:
-    s.connect(sys.argv[2] if len(sys.argv) > 2 else "/run/trimum/priv.sock")
+    s.connect(sys.argv[2] if len(sys.argv) > 2 else "/run/trimum-bpf/priv.sock")
     s.sendall(req)
     data = s.recv(65536)
 except Exception as e:
@@ -327,7 +327,7 @@ do_selfcheck() {
     skip "部署树对 helper 可读" "取不到客户端组（systemctl show trmd -p User / id -gn 都没结果）或 ${DEPLOY_ROOT} 不在本机"
   fi
 
-  # 10. 非 root 客户端能连上 socket 并拿到**协议应答**（证明 /run/trimum 与 priv.sock 的组/位对；root 才能 runuser）
+  # 10. 非 root 客户端能连上 socket 并拿到**协议应答**（证明 /run/trimum-bpf 与 priv.sock 的组/位对；root 才能 runuser）
   if [ "$canconn" -eq 1 ] && [ -n "$CLIENT_USER" ]; then
     local r10; r10="$(send_priv_as "$CLIENT_USER" bpf.stats)"
     case "$r10" in
@@ -389,6 +389,16 @@ do_selfcheck() {
     esac
   else
     skip "端到端 bpf.load" "需 root 且 socket 存在（以 ${CLIENT_USER:-<客户端用户>} 身份真加载一次）"
+  fi
+
+  # 13. 运行目录独立于 trmd（ebpf1h：共用 /run/trimum 会互删 socket / 回灌文件）
+  if [ "$SOCK_DIR" = "/run/trimum" ]; then
+    bad "运行目录独立于 trmd（SOCK_DIR=${SOCK_DIR} 与 trmd 的 RuntimeDirectory 同名；helper 必须用自己的 /run/trimum-bpf）"
+  elif is_root && [ -d "$SOCK_DIR" ]; then
+    local st13; st13="$(stat -c '%U:%G %a' "$SOCK_DIR" 2>/dev/null || echo '?')"
+    ok "运行目录独立于 trmd（${SOCK_DIR}，${st13}）"
+  else
+    skip "运行目录独立于 trmd" "需 root 且 ${SOCK_DIR} 存在（由单元 RuntimeDirectory 建）"
   fi
 
   echo

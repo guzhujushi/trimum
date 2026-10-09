@@ -69,7 +69,7 @@ def test_send_priv_as_tolerates_the_optional_program_argument(tmp_path: Path):
         "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
         "FAKE_RUNUSER_RECORD": str(record),
         "VENV_PY": "/usr/bin/python3",
-        "SOCK": "/run/trimum/priv.sock",
+        "SOCK": "/run/trimum-bpf/priv.sock",
     })
     proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                           env=env, timeout=60)
@@ -77,7 +77,7 @@ def test_send_priv_as_tolerates_the_optional_program_argument(tmp_path: Path):
     assert "unbound variable" not in proc.stderr, proc.stderr
     assert record.read_text(encoding="utf-8").splitlines() == [
         "-u", "guzhujushi", "--", "/usr/bin/python3", "-", "bpf.stats", "",
-        "/run/trimum/priv.sock",
+        "/run/trimum-bpf/priv.sock",
     ]
 
 
@@ -294,3 +294,66 @@ def test_perf_gate_hint_explains_the_perf_event_open_denial(tmp_path: Path):
     assert on.isascii()
     assert run("3", "CONFIG_SECURITY_PERF_EVENTS_RESTRICT=y\n") == ""
     assert run("4", "# CONFIG_SECURITY_PERF_EVENTS_RESTRICT is not set\n") == ""
+
+
+# ---- ebpf1h：helper 必须有自己的 RuntimeDirectory（别和 trmd 共用） -----------------
+#
+# 病因（2026-10-08 真机复现）：helper 单元与 trmd 的 S1 加固 drop-in 都声明 RuntimeDirectory=trimum，
+# 而 systemd 在单元停止时**连内容一起删** ⇒ trmd 重启删掉 helper 的 priv.sock / bpf-alerts.jsonl，
+# 反向亦然。修法：helper 用**自己的** /run/trimum-bpf；trmd 的 /run/trimum 一字不动。
+
+BPF_RUN_DIR = "/run/trimum-bpf"
+
+
+def _unit_env(text: str, key: str) -> str:
+    """取单元里 `Environment=<key>=<值>` 的值（必须恰好一条，多了/少了都算不合规）。"""
+    prefix = f"Environment={key}="
+    vals = [ln[len(prefix):] for ln in text.splitlines() if ln.startswith(prefix)]
+    assert len(vals) == 1, f"单元必须且只能给一条 Environment={key}=（实际 {vals}）"
+    return vals[0]
+
+
+def test_unit_gives_helper_its_own_runtime_directory():
+    """helper 与 trmd 共用 RuntimeDirectory ⇒ 谁重启谁删对方的 socket/回灌文件（ebpf1h）。"""
+    lines = _unit_text().splitlines()
+    assert "RuntimeDirectory=trimum-bpf" in lines
+    assert "RuntimeDirectory=trimum" not in lines, "helper 不许再用 trmd 的 RuntimeDirectory"
+    assert "RuntimeDirectoryMode=0750" in lines
+    # 红线：trmd 侧（S1 加固脚本）必须仍是 trimum —— 防「顺手把 daemon 的运行目录也改了」
+    harden = (REPO / "scripts" / "harden_trmd_unit.sh").read_text(encoding="utf-8")
+    assert "RUNTIME_NAME=trimum" in harden
+    assert "RUNTIME_NAME=trimum-bpf" not in harden
+    # helper 仍是最小权限：不许为了换目录顺手改能力集（注释里提到 CAP_SYS_ADMIN 是说明，只看指令行）
+    assert [ln for ln in lines if ln.startswith("CapabilityBoundingSet=")] == [
+        "CapabilityBoundingSet=CAP_BPF CAP_PERFMON"]
+    assert [ln for ln in lines if ln.startswith("AmbientCapabilities=")] == [
+        "AmbientCapabilities=CAP_BPF CAP_PERFMON"]
+
+
+def test_unit_socket_and_alerts_live_in_the_helper_runtime_dir():
+    text = _unit_text()
+    assert _unit_env(text, "TRIMUM_BPF_SOCKET") == f"{BPF_RUN_DIR}/priv.sock"
+    assert _unit_env(text, "TRIMUM_BPF_ALERTS") == f"{BPF_RUN_DIR}/bpf-alerts.jsonl"
+
+
+def test_code_defaults_match_the_helper_runtime_dir():
+    """daemon 侧读的是 bpf_audit 的默认值（真机没有 security.bpf_alerts）⇒ 两个默认值必须与单元一致。"""
+    from trimum_core import bpf_audit, bpf_helper
+    assert bpf_helper.DEFAULT_SOCKET_PATH == f"{BPF_RUN_DIR}/priv.sock"
+    assert bpf_audit.DEFAULT_ALERT_PATH == f"{BPF_RUN_DIR}/bpf-alerts.jsonl"
+
+
+def test_setup_script_tracks_the_helper_runtime_dir():
+    text = _setup_text()
+    assert f"SOCK={BPF_RUN_DIR}/priv.sock" in text
+    assert f"SOCK_DIR={BPF_RUN_DIR}" in text
+    assert f'"{BPF_RUN_DIR}/priv.sock"' in text        # MANAGED / 内嵌 python 兜底默认值
+    assert "运行目录独立于 trmd" in text               # 新增的自检项 13
+
+
+def test_setup_script_self_check_reports_the_helper_runtime_dir(fake_deploy_root):
+    """自检项 13 的行为：非 root ⇒ 如实报 SKIP，且理由里打的必须是 /run/trimum-bpf（不是 /run/trimum）。"""
+    r = _self_check(fake_deploy_root)
+    line = next(ln for ln in _combined(r).splitlines() if "运行目录独立于 trmd" in ln)
+    assert "[SKIP]" in line, line
+    assert BPF_RUN_DIR in line, line

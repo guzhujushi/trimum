@@ -8,10 +8,17 @@
 #   永远拿不到；AmbientCapabilities 让这个以 root 身份运行的 python 进程启动时就带着这两枚。
 #
 # 为什么 RestrictAddressFamilies=AF_UNIX（不联网）：
-#   helper 只对 unix socket 说话（daemon 在 /run/trimum/priv.sock 连它），
+#   helper 只对 unix socket 说话（daemon 在 /run/trimum-bpf/priv.sock 连它），
 #   不需要任何网络。把地址族限制到 AF_UNIX 后，socket(AF_INET/AF_INET6/...) 会直接 EPERM，
 #   helper 物理上连不出网——被攻破也当不了跳板。
-#
+
+# 为什么 helper 用**自己的** RuntimeDirectory（`trimum-bpf`，不与 trmd 的 `trimum` 共用）：
+#   systemd 在单元**停止**时会把整个 RuntimeDirectory **连内容一起删**。helper 与 trmd 若共用 `trimum`：
+#     ① trmd 重启 ⇒ helper 的 `priv.sock` / `bpf-alerts.jsonl` 被删（helper 进程还活着却没人连得上）；
+#     ② 重启 helper ⇒ trmd 的 `trimum.sock` 被删（daemon 的 IPC 静默退回 HTTP）；
+#     ③ `/run/trimum` 还被 chown 给**非特权**的 daemon uid ⇒ daemon 能写/删特权 helper 的资产。
+#   两个单元必须各有各的运行目录：helper = `/run/trimum-bpf`，trmd = `/run/trimum`（后者一字不动）。
+
 # 为什么必须带客户端组（`Group=`，由安装脚本插在 `User=root` 之后）：
 #   本单元的 capability 边界集只有 CAP_BPF / CAP_PERFMON，**没有 CAP_DAC_OVERRIDE / CAP_DAC_READ_SEARCH**
 #   ⇒ uid 0 也一样守文件权限位。于是：
@@ -19,7 +26,7 @@
 #        都 import 不了（真机实测：`ModuleNotFoundError: No module named 'trimum_core'` → 反复重启
 #        → `systemctl is-active` 一直停 `activating`、socket 永不出现）；
 #     ② `RuntimeDirectory=` 与它里面 bind 出来的 `priv.sock` 会随之变成 `root:<客户端组>`，
-#        **非 root** 的 daemon 才进得去 `/run/trimum`、连得上 socket（即 §6.7 写的「socket root:客户端组 0660」）。
+#        **非 root** 的 daemon 才进得去 `/run/trimum-bpf`、连得上 socket（即 §6.7 写的「socket root:客户端组 0660」）。
 #   组名不写死（public 仓库、可能换机器）：由 `scripts/setup_ebpf_helper.sh` 按 `trmd.service` 的
 #   `User=` 推导后插入，可用 `TRIMUM_BPF_CLIENT_USER` / `TRIMUM_BPF_CLIENT_GROUP` 覆盖。
 #
@@ -39,10 +46,11 @@ User=root
 # TRIMUM_UNIT_GROUP_PLACEHOLDER
 WorkingDirectory=/opt/trimum
 Environment=PATH=/opt/trimum/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=TRIMUM_BPF_SOCKET=/run/trimum/priv.sock
+Environment=TRIMUM_BPF_SOCKET=/run/trimum-bpf/priv.sock
+Environment=TRIMUM_BPF_ALERTS=/run/trimum-bpf/bpf-alerts.jsonl
 Environment=XDG_CONFIG_HOME=/etc
 ExecStart=/opt/trimum/venv/bin/python -m trimum_core.bpf_helper_main
-RuntimeDirectory=trimum
+RuntimeDirectory=trimum-bpf
 RuntimeDirectoryMode=0750
 Restart=on-failure
 RestartSec=5
@@ -55,7 +63,7 @@ CapabilityBoundingSet=CAP_BPF CAP_PERFMON
 AmbientCapabilities=CAP_BPF CAP_PERFMON
 # 不再允许提权（setuid / capability 增益都失效）：两枚 Ambient 之外的能力永远拿不到。
 NoNewPrivileges=yes
-# 整个文件系统只读（helper 只读 manifest + 只写 /run/trimum，不碰任何持久化面）。
+# 整个文件系统只读（helper 只读 manifest + 只写 /run/trimum-bpf，不碰任何持久化面）。
 ProtectSystem=strict
 # ── 只读与不可 exec ───────────────────────────────────────
 # 只放行这两条读路径：eBPF 产物目录 + 程序清单；其余文件系统都只读（ProtectSystem=strict 已覆盖）。

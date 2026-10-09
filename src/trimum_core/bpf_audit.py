@@ -14,7 +14,7 @@ from .event_bus import EVENT_SEC_EBPF
 from .models import AuditEvent
 
 # ---- 常量（逐字） ----
-DEFAULT_ALERT_PATH: str = "/run/trimum/bpf-alerts.jsonl"
+DEFAULT_ALERT_PATH: str = "/run/trimum-bpf/bpf-alerts.jsonl"  # 兜底默认；真机由单元 Environment=TRIMUM_BPF_ALERTS 覆盖
 ALERT_PATH_ENV: str = "TRIMUM_BPF_ALERTS"
 ALERT_PATH_CONFIG_KEY: str = "security.bpf_alerts"
 DEFAULT_POLL_INTERVAL_SECONDS: float = 2.0

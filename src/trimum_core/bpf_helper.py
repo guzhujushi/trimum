@@ -16,7 +16,7 @@ from .bpf_helper_protocol import (
 )
 
 # ---- 常量（逐字） ----
-DEFAULT_SOCKET_PATH: str = "/run/trimum/priv.sock"
+DEFAULT_SOCKET_PATH: str = "/run/trimum-bpf/priv.sock"  # 兜底默认；真机由单元 Environment=TRIMUM_BPF_SOCKET 覆盖
 SOCKET_ENV: str = "TRIMUM_BPF_SOCKET"
 SOCKET_CONFIG_KEY: str = "security.bpf_socket"
 ALLOWED_UIDS_CONFIG_KEY: str = "security.bpf_helper_allowed_uids"

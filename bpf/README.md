@@ -19,7 +19,7 @@ the compiled objects (`bpf/*.bpf.o`) are build products and are gitignored.
   (`bpf.load exec_guard`) only when you want that stream. All five kinds are accepted by the
   daemon side (`src/trimum_core/bpf_audit.py`, `HELPER_ALERT_KINDS`).
 * The loader (`src/trimum_core/bpf_loader.py`) drains the ring buffers in a background thread and
-  appends one JSON line per event to `security.bpf_alerts` (default `/run/trimum/bpf-alerts.jsonl`);
+  appends one JSON line per event to `security.bpf_alerts` (default `/run/trimum-bpf/bpf-alerts.jsonl`);
   `bpf.tail` additionally peeks the last `security.bpf_recent_events` records. Every knob is
   configurable (`security.bpf_program_dir` / `..._drain_interval_ms` / `..._alerts_max_bytes` /
   `..._recent_events` + matching `TRIMUM_BPF_*` env vars) -- key table in `docs/SANDBOX-PLAN.md` §6.7.

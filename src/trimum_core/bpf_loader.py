@@ -11,7 +11,7 @@
 
 排水（ring buffer -> 审计回灌文件）：libbpf 1.x 的 `ring_buffer__poll` 回调在**同一线程**里被调，
 所以 loader 起一个后台线程按 `security.bpf_drain_interval_ms` 轮询；事件同时进
-① `tail()` 能看到的内存环（最近 N 条，非破坏性读）② `/run/trimum/bpf-alerts.jsonl`（daemon 侧
+① `tail()` 能看到的内存环（最近 N 条，非破坏性读）② `/run/trimum-bpf/bpf-alerts.jsonl`（daemon 侧
 `bpf_audit.BpfAlertTailer` 读的那个文件）。文件写失败只降级 + `log.warning`，**不影响 attach**。
 """
 from __future__ import annotations
