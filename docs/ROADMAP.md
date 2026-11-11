@@ -200,7 +200,8 @@ Linux 7.0 升级后，BPF LSM / sched_ext 可以做能力检查与最小 PoC；�
 | 官方分发渠道 | 包格式、签名、索引、`trm install` | ✅ 主体已实现 |
 | 多用户边界 | `/etc/trimum` 公共层、审计归属、私钥保护 | 🟡 调研完成，未改代码 |
 | 浏览器 / 桌面 / GUI | 浏览器工具、桌面预设、远程桌面 | 🟡 可选前端，不是核心 |
-| AIOS / Cerebrum 兼容 | 可选外部 Agent Runtime / SDK 适配；独立 venv + 沙箱，不进入核心 | 🟡 调研完成，暂不接入 |
+| Codex Plan / Coding Agent | `codex exec` + 版本化 schema；Plan read-only，Code workspace-write | 🟡 契约已定，待实现 |
+| AIOS / Cerebrum 兼容 | 已放弃接入，仅保留设计参考 | ⚫ 不采用 |
 | 语义记忆 / RAG | 本地 embedding + sqlite-vec + RRF | ⚪ 未来设计 |
 
 ---
@@ -224,7 +225,12 @@ Linux 7.0 升级后，BPF LSM / sched_ext 可以做能力检查与最小 PoC；�
 | 许可证 | GPL-2.0-only；历史版本仍为 MIT。 |
 | 代码复用 | AgentCgroup 第一优先；SchedCP / AgentSight 可选外部；ActPlane 只作设计参考；核心不引入 Rust 工具链或新常驻服务。 |
 | RuntimeKernel | B 薄门面：统一入口/schema，内部模块不拆。 |
-| Plan Agent | B 版本化 schema；TARL 只带引用与摘要。 |
+| Plan Agent | B 版本化 + A 最小冻结：v1 必填 `schema/plan_id/task/steps`；TARL 只带引用与摘要。 |
+| Codex 调用配置 | B 临时 profile：每次按 `run_id` 生成，不写全局 `config.toml`；profile 本身不加 token。 |
+| Agent 文件协议 | A 统一 `AgentSpec` + `AgentResult`；`entry` 唯一入口，socket / 文件只是 adapter。 |
+| AgentCgroup | A 先做（`systemd-run --user` + 纯 Python cgroup）；C 尽快（session + tool-call 临时 cgroup）；整体 daemon 不采用。 |
+| Codex 验证 | A 默认由 `verifier.py` 独立判定；高风险 step 才双跑 Codex + verifier。 |
+| 重试策略 | 零自动重试；只有人工批准或新 invocation 才重试。 |
 | Storage Manager | B 统一 API + 配额。 |
 | Workflow 预算 | B 独立 WorkflowBudget。 |
 | EventBus | B JSONL/WAL + 回放。 |
@@ -240,13 +246,16 @@ Linux 7.0 升级后，BPF LSM / sched_ext 可以做能力检查与最小 PoC；�
 
 ## 剩余待决策
 
-1. Plan schema 字段冻结与兼容策略。
-2. StorageManager 配额默认值与迁移顺序。
-3. 系统级调度反馈接口。
-4. Execution Verifier 验证等级。
-5. Linux 7.0 上 sched_ext / BPF LSM / memcg_bpf_ops 的实际能力与 PoC 准入。
-6. GPU / 网络 / 存储 IO 预算模型。
-7. 多用户下 Runtime 归属。
-8. AgentCgroup 的 GPL 精确版本与可 vendor 模块边界。
+1. Plan schema 的 v1 → v2 兼容策略与未知字段处理（字段已最小冻结）。
+2. StorageManager 的配额默认值、清理周期与迁移顺序。
+3. WorkflowBudget 与节点预算的具体组合规则。
+4. 系统级调度接口：指标、频率、如何反馈给 Plan Agent。
+5. GPU / 网络 / 存储 IO 的预算与隔离。
+6. 多用户边界下的 Runtime 归属。
+7. 成本浮动是分资源配置还是统一 `margin_percent`（当前先统一）。
+8. AgentCgroup 的 GPL 精确版本（`only` / `or-later`）与 vendor 边界。
+
+Linux 7.0 升级前不开工 eBPF / sched_ext / BPF LSM / memcg_bpf_ops / AgentCgroup eBPF；
+升级后先做能力自检与最小 PoC，不阻塞 MVP。
 
 这些决策在 `docs/ARCH.md` §9、两份详细设计文档与 `docs/architecture/code-reuse.md` 中保持同步。

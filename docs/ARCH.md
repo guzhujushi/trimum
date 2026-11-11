@@ -479,11 +479,18 @@ flowchart LR
 
 | 决策 | 结论 |
 |---|---|
-| 内核基线 | **Linux 7.0**（计划升级）；升级前 6.8 只作当前实测事实，不作为长期约束。 |
+| 内核基线 | **Linux 7.0**（计划升级）；升级前 6.8 只作当前实测事实；sched_ext / BPF LSM / memcg_bpf_ops / AgentCgroup eBPF 等升级后再开工。 |
 | 项目许可证 | **GPL-2.0-only**；从下一个发布版本起，历史版本仍为 MIT。 |
 | 代码复用 | **复用优先**：AgentCgroup 第一优先；SchedCP / AgentSight 可选外部工具；ActPlane 只作设计参考；核心不引入 Rust 工具链或新常驻服务。 |
 | RuntimeKernel 门面 | **B 薄门面**：统一入口与 schema，内部模块不拆不改。 |
-| Plan Agent 输出契约 | **B 版本化 schema**：先冻结最小字段；TARL 只带引用与摘要。 |
+| Plan Agent 输出契约 | **B 版本化 + A 最小冻结**：v1 只必填 `schema/plan_id/task/steps[id,agent,instruction,depends_on]`；其余可选；TARL 只带引用与摘要。 |
+| Codex Plan Agent | **A 外部进程**：`codex exec -s read-only` + `trimum.plan/v1`；复用内置提示词/循环，不复制源码。 |
+| Codex Coding Agent | **B 子 Agent**：`codex-code` 走 `workspace-write` + `trimum.code_result/v1`；测试后续拆 `codex-verify`。 |
+| Codex 调用配置 | **B 临时 profile**：每次生成 `$CODEX_HOME/trimum-<role>-<run_id>.config.toml` 并用 `-p`；不写全局 config；profile 不增加 token。 |
+| Agent 文件协议 | **A 统一 `AgentSpec` + `AgentResult`**：`entry` 是唯一入口（默认 `./main.py`）；socket 与文件/EventBus 是两个 adapter。 |
+| AgentCgroup 落地 | **A 先做，C 尽快**：A = `systemd-run --user` + 纯 Python cgroup；C = session + tool-call 临时 cgroup；B 不采用。 |
+| Codex 验证 | **A 默认，C 高风险**：`verifier.py` 独立判定；高风险双跑；Codex 自报仅线索。 |
+| 重试策略 | **零自动重试**：schema 校验失败直接失败；仅人工批准或新 invocation 才重试。 |
 | Storage Manager | **B 统一 API + 配额**：先接口与配额，不改现有路径语义。 |
 | Workflow 级预算 | **B 独立 WorkflowBudget**：复用 tighten，与 Agent 预算取交集。 |
 | EventBus 历史 | **B JSONL/WAL + 启动回放**：持久化失败不影响业务。 |
@@ -500,7 +507,7 @@ flowchart LR
 
 ### 9.2 剩余 TBD
 
-1. **Plan schema 的字段冻结与兼容策略**：最小字段先定哪些，后续如何演进。
+1. **Plan schema 的兼容策略**：v1 → v2 规则、未知字段处理。
 2. **StorageManager 的配额默认值与迁移顺序**。
 3. **系统级调度接口**：System Intelligence 向 Agent Runtime 反馈的指标与建议格式。
 4. **Execution Verifier 的验证等级**：哪些策略必须静态分析 + 基准 + 隔离测试。

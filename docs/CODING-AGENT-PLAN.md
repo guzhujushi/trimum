@@ -293,5 +293,141 @@ async def plan_step_with_llm(task, history, *, router=None, timeout=15.0) -> Cod
 
 ---
 
+## 10. Codex Coding Agent（2026-11-11 定）
+
+定位：**执行计划的 coding 子 Agent**，不是 Plan Agent，也不是新的 Runtime。它消费 `trimum.plan/v1` 的一个 step，
+调用 Codex CLI 完成实现；测试先由同一角色执行，稳定后再拆独立的 `codex-verify`。
+
+### 10.1 三个角色
+
+| 角色 | sandbox | 输出 schema | 职责 |
+|---|---|---|---|
+| `codex-plan` | `read-only` | `trimum.plan/v1` | 只规划；不写盘、不改代码 |
+| `codex-code` | `workspace-write` | `trimum.code_result/v1` | 实现 plan step，并执行声明的验证命令 |
+| `codex-verify`（后续） | `workspace-write`（仅工作区 + tmp） | `trimum.verify_result/v1` | 只跑测试/构建/静态检查；不改源码 |
+
+`codex-code` 负责“实现”，但**不能自己给自己放行**：它收到的写路径、工具、网络、预算都是 Kernel 从 plan 与父级策略取交集后的结果。
+
+### 10.2 Agent 包与 manifest
+
+建议目录与现有子 Agent 保持一致：
+
+```text
+~/.local/share/trimum/agents/codex-code/
+  agent.json5
+  main.py
+```
+
+`agent.json5` 示例：
+
+```json5
+{
+  name: "codex-code",
+  version: "0.1.0",
+  description: "Codex coding sub-agent for plan steps",
+  capabilities: ["code.edit", "code.test"],
+  depends_on: ["codex", "git"],
+  entry: "./main.py",
+  risk_level: "high",
+  sandbox: { mode: "workspace-write", seccomp_profile: "l1" }
+}
+```
+
+注意：manifest 的 `sandbox` 只能收紧，不能给自己加写面；真正的可写路径由 Kernel 的 `extra_write` / plan 的交集决定。
+当前 launcher 实际固定找 `<agent_type>/main.py`，`entry` 的统一问题见 §10.6。
+
+### 10.3 输入：`trimum.code_task/v1`
+
+`main.py` 通过现有 `AgentRunner` 读取 `TRIMUM_INPUT_FILE`，输入对象建议冻结为：
+
+```json
+{
+  "schema": "trimum.code_task/v1",
+  "task_id": "task_001",
+  "plan_id": "plan_20261111_001",
+  "step_id": "implement_fix",
+  "objective": "修复 nginx 502，并跑相关测试",
+  "cwd": "/srv/repo",
+  "allowed_paths": ["/srv/repo", "/tmp"],
+  "denied_paths": ["/etc", "~/.ssh"],
+  "resources": {
+    "cpu_percent_max": 80,
+    "memory_mb_max": 1024,
+    "timeout_s": 600,
+    "token_budget": 50000
+  },
+  "verification": {
+    "commands": ["pytest -q tests/test_api.py"],
+    "timeout_s": 300
+  },
+  "constraints": [
+    "no git push",
+    "no network unless explicitly allowed",
+    "do not write outside allowed_paths"
+  ]
+}
+```
+
+`resources` 是请求，不是授权；Kernel 仍要取交集并落到 cgroup / token 预算。
+
+### 10.4 输出：`trimum.code_result/v1`
+
+本版冻结结果名称为 `trimum.code_result/v1`；字段可以先少后多，但新增字段必须保持向后兼容。
+Codex 的最终响应通过 `--output-schema` 约束为：
+
+```json
+{
+  "schema": "trimum.code_result/v1",
+  "status": "completed",
+  "summary": "修复了 502，并补充了回归测试",
+  "changed_files": [
+    { "path": "src/api.py", "change": "modified", "lines_added": 12, "lines_removed": 3 }
+  ],
+  "tests": [
+    { "command": "pytest -q tests/test_api.py", "status": "passed", "exit_code": 0, "summary": "12 passed" }
+  ],
+  "diff_summary": "...",
+  "blockers": [],
+  "needs_approval": [],
+  "usage": { "tokens": 12345, "duration_s": 42.1 }
+}
+```
+
+`status` 只允许 `completed` / `failed` / `blocked`。`failed` 与 `blocked` 不允许伪装成成功。
+
+### 10.5 调用与验证边界
+
+`codex-code` 的调用形态：
+
+```bash
+codex exec \
+  -s workspace-write \
+  -C <cwd> \
+  --add-dir <allowed_path> \
+  --skip-git-repo-check \
+  --output-schema schemas/trimum.code_result.v1.json \
+  --output-last-message <run_dir>/result.json \
+  -m <model> \
+  "<task prompt>"
+```
+
+硬约束：
+
+- 外层仍由 trimum 的 Landlock / seccomp / cgroup + Tool Gateway 包住；Codex 自己的 `workspace-write` 只是内层。
+- 禁止 `danger-full-access`；禁止 `git push`；网络默认由外层沙箱拒绝（Codex 自身没有统一的“禁网”开关，不能只靠 prompt）；不允许写 `allowed_paths` 之外。
+- Codex 自报的测试结果只能当线索；**最终判据必须由 trimum 的 `verifier.py` 独立执行/校验**，不能只信 `code_result.tests`。
+- 每个 plan step 默认只调用一次；schema 校验失败、测试失败、能力不足都直接返回 `failed` / `blocked`，**不自动重试**。
+- 需要重试时，生成新的 `CodexInvocation` 并记录原因；不能悄悄重复同一 prompt 消耗 token。
+
+### 10.6 与现有代码的关系
+
+- `src/trimum_core/codex_launcher.py:56` 的 `resolve_codex_argv` 继续作为命令解析入口；新增 role 参数来拼 `-s` / `--output-schema` / `--output-last-message`。
+- `src/trimum_core/workflow_runtime.py:1019` 的 `_handle_codex_node` 只是“跑一次 Codex”的原语，不直接当 coding agent；它缺少结构化结果、独立验证和 step 预算。
+- `src/trimum_core/coding_agent.py` 的原生循环仍是默认实现；Codex coding agent 是**可选后端**，不替换它。
+- `src/trimum_core/verifier.py` 仍是验证判据的唯一入口；Codex 负责实现与跑命令，verifier 负责判定红/绿。
+- 实现顺序：① `trimum.plan/v1` Pydantic + JSON Schema；② `codex-plan` 适配器；③ `codex-code` 包与结果 schema；④ `codex-verify`；⑤ 端到端测试（只读 plan、workspace-write code、越界写入拒绝、无网络、零自动重试）。
+
+---
+
 > **下一步**：§8.1 的四条已定，**先做沙箱前置片**（`docs/SANDBOX-PLAN.md` 的 S1 → S4），
-> 再回来按 §7 的步骤 1→5 推进（入口用 `trm exec --code`）。仍有两项未决（原生工具调用 / 会话记录位置），不阻塞开工。
+> 再回来按 §7 的步骤 1→5 推进（入口用 `trm exec --code`）。仍有一项未决（原生工具调用方式），不阻塞开工。

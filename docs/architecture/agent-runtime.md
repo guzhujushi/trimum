@@ -108,10 +108,14 @@ Plan Agent **不是**底层资源管理器，也**不拥有系统最高权限**�
 | 父子委派与预算交集 | `delegation.py` | ✅ |
 | 统一 Plan Agent schema | 契约已定（B 版本化 schema），实现待拆 | 🟡 |
 
-### 3.4 Plan Agent 输出契约（2026-11-11 定：B 版本化 schema）
+### 3.4 Plan Agent 输出契约（2026-11-11 定：B 版本化 + A 最小冻结）
 
 Plan Agent 不直接启动进程，也不直接分配资源；它输出一份**可验证的计划**，由 Kernel 校验后执行。
 契约采用版本化 schema，先冻结最小字段，再逐步扩展（不追求一次设计完整）。
+
+**冻结口径（A）**：`trimum.plan/v1` 的必填字段只有 `schema`、`plan_id`、`task`、`steps`，
+以及每个 step 的 `id` / `agent` / `instruction` / `depends_on`；`resources`、`sandbox`、`context`、
+`tools`、`approvals`、`on_failure` 先作为可选扩展。这样 Codex 先稳定产出，后续再收紧必填项。
 
 建议的最小结构（示意，不是已冻结代码）：
 
@@ -158,6 +162,7 @@ steps:
 
 **字段含义**
 
+- `resources` / `sandbox` / `context` / `tools` / `approvals` / `on_failure`：v1 可选，后续版本再决定是否提升为必填。
 - `resources`：Agent 级资源需求；实际分配由 Resource Manager 取交集，不能由 Plan Agent 直接放大。
 - `sandbox`：沙箱范围（文件读写、网络、seccomp）；由 Sandbox Manager 施加，失败 fail-closed。
 - `context`：上下文与记忆命名空间；由 Context Manager 分配，token 预算与压缩策略由它执行。
@@ -177,6 +182,64 @@ TARL 是**紧凑传输格式**，schema 是**语义契约**；两者不是一回
 
 > 这与「Plan Agent 在 TARL 里带上沙箱、文件访问、上下文」的想法方向一致；区别是：
 > **TARL 带的是引用与摘要，完整契约留在 schema 里**，这样既能保持 TARL 轻量，也能让 Kernel 做确定性校验。
+
+### 3.5 Codex 作为 Plan Agent（2026-11-11 定）
+
+**结论：可以复用 Codex 的内置提示词和完整 Agent 循环，但只能通过 `codex exec` 子进程复用；不复制、不 import、也不修改 Codex 源码。**
+
+- `codex exec` 自带 Codex 的 system / developer prompt、工具循环、仓库读取、sandbox 与 approval 机制；trimum 只提供任务、边界、schema 和结果位置。
+- `--output-schema` 只约束**最终响应**的结构，不替换 Codex 的内部流程。schema 校验失败视为本次计划失败，**不自动重试**。
+- Plan 角色固定 `-s read-only`：可以读仓库、做只读检查，但不能写盘、不能跑会改状态的测试，也不能直接启动 coding 子 Agent。
+- Codex 的版本、model/provider、profile 由 trimum 固定并记录；不假设“某个版本的内部 prompt 永远不变”。
+- 复用的是 Codex 的运行时行为，不是可调用的库 API；最终验收仍由 trimum 的 `verifier.py` 做，不能把 Codex 自报的“测试通过”当结论。
+
+建议调用形态：
+
+```bash
+codex exec \
+  -s read-only \
+  -C <workspace> \
+  --skip-git-repo-check \
+  --ephemeral \
+  --output-schema schemas/trimum.plan.v1.json \
+  --output-last-message <run_dir>/plan.json \
+  -m <model> \
+  "<plan prompt>"
+```
+
+**每次调用生成一份不可变 `CodexInvocation`**，至少包含：
+
+```yaml
+schema: trimum.codex_invocation/v1
+role: plan | code | verify
+plan_id: plan_20261111_001
+task_hash: sha256:...
+model: ...
+reasoning_effort: ...
+sandbox: read-only | workspace-write
+cwd: /srv/repo
+add_dirs: []
+allowed_paths: ["/srv/repo", "/tmp"]
+denied_paths: ["/etc", "~/.ssh"]
+network: deny
+timeout_s: 300
+max_output_bytes: 65536
+output_schema: schemas/trimum.plan.v1.json
+output_last_message: <run_dir>/plan.json
+prompt_sha256: sha256:...
+```
+
+- 这份对象写入 `tmp/plans/<plan_id>/invocation.json`，CLI 参数由它渲染；**不要手写 argv，也不要在并发调用中修改全局 `~/.codex/config.toml`**。
+- **定 B：每次生成临时 profile**。profile 写到 `$CODEX_HOME/trimum-<role>-<run_id>.config.toml`，用 `-p trimum-<role>-<run_id>` 指向；调用结束或失败都删除，不修改全局 `config.toml`。并发用唯一 `run_id`，避免互相覆盖。
+- **profile 本身不进入模型上下文，不会直接增加 token**。token 只由 prompt、仓库上下文、工具循环和输出决定；profile 只放 runtime 配置（model / reasoning / sandbox / approval），**不要把 `developer_instructions` 或大段规则塞进 profile**，否则才会增加上下文 token。
+- 动态资源与边界同时写入 `CodexInvocation` 和 prompt `constraints`，不能只写进 profile。
+- 调用前本地预检：schema 文件存在且可解析、cwd/路径存在、model/provider 可用、timeout/预算合法；预检失败直接 `plan_invalid`，不调用模型。
+- schema 校验失败返回 `plan_invalid`；**默认一次调用、零自动重试**。只有人工显式批准或新的 invocation 才重试，避免反复尝试消耗 token。
+- 实现后可选：同一 `task_hash + repo_head + capabilities` 命中已保存 plan 时不调用 Codex；未命中或缓存不可信时仍走一次正式调用。
+
+**边界写在三处，缺一不可**：① Codex CLI 的 `-s` / `-c` 参数；② prompt 中的 `constraints`；③ trimum 外层 Landlock / seccomp / cgroup 与 Tool Gateway。Codex 自己的 sandbox 是内层，不是 trimum 的替代边界。
+
+> Codex 的编码实现角色见 `docs/CODING-AGENT-PLAN.md` §10；Plan 只产出计划，不执行计划。
 
 ---
 
@@ -223,6 +286,17 @@ RuntimeKernel.observe(run_id) -> Observation
 - `delegation.py`：父子 Agent 能力 / 风险 / 预算交集。
 
 状态：✅ 主体已实现；统一调度队列与系统级公平调度 ⚪ TBD。
+
+**Agent 文件协议（2026-11-11 定：A）**：以 `AgentManifest` 生成统一的 `AgentSpec`；`entry` 是唯一可执行入口
+（默认 `./main.py`），launcher 必须读取 manifest 的 `entry`，不再硬编码 `main.py`。Unix socket 与
+workflow 文件 / EventBus 只是两个 transport adapter，对外统一收敛为：
+
+```text
+AgentSpec -> AgentSession(start/stop/status) -> AgentResult(status, output, error, usage)
+```
+
+socket 的 start/stop/status/heartbeat 与 workflow 的 input.json/result.json 不再各自定义一套语义；
+两者都必须能映射到同一个 `AgentResult`。
 
 ### 4.2 Sandbox Manager
 
@@ -483,7 +557,14 @@ budget:
 | 决策 | 结论 |
 |---|---|
 | RuntimeKernel 门面 | **B 薄门面**：统一入口与请求/响应 schema，内部模块不拆不改。 |
-| Plan Agent 输出契约 | **B 版本化 schema**：先冻结最小字段，逐步统一；TARL 只带引用与摘要。 |
+| Plan Agent 输出契约 | **B 版本化 + A 最小冻结**：v1 必填 `schema/plan_id/task/steps[id,agent,instruction,depends_on]`；其余可选；TARL 只带引用与摘要。 |
+| Codex Plan Agent | **A 外部进程**：`codex exec -s read-only` + `trimum.plan/v1`；复用内置提示词和循环，不复制/不改 Codex 源码。 |
+| Codex Coding Agent | **B 子 Agent**：`codex-code` 走 `workspace-write` + `trimum.code_result/v1`；测试后续拆独立 `codex-verify`。 |
+| Codex 调用配置 | **B 临时 profile**：每次生成 `$CODEX_HOME/trimum-<role>-<run_id>.config.toml` 并用 `-p` 指向；不写全局 config；profile 不增加 token。 |
+| Agent 文件协议 | **A 统一 `AgentSpec` + `AgentResult`**：`entry` 是唯一入口（默认 `./main.py`）；socket 与文件/EventBus 只是两个 adapter。 |
+| AgentCgroup 落地 | **A 先做，C 尽快**：A = `systemd-run --user` + 纯 Python cgroup 生命周期；C = session + tool-call 临时 cgroup；B（整体 daemon）不采用。 |
+| Codex 验证 | **A 默认，C 高风险**：`verifier.py` 独立判定；高风险 step 强制 Codex + verifier 双跑；Codex 自报仅线索。 |
+| 重试策略 | **零自动重试**：schema 校验失败直接失败；只有人工显式批准或新 invocation 才重试。 |
 | Storage Manager | **B 统一 StorageManager API + 配额**：先接口与配额，不改现有路径语义。 |
 | Workflow 级预算 | **B 独立 WorkflowBudget**：复用 tighten 语义，与 Agent 预算取交集。 |
 | 硬资源超限 | **A 硬拒绝 fail-closed**：CPU / RAM / 存储 / 文件写入。 |
@@ -491,17 +572,18 @@ budget:
 | 浮动余量 | **默认 10%，可配置**：只用于边界判断，不改变最终配额。 |
 | 成本视图 | **A 放在 `trm status` + `--json`**：不新增顶层命令。 |
 | 外部复用 | **复用优先**：AgentCgroup 第一优先；SchedCP / AgentSight 可选外部工具；ActPlane 只作设计参考。 |
-| 内核基线 | **Linux 7.0**（计划升级）；升级后先做能力自检，不假设所有内核特性自动可用。 |
+| 内核基线 | **Linux 7.0**（计划升级）；sched_ext / BPF LSM / memcg_bpf_ops / AgentCgroup eBPF 等升级后再开工；升级后先做能力自检。 |
 
 ### 9.2 剩余 TBD
 
-1. Plan schema 的字段冻结时间表与兼容策略。
+1. Plan schema 的兼容策略（v1 → v2 规则、未知字段处理）。
 2. StorageManager 的配额默认值、清理周期与迁移顺序。
 3. WorkflowBudget 与节点预算的具体组合规则。
 4. 系统级调度接口：哪些指标、什么频率、如何反馈给 Plan Agent。
 5. GPU / 网络 / 存储 IO 的预算与隔离。
 6. 多用户边界下的 Runtime 归属（每用户 Runtime vs 系统 Runtime）。
 7. 成本浮动是按资源分别配置，还是统一一个 `margin_percent`（当前先统一）。
+8. AgentCgroup 的 GPL 精确版本（`only` / `or-later`）与 vendor 边界。
 
 ---
 
