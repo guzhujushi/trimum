@@ -1,5 +1,8 @@
 # W1 — Workflow 执行语义（监听 Event Bus → 驱动执行）
 
+> **架构归属（2026-11-11 重构）**：本文是 **已完成的历史实现记录**，归属 Agent Runtime 的 Workflow 编排层。
+> 总体架构见 `docs/ARCH.md` §3；当前执行语义以 `workflow_runtime.py` 与测试为准。
+
 > 立项：2026-09-20，紧接 E4。E4 遗留原文：「`WorkflowDefV2.to_workflow_definition()` 不搬运
 > `instruction`，编译出来的 workflow 在 `trm workflow run` 下不会真的执行命令 —— 留给
 > 「workflow 执行语义」一轮」。本轮就是那一轮。

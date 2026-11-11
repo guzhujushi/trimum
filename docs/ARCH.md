@@ -1,599 +1,477 @@
 # ARCH — trimum 架构
 
-> **架构单一事实源**（2026-09-21 由根目录 `ARCH.md` 移入 `docs/`；同时删掉与 `docs/` 专题文档重复的规划快照，根目录不再保留 `PRD.md` / `ARCH.md`）。
-> 需求与生态方案见 `docs/ECOSYSTEM-STRATEGY.md` / `docs/MCP-INTEGRATION-PLAN.md`，运维见 `docs/OPERATIONS.md`；进度与待办见 `STATUS.md` / `TODO.md`。
+> **架构单一事实源**（2026-11-11 重构）。
+> 本文只回答「trimum 是什么、由哪两大核心组成、现有模块归属哪里、哪些已实现、哪些仍是 TBD」。
+> 文件名沿用 `docs/ARCH.md`，不另建重复的 `ARCHITECTURE.md`。
+> 详细设计：`docs/architecture/agent-runtime.md`、`docs/architecture/system-intelligence.md`；
+> 路线图：`docs/ROADMAP.md`；安全机制：`docs/SECURITY.md`、`docs/SECURITY-DEFENSE-PLAN.md`、`docs/SANDBOX-PLAN.md`。
 
-## 技术选型
+**状态记号**：✅ 已实现　🟡 部分实现 / 原型　⚪ 未来设计（TBD）　🚫 已废弃 / 不再采用
 
-- 语言：Python 3.12+
-- Web 框架：FastAPI
-- 数据模型：Pydantic v2
-- 工具插件：`~/.trimum/tools/<name>/{tool.json5,main.py}`
+---
 
-## browser 路由设计
+## 0. 定位
 
-1. `models.ToolType` 新增 `BROWSER = "browser"`，使 `ExecuteRequest.tool` 接受
-   `"browser"`。
-2. `ToolGateway.execute()` 以 `request.tool.value`（即 `"browser"`）查询
-   `ToolRegistry`，命中文件工具定义后调用 `ToolRegistry.get_executor("browser")`。
-3. `tool_file_loader.TOOL_KINDS` 增加 `"browser" -> ToolType.BROWSER` 映射。
-4. `ToolGateway._check_cwd_jail()` 将 `ToolType.BROWSER` 加入免 cwd 校验集合，
-   与 `CUSTOM` 等无文件系统路径依赖的工具一致。
-5. CDP 地址解析优先级：`cdp` 请求参数 > `CLI_ANYTHING_CDP_URL` > `http://localhost:9222`。
+trimum 是 **AI-native System Runtime（AI 原生系统运行环境）**。
 
-## `trm` CLI 设计
+它不是在做一个 AI 桌面助手、Agent 框架或 Linux 发行版，而是在建立一套连接 AI Agent 与操作系统的运行基础设施：
 
-### 目录结构
+- 把 Agent 纳入统一的操作系统资源管理和安全控制体系。
+- 让操作系统能够感知 AI 工作负载，并根据系统状态动态调整资源分配和执行策略。
+- 建立 **Agent Runtime** 与 **System Intelligence** 之间的双向反馈机制。
 
-- `src/trimum_core/cli/__init__.py`：`main(argv)` 入口，分发到 handler。
-- `src/trimum_core/cli/__main__.py`：支持 `python -m trimum_core.cli`。
-- `src/trimum_core/cli/parser.py`：构建根 parser 与全局 `--json`/`--version`。
-- `src/trimum_core/cli/_utils.py`：版本、JSON 输出、RPC/HTTP 探测、daemon 状态等公共能力。
-- `src/trimum_core/cli/commands/`：每个命令模块导出 `add_subparsers()`。
+一句话：
 
-### 关键规则
+> **Agent Runtime 管理 AI 工作负载；System Intelligence 理解和优化整个操作系统的运行；
+> 两者通过资源管理、安全治理和系统反馈形成闭环。**
 
-- `commands.register_all()` 使用 `pkgutil` 动态导入命令模块，跳过私有模块。
-- 每个子命令通过 `parser.set_defaults(handler=handler)` 绑定 `def handler(args) -> int`。
-- 全局 `--json` 递归注入所有子 parser，使用 `argparse.SUPPRESS` 避免覆盖根参数。
-- 不引入 click/typer；daemon 交互优先 JSON-RPC，HTTP API 作为 fallback。
+---
 
-## Tool Gateway 分层（2026-09-19 更新）
+## 1. 总体架构
 
-`ToolGateway.execute()` 的检查顺序：
+```mermaid
+flowchart TB
+    subgraph Entry[交互入口]
+        CLI[CLI / Shell]
+        API[HTTP / JSON-RPC]
+        WF[Workflow / Event Bus]
+    end
 
-1. **Layer 0 — cwd Jail**：工作目录白名单（`ToolType.BROWSER/CUSTOM` 等免检）。
-2. **Layer 1 — PolicyEngine**：`config/policy.yaml` 正则规则，带 `source_type` 感知；
-   `interactive=True` 时对 confirm 直接弹窗。可叠加 `LlmPolicyEngine` 增强判定。
-3. **Layer 2 — Agent 权限**：`AgentManifest` 声明的 exec/deny_exec/read/write。
-4. **Layer 2.5 — SecurityRule（弹性沙箱决策中心）**：`can_execute()` 合并
-   PolicyEngine + BehaviorMonitor + 资源阈值，返回 allow/confirm/deny。
-   - deny → `status=denied`，审计事件 `security_blocked`
-   - confirm → 升级为 `Action.CONFIRM`（interactive 时弹窗，用户确认后回落 AUTO）
-   - `TrimumError(RESOURCE_LIMIT_EXCEEDED)` → deny；其他异常 fail-open 并记日志
-   - 网关默认自建 SecurityRule，并关闭其内部资源阈值检查
-     （`enforce_resource_limits=False`）：网关是单条命令粒度，拿不到 Agent cgroup
-     上下文，配额由 `AgentManager` / `CgroupV2Controller` 负责
-5. **Layer 4 — SecMonitor**：威胁特征匹配（DENY 直接拦截）。
-6. **Layer 3 — JIT 授权**：高风险操作需要一次性令牌。
-7. **执行**：文件工具 `main.py` 优先，其次 DispatcherRegistry；随后凭据脱敏 + 审计。
+    subgraph AR[Agent Runtime]
+        PA[Plan Agent<br/>理解任务 / 拆解 / 选 Agent / 提资源需求]
+        K[Agent Runtime Kernel<br/>确定性执行与资源分配]
+        S[Agent Scheduler]
+        SB[Sandbox Manager]
+        C[Context Manager]
+        R[Resource Manager]
+        T[Tool Manager]
+        M[MCP Manager]
+        ST[Storage Manager]
+    end
 
-**决策合并（`_merge_decision`）**：各层结论与工具自报结果按「网关优先」合并 ——
+    subgraph SI[System Intelligence]
+        OBS[eBPF Observation<br/>负载 / 进程 / syscall / 网络 / Agent 行为]
+        WA[Workload Analysis Engine]
+        PR[Policy Repository]
+        PE[Policy Engine]
+        V[Execution Verifier]
+        PC[Privileged Controller]
+    end
 
-- 工具自报 `status in ("", "allowed")` 视为「未表态」，最终 `status` 以网关为准；
-- 网关 `action` 为 `DENY` / `CONFIRM` 时覆盖工具默认的 `AUTO`（否则 Layer 1 的 confirm
-  会被文件工具返回的 `allowed/AUTO` 吞掉）；
-- 两组结果都带风险等级时取更高者（`_RISK_RANK`）。
+    KERNEL[(Linux Kernel)]
+    AG[Agent / Tool / MCP]
 
-## IPC 监听与 daemon 运行要点
-
-- **监听 socket 必须非阻塞**：`IpcHandler._start_unix_socket()` / `_start_tcp_fallback()`
-  都调用 `sock.setblocking(False)`。`loop.sock_accept()` 只在 debug 模式下校验非阻塞标志，
-  阻塞 socket 会让 `accept()` 直接卡在事件循环线程里 —— 表现为「daemon 起来了但整体假死、
-  测试挂住」。Windows 走 `unix_socket_skipped_windows` 分支，所以只有 Linux 会踩到。
-- **配置决定 socket 路径**：daemon 的 cwd 决定加载哪份 config（`/opt/trimum/config.yaml`
-  用 `/run/trimum/trimum.sock` 这类系统路径，普通用户运行会 `unix_socket_start_failed`，
-  此时 `trm` 自动退回 HTTP API，功能可用但 RPC 不可用）。
-- **启动协程必须定义在模块级**：曾把 `_learning_loop` 定义在 `startup()` 内部却在定义前
-  `create_task(_learning_loop(...))`，局部名未绑定 → daemon 启动即
-  `UnboundLocalError` + `Application startup failed`。`tests/test_api_server_startup.py`
-  直接跑一遍 startup handler 兜住这类问题。
-
-## 上下文窗口管理（`context_compactor.py`）
-
-`AgentLoop` 不再把历史 JSON 硬截断，改为 `ContextCompactor.build(history)`：
-
-- **单条输出限长**：2400 字符（头 1600 / 尾 800，中间折叠为「已省略 N 字符」）
-- **滑窗**：最近 5 步保留原文
-- **早期步骤摘要**：每步一行（名称 + 命令 + 状态 + 输出摘要，≤160 字符）
-- **总预算**：3000 字符，超预算时按「最新优先」丢弃，并标注省略数量
-
-纯规则实现，不调用 LLM；策略由 `CompactionPolicy` 注入，便于按模型上下文窗口调整。
-
-## 审计与可观测性（`audit_store.py`）
-
-- **落盘**：`AuditStore` 以 JSONL 追加写入 `Path(Config().log_path).parent/"audit.jsonl"`，
-  单文件超过 5MB 轮转为 `audit.jsonl.1`（只保留一代）。
-- **健壮性**：追加失败只记日志不抛异常（审计不能影响主流程）；读取时整行 JSON 解析失败则跳过。
-- **广播**：`ToolGateway._publish_audit()` 把同一条事件以 `task.audit.<event_type>` 发到
-  `EventBus`；`policy_denied` / `security_blocked` / `cwd_jail` / `jit_auth` 用 WARNING 级别。
-  无运行中的事件循环时静默跳过（CLI 单次执行场景）。用 `create_task` 并持引用避免任务被回收。
-- **查询**：`trm log audit [--event-type X] [--agent Y] [--risk Z] [--since 1h]` 直读结构化文件；
-  文件不存在时回退到旧的主日志文本过滤，保证兼容。
-- **学习旁路**：行为采样（`_observe_behavior`）在 `_record_audit()` 开头执行、先于 `enable_audit`
-  早退，因此学习不依赖审计开关。
-
-## 事件总线（`event_bus.py`，2026-09-21 硬化）
-
-- **匹配口径只有一处实现**：`event_index.matches()`（首段分桶 + `*` 浮动匹配 1+ 段）。`EventBus.publish`
-  走 `EventIndex.match()`（按首段分桶，不再整表线性扫描），`EventBus._matches` / `EventIndex._matches`
-  都转发到它。**workflow 触发器匹配故意不同**（`WorkflowRuntime.type_matches` 先剥 `event.` / `task.`
-  前缀再 `fnmatch` —— 那是给写 YAML 的人看的宽松口径）：两套口径都由测试钉住，别顺手「统一」。
-- **失败可观测**：订阅者抛异常 → `WARNING` 日志（订阅者名 + 事件类型 + 堆栈）+ `dispatch_failures` 计数 +
-  `last_failure` 快照（事件类型 / 订阅者 / 错误 / 时间）+ 向总线广播 `event.eventbus.dispatch_failed`
-  （这条事件自己失败时只记不播，防转圈）。坏的订阅者仍然不影响别人、也不影响发事件的人（各自一个 Task）。
-- **严格模式**：`TRIMUM_BUS_STRICT=1`（或 `EventBus(strict=True)`）→ 订阅者异常抛 `TrimumError(TRM-9005)`，
-  由 `await bus.wait_for_handlers()` 收集 —— `publish` 是 fire-and-forget，异常得有地方收。默认关。
-- **观测面**：`bus.stats()`（patterns / subscribers / history / in_flight / dispatch_failures / strict）与
-  `await bus.wait_for_handlers(timeout=...)`；`LiveConsole.subscribe_events()` 按**段**判进度
-  （`task.node.started` 也算 `started`）并对重复的同一（种类, 名字）去重，安全告警另订 `security.*` /
-  `event.security.*`。
-
-- **意图驱动链已接线（2026-09-21，穿插项步骤 C）**：`WorkflowListener.submit(instruction)` 是
-  `event.transform.completed` 的**唯一生产者**，也是 `event.workflow.trigger` 的生产者之一
-  （另一条是低匹配转 Planner 后的 `event.planner.task_created`）；daemon 启动时装配 —— 这几个事件
-  从此不再是「发了没人听 / 听了没人发」。
-
-## 策略学习反馈环
-
-```
-命令执行/被拒  ->  BehaviorMonitor.record_command()/record_deny()
-                       |
-        （60s 周期）   v
-             LearningEngine.analyze()  ->  generate_ruleset()
-                       |
-                  inject_to_policy(source="learned", 去重)
-                       v
-                 PolicyEngine（仅 auto 模式自动注入）
+    Entry --> PA --> K
+    K --- S
+    K --- SB
+    K --- C
+    K --- R
+    K --- T
+    K --- M
+    K --- ST
+    K --> SB --> AG --> KERNEL
+    KERNEL -->|eBPF 事件 / 资源指标| OBS --> WA
+    WA --> PE
+    PR <--> PE
+    PE --> V --> PC --> KERNEL
+    KERNEL -->|系统状态| R
+    SI -.->|资源预算 / 执行策略反馈| K
 ```
 
-- `behavior_monitor.py` 维护 `ACTION_TYPE_COMMANDS` 单一数据源，`classify_command()` 查表；
-  `pattern_for_action_type()` 反向生成命令正则（`^(cat|less|...)\b`），供学习规则直接使用。
-- `learning_engine.py` 的规则 pattern 必须是**真实命令正则**（早期版本写的是操作类型名，
-  永远匹配不到命令行）；置信度按 `raw/0.8` 归一化后才与阈值（默认 0.85）比较。
-- 对外：`GET /api/security/learning` 查画像，`POST /api/security/learn {"inject": bool}` 触发分析，
-  CLI 对应 `trm security learning` / `trm security learn [--inject]`。
+架构上分三层，但**不要求拆成独立服务或进程**：
 
-## 子 Agent 启动器（`agent_launcher.py`）
+1. **交互层**：CLI、HTTP / JSON-RPC、Workflow 与 Event Bus。它是「人 / 外部系统」进入 Agent Runtime 的接口。
+2. **Agent Runtime 层**：Plan Agent + Runtime Kernel。所有 Agent / Tool / MCP 的执行都必须经过这里。
+3. **System Intelligence 层**：观测、分析、策略、验证、受控下发。它既读内核状态，也向内核提交经过验证的有限操作。
 
-- **脚本布局**：`agents_root()/ <agent_id>/main.py`；Linux 为
-  `~/.local/share/trimum/agents`，Windows 存在 `~/.trimum/agents` 时回退到该目录。
-- **环境变量契约**：`TRIMUM_AGENT_ID` / `TRIMUM_AGENT_TYPE` / `TRIMUM_SOCKET_PATH`。
-- **进程**：`create_subprocess_exec(sys.executable, <脚本绝对路径>, agent_id, cwd=脚本目录)`；
-  启动后 `STARTUP_GRACE_SECONDS`(0.15s) 内退出则判为失败，返回带日志尾部的
-  `error`，避免「假 RUNNING」。
-- **输出落日志**：子进程 stdout/stderr 追加写入
-  `<agents_root>/../agent-logs/<agent_id>.log`，**不用 PIPE** —— 没人读的管道写满
-  64KB 会把 Agent 卡死，短命的 CLI 进程退出时还会抛 asyncio "Event loop is closed"。
-  秒退诊断只读本次启动写入的区间（记录启动前文件偏移），同 id 反复启动不会串台。
-- **cgroup 绑定**：spawn 成功后立刻 `apply_cgroup(agent_id, pid, limits)` ——
-  Linux 走 `CgroupV2Controller`，Windows 走 `PsutilController`。
-- `terminate_process()` 负责 SIGTERM/结束，`stop_agent()` 先终止进程再删记录。
-- 无脚本时保持旧语义（`INITIALIZED`，不报错），便于渐进接入。
-- 部署模板见 `scripts/agent-template/main.py`。
+---
 
+## 2. 设计原则
 
-## 生态四层（L0–L3）
+以下原则是架构裁决依据，不是宣传语：
 
-> 战略、竞品对比与路线图（E0–E7）见 `docs/ECOSYSTEM-STRATEGY.md`。核心判断：**做生态集成器，不做生态复制品**。
+1. **Lightweight**：极致轻量，避免常驻无用进程。
+2. **On-demand**：Agent、Tool、Workflow 按需启动。
+3. **Least Privilege**：最小权限；Plan Agent 不拥有系统最高权限。
+4. **Isolation**：Agent 与 Tool 执行环境隔离。
+5. **Observability**：系统行为可观测。
+6. **Verifiability**：关键执行行为和策略可验证。
+7. **Feedback-driven**：通过运行反馈优化资源和执行策略。
+8. **Modular**：模块化，但避免过度拆分。
+9. **Local-first**：优先本地运行，减少不必要的数据外传。
+10. **Fail-safe**：AI 决策失败时，系统仍应保持安全和可控。
 
-| 层 | 内容 | 落点 |
+由这些原则派生出的硬约束：
+
+- **Plan Agent 只提计划与资源需求**，不直接做权限检查、沙箱创建、进程管理。
+- **Agent 不绕过 Runtime 获得系统权限**；所有动作经 Tool Gateway 与沙箱。
+- **LLM 推理不进入内核执行路径**；AI 分析与策略决策在用户态完成。
+- **未实现的能力不写成已实现**；不确定的实现细节标记 TBD 或 Future Design。
+- **配置优先**：路径 / 端口 / 阈值按「显式参数 > 环境变量 > 配置文件 > 默认值」解析，缺失或坏值静默走默认。
+
+---
+
+## 3. 核心一：Agent Runtime
+
+### 3.1 Plan Agent
+
+Plan Agent 是 Agent 系统的逻辑规划和调度中枢，负责：
+
+- 理解用户任务。
+- 拆分任务并规划执行流程。
+- 选择和调度合适的 Agent。
+- 为 Agent 提出资源需求。
+- 决定需要分配哪些 Tool 和 MCP。
+- 管理任务执行过程和上下文协作。
+
+**权限边界**：Plan Agent 是逻辑决策中枢，不是底层资源管理器，也不拥有系统最高权限。
+它输出「执行计划 + 资源需求 + 能力需求」，实际资源分配、权限检查、沙箱创建和进程管理由
+Agent Runtime 的确定性组件执行。
+
+当前实现：`planner_agent.py`、`transform_agent.py`、`workflow_runtime.py`、`delegation.py` 已承担部分规划/
+委派职责；**统一的 Plan Agent 接口与计划 schema 仍属 🟡 TBD**。
+
+### 3.2 Agent Runtime Kernel
+
+Kernel 是「把计划变成受控执行」的确定性管理层。逻辑职责如下：
+
+| 组件 | 职责 | 当前落点 | 状态 |
+|---|---|---|---|
+| **Agent Scheduler** | Agent 调度、生命周期、启动/停止、注册与 IPC | `agent_manager.py` / `agent_runtime.py` / `agent_launcher.py` / `agent_socket.py` / `agent_registry.py` | ✅ |
+| **Sandbox Manager** | 沙箱创建、隔离、销毁；Landlock / seccomp / cgroup 施加 | `sandbox_exec.py` / `seccomp_exec.py` / `sandbox_limits.py` / `sandbox_state.py` | ✅ |
+| **Context Manager** | 上下文分配、压缩、记忆命名空间与召回 | `context_manager.py` / `context_compactor.py` / `memory_bridge.py` / `memory_classifier.py` | ✅ |
+| **Resource Manager** | CPU / RAM / IO / 文件写入 / 网络请求预算；cgroup 与 token 计量 | `resource_controller.py`（`CgroupV2Controller` / `PsutilController` / `TokenUsageTracker`） | 🟡 无 GPU 预算；系统级竞争调度 TBD |
+| **Tool Manager** | 工具注册、发现、授权、调用、审计 | `tool_gateway.py` / `tool_dispatchers.py` / `tool_file_loader.py` / `capability.py` | ✅ |
+| **MCP Manager** | MCP Server 管理、连接、工具聚合与权限分配 | `mcp_client.py` / `mcp_registry.py` / `mcp_bridge.py` / `mcp_catalog.py` | ✅ |
+| **Storage Manager** | Agent 工作区、持久化存储、执行产物 | `paths.py` + 现有目录约定；**无统一 Storage Manager 对象** | 🟡 目录约定已存在，统一接口 TBD |
+
+**Kernel 的形态**：当前这些模块是**逻辑职责划分**，不是一个叫 `RuntimeKernel` 的类。
+是否需要引入统一门面对象、统一请求/响应 schema，属于 R1 的待决策项（见 `docs/ROADMAP.md`）。
+不要求立即拆成独立服务或进程。
+
+### 3.3 Agent 执行模型
+
+```mermaid
+sequenceDiagram
+    participant U as 用户 / 外部系统
+    participant P as Plan Agent
+    participant K as Agent Runtime Kernel
+    participant S as Agent Sandbox
+    participant A as Agent / Tool / MCP
+    participant G as Tool Gateway
+    participant L as Audit / Event Bus
+
+    U->>P: 任务 + 上下文
+    P->>P: 拆解 / 选 Agent / 估算资源与能力需求
+    P->>K: 执行计划 + 资源需求 + 能力需求
+    K->>K: 策略检查 / 能力交集 / 资源预算 / 创建沙箱
+    K->>S: 在隔离环境中启动 Agent
+    S->>A: 执行
+    A->>G: Tool / MCP 调用
+    G->>G: Policy / 审批 / 能力 / 威胁检查
+    G-->>L: 审计 + 事件
+    A-->>K: 结果 / 失败 / 资源使用
+    K-->>P: 执行结果 + 观测数据
+    P-->>U: 汇总 / 下一步
+```
+
+关键规则：
+
+- **单一执行通道**：Agent / Workflow / CLI 的工具调用统一走 Tool Gateway，不新增绕过通道。
+- **先交集后执行**：子 Agent 的能力、风险、预算、沙箱范围取父级与请求的交集，只收紧不放宽。
+- **失败不伪装**：策略拒绝、沙箱施加失败、验证失败必须显式失败，不许静默降级。
+- **执行可审计**：关键动作落审计链；观测失败不得让业务失败（审计/观测是旁路）。
+
+### 3.4 资源管理层次
+
+必须区分四个层次，不能把「Agent 预算」和「系统调度」混为一谈：
+
+| 层次 | 管什么 | 当前状态 |
 |---|---|---|
-| **L0 环境清单** | `trm env inventory` / `trm env install`（探测 + 显式安装；不自建包仓库） | `env_toolchain.py`（见「环境层与工具链安装（E3）」） |
-| **L1 协议（MCP）** | MCP client + `~/.trimum/mcp/*.json5` + 远端工具聚合 | `mcp_client.py` / `mcp_registry.py` / `mcp_bridge.py` |
-| **L2 知识（Agent Skills）** | `trm skill list/import/sync`，`SKILL.md` 分发进各宿主技能目录 | `skill_sync.py`（见「命令面契约与技能分发（E1）」） |
-| **L3 目录（workflow）** | `workflows/*.yaml`（Warp 式）→ 编译进 Workflow / TARL 引擎 | `workflow_catalog.py` / `workflow_runtime.py`（见「Workflow 执行语义（W1）」） |
+| **Agent 级预算** | 单个 Agent 的 CPU / RAM / IO / 写入 / 网络请求 / token | ✅ cgroup + `ResourceLimits` + `TokenUsageTracker` |
+| **Workflow 级预算** | 一次 workflow 的总步数、token、并发与资源上限 | 🟡 部分（`delegation.Budget` 只管父子委派） |
+| **Tool Call 级预算** | 单次工具调用的超时、输出大小、风险等级 | ✅ Tool Gateway / dispatcher 层 |
+| **系统级竞争与调度** | 全局 CPU / 内存压力、Agent 间竞争、动态调整 | ⚪ System Intelligence 的 Future Design |
 
-- **统一底座**：四层产出的能力注册进同一张生态表（`trust` / `risk` / `requires` / `source_url` 元数据），
-  一律经 ToolGateway 分层与审计；第三方来源默认 `enabled: false`。
-- **自描述能力面**：`trm commands --all/--json/--check`，让 Agent 运行时枚举全部能力。
-- **第三方 harness 只作可选导入源**，不写进默认安装，不改技术栈依赖。
+同时必须区分这些「资源」概念，不能混用：
 
-## 浏览器工具（2026-09-20 调研结论）
+- **Context**：当前模型上下文窗口内的 token。
+- **RAM**：进程常驻内存。
+- **Persistent Memory**：跨会话保存的记忆（SQLite / FTS5 / 未来向量索引）。
+- **Storage**：工作区、产物、缓存、日志、审计文件。
+- **CPU**：时间片与 cgroup 配额。
+- **GPU**：当前未纳入预算模型（⚪ TBD）。
+- **Token Budget**：LLM 输入/输出 token 配额，与 RAM/CPU 无关。
 
-- `~/.trimum/tools/browser/`（`main.py` + `_cdp.py`）是**自研纯 Python CDP 实现**，19 个 action，
-  默认 CDP 后端（连 `--remote-debugging-port=9222` 的 Chrome，保留登录态），DOMShell 仅作可选后端。
-- CLI-Anything 的 `browser`（`cli-anything-browser`）依赖 Node.js + npx + DOMShell 扩展，**不引入**；
-  `browser-cdp` 在该仓库中并不存在。证据见 `docs/CLI-ANYTHING-RESEARCH.md`。
-- 仅借鉴其约定：工具自带 SKILL.md、registry 的 `requires` 依赖前置声明字段、能力矩阵（`cli-hub can <task>`）
-  与 Workflow TARL 匹配的同构关系。
+### 3.5 安全治理
 
-## 命令面契约与技能分发（E1，2026-09-20 已实现）
+安全是 Agent Runtime 的基础能力，不是外挂：
 
-### 命令元数据契约（`src/trimum_core/cli/registry.py`）
+- 最小权限原则。
+- 沙箱隔离（Landlock / seccomp / cgroup；namespace 视场景使用）。
+- Tool / MCP 白名单与能力交集。
+- 文件系统访问控制。
+- 网络访问控制（受控范围内）。
+- 高风险操作审批（交互 confirm；非交互 fail-closed + `trm approve`）。
+- 资源限制。
+- 执行日志、审计链与带外见证。
 
-- 命令面**从 argparse 树推导**（单一事实源，不会漂移），命令模块可选声明
-  `__command_meta__ = {"<group> <command>": {summary/args/examples/aliases/hidden/requires_sudo/risk/tags}}`
-  补充 argparse 表达不了的信息。
-- 别名折叠：`add_parser(name, aliases=[...])` 会把同一 parser 注册成多个 choice，
-  采集时按 parser 身份归并，别名只出现在 `aliases` 字段，不重复计入命令面。
-- `check_commands()` 校验：未知元数据键、元数据指向不存在的命令、leaf 缺摘要或缺 handler、
-  `risk` 取值非法、别名遮蔽既有命令。`trm commands --check` 退出码非零即失败，
-  测试 `tests/test_cli_commands_meta.py` 复用同一套规则，元数据无法腐化。
+**实现边界**：Landlock、seccomp、cgroup 已有落地；BPF LSM、sched_ext 仍属 System Intelligence 的未来设计，
+不得把它们写成已实现能力。机制事实以 `docs/SANDBOX-PLAN.md` 为准，配置口径以 `docs/SANDBOX-SCOPE.md` 为准。
 
-### 技能分发（`src/trimum_core/skill_sync.py`）
+### 3.6 交互入口
 
-- 两层技能严格分离：**Agent Skills**（`SKILL.md`，给 Claude Code / Codex / Gemini CLI 等读）
-  会被分发；**trimum 技能**（`skill.yaml`，由 `SkillExecutor` 执行）只登记不分发。
-- 源根：`~/.trimum/skills` → `$TRIMUM_SKILLS_DIR` → 仓库 `skills/`（源码布局），先命中者胜。
-- 目标根：`~/.agents/skills`、`~/.claude/skills`、`~/.codex/skills`、`~/.pi/agent/skills`、
-  `~/.gemini/config/skills`、`~/.hermes/skills`、`~/.trimum/agent-skills`；可用 `$TRIMUM_SKILL_TARGETS` 覆盖。
-- 链接策略 `auto`：symlink → Windows junction（`mklink /J`，无需管理员）→ 目录复制；
-  冲突（目标已存在且不是指向本源的链接）默认拒绝，`--force` 才替换；`--prune` 清理悬空链接。
-- 判断链接需同时看 `is_symlink()` 与 `os.path.isjunction()`（Windows 上 junction 不是 symlink）。
+CLI / Shell / HTTP / JSON-RPC / Workflow 是「系统级 AI 的交互接口」，不是第三套运行时：
 
-## 宿主探测与首启引导（E6，2026-09-20 已实现）
+- CLI 通过 IPC 或 HTTP 调 daemon；daemon 内仍走同一套 Kernel / Gateway。
+- Workflow 是 Agent Runtime 的编排层，不是独立执行通道。
+- 桌面 / GUI 若存在，只是可选前端；不属于核心架构。
 
-- **不假设预装**：`src/trimum_core/hosts.py` 维护 14 个已知宿主（`.agents` / `.claude` / `.codex` / `.pi` /
-  `.gemini` / `.hermes` / `.cursor` / `.opencode` / `.kimi` / `.qwen` / `.zed` / `.kiro` / `.trae` / `.openclaw`），
-  证据三路：`TRIMUM_HOSTS` 强制、配置目录存在、PATH 上的 CLI（`TRIMUM_HOSTS_DISABLE` 反向排除）。
-- **分发目标由探测决定**：`skill_sync.default_target_roots()` 默认只返回「已存在宿主」的技能根 + trimum 自己的
-  `~/.trimum/agent-skills`（永远存在，保证零预装可跑）；`all_hosts=True` / `--all-hosts` 恢复全量预置模式。
-- **数据根单一入口**：`src/trimum_core/paths.py` 的 `trimum_home()`（`TRIMUM_HOME` 可覆盖）为将来多用户
-  「每用户一份 root」与 `/etc/trimum` 系统公共层预留唯一改点；本轮只在新模块使用，不重构既有调用点。
-  多用户边界（公共层内容与查找顺序 / 审计 `user_id` 归属 / 私钥保护三档）的方案与迁移成本见
-  `docs/MULTI-USER-BOUNDARY.md`（2026-09-21 调研，结论：**不改代码**）。
-- **身份**：`src/trimum_core/identity.py` 生成 Ed25519 密钥对（`~/.trimum/identity/identity-ed25519.key`，POSIX 下 0600）
-  与自签身份文档 `identity.json`（`schema` / `user` / `machine_id` / `public_key_fingerprint` /
-  `capabilities: {tools, max_risk, expires_at, scope}`）。`cryptography` 为**可选依赖**：缺失时状态 `skipped`，
-  不写半成品；`max_risk` 非法值直接报错（能力只收紧）。
-- **向导**：`src/trimum_core/setup_wizard.py`（步骤 `hosts` / `identity` / `toolchain` / `skills`，可 `--skip`）
-  + `trm setup` 命令；选装清单 `config/setup-catalog.yaml`（7 组 25 项，含 pacman / apt / winget 包名，
-  **只登记不安装**，实际安装留给 E3 的 `trm env install`）。状态落 `~/.trimum/config/setup.json5`。
-- **与旧向导的关系**：`trm install` 保持原有 systemd / API Key 引导，`trm install --setup` 复用新向导；
-  `trm install <name>`（官方包安装，E5）留给将来，不与向导抢名称。
-- 测试：`tests/test_hosts.py`、`tests/test_setup_wizard.py`、`tests/test_skill_sync.py::TestDynamicTargets`。
+---
 
-## MCP 接入（E2，2026-09-20 已实现：M0/M1/M2）
+## 4. 核心二：System Intelligence
 
-> 生态四层的 **L1**（`docs/ECOSYSTEM-STRATEGY.md` §3）。方案与阶段划分见 `docs/MCP-INTEGRATION-PLAN.md`；
-> M4（HTTP/SSE + 空闲回收 + cgroup + 常驻池）与 M4.5（远端工具聚合）见下节。
+System Intelligence 的目标：让 AI 不只是调用操作系统接口，而是能理解系统运行状态，并在安全约束下辅助优化操作系统。
 
-### 模块
+### 4.1 eBPF Observation / Enforcement
 
-| 模块 | 职责 |
-|---|---|
-| `src/trimum_core/mcp_client.py` | 协议层：stdio 子进程 + JSON-RPC 2.0 换行分帧；`connect` / `initialize` / `list_tools` / `call_tool` / `ping` / `close` |
-| `src/trimum_core/mcp_registry.py` | 定义与生命周期：`~/.trimum/mcp/<name>.json5` → `MCPServerDefinition`；`MCPRegistry` 加载并上报坏文件；`MCPServerPool` 懒启动 / 按名复用 / 坏连接重建 |
-| `tool_dispatchers.MCPDispatcher` | 翻译层：`mcp.tools.list` / `mcp.tools.call` → MCP 调用 → JSON 输出 + `mcp_call` 审计 |
-| `cli/commands/mcp.py` | `trm mcp list/tools/call/paths`，与网关共用同一个 dispatcher（不是第二套实现） |
+eBPF 是 System Intelligence 的重要基础设施，分两个方向：
 
-### 关键设计（M0 冻结）
+**Observation（当前主线，✅ 部分实现）**
 
-- **自研最小 client，不引入 SDK / Node**：MCP 的 stdio 分帧就是「一行一个 JSON-RPC 2.0」（与 LSP 同款），
-  `create_subprocess_exec` + `readline()` 足够；将来若 coding Agent 走 openai-agents，可只替换 transport，
-  `MCPClient` 接口不变。
-- **stderr 落日志文件**（`mcp-<name>.log`），不用 PIPE：避免写满 64KB 管道卡死，以及短命进程在事件循环关闭后
-  flush 报错 —— 与 `agent_launcher.py` 同一约定。
-- **一次一个在途请求**（每客户端一把锁）：顺序答复的服务器不会被并发打乱；超时 / 非法 JSON / 提前 EOF 一律标记
-  broken，由 pool 丢弃并重建，不允许「半死不活的流」继续用。
-- **deny-by-default**：`enabled` 缺省 `false`；`allow_tools` / `deny_tools` 为 glob 白黑名单（**deny 优先**）；
-  `trust: cloud` 额外继承默认 deny 模式（`*delete*` `*exec*` `*shell*` `*eval*` …），远端 server 不能靠改名拿到破坏性本地工具。
-- **不新开旁路**：MCP 调用与内置工具走**同一层** ToolGateway 分层（Policy → Agent 权限 → SecurityRule → JIT）+
-  审计 + 凭据脱敏；MCP 类型本就在 `_check_cwd_jail` 的跳过表里（它不碰工作目录）。
-- **审计**：每次调用记 `mcp_call` 事件（server / tool / transport / trust / 耗时 / 结果 / 参数**键名**），
-  **参数值绝不入审计**；`ToolGateway` 构造完成后把 `audit_store` / `event_bus` 回填给 dispatcher（`bind_audit`），
-  事件以 `task.audit.mcp_call` 广播。被策略拦下的调用同样留痕（duration 0，action denied）。
-- **参数与输出**：`mcp.tools.list [server]`（空 = 所有已启用）、`mcp.tools.call <server> <tool> [json-arguments]`；
-  输出一律 JSON，Agent 可直接消费。
-- **CLI 输出纯净**：`cli.main()` 现在把 structlog 诊断路由到 **stderr**（`logger.setup_cli_logging()`），
-  否则 `trm --json ...` 的 stdout 会混进 `mcp.started` 这类 INFO 行（本轮实测到的既有缺陷，已修）。
-- 测试：`tests/fixtures/mcp_echo_server.py` 是**真协议** stdio server（不是 mock），
-  `tests/test_mcp_client.py`（16）+ `tests/test_mcp_registry.py`（27）+ `tests/test_mcp_dispatcher.py`（30）。
+- CPU、内存、IO 负载（`system_monitor.py` + cgroup 指标）。
+- 进程与线程行为。
+- 系统调用和资源访问（`bpf_guard.bpf.c` 观测 `sys_enter_bpf`，`exec_guard.bpf.c` 观测 `sys_enter_execve`）。
+- 网络活动（规划中）。
+- Agent 与 Tool 的执行行为（审计 / Event Bus / eBPF 事件）。
+- 系统性能事件。
 
-## MCP 策展导入器（M3，2026-09-20 已实现）
+**Enforcement（受控、渐进）**
 
-> 生态四层 **L1 的入口**（姿势 B，`docs/MCP-INTEGRATION-PLAN.md` §5/§5.1）：把上游 4,000+ 条
-> `awesome-mcp-servers` 压成一份**候选清单**，让人只审「能用的那一小撮」。
+- cgroup 资源控制：✅ 已通过 `resource_controller.py` 落地。
+- BPF LSM 安全策略：⚪ 未来设计。
+- sched_ext 调度机制：⚪ 未来设计。
+- 与其他内核控制接口协作：⚪ TBD。
 
-### 模块
+**边界**：eBPF 不只是传感器，也可以参与受控的系统行为管理；但 **LLM 推理不得放入内核执行路径**。
+AI 分析与策略决策在用户态完成，内核侧只执行经过验证的有限程序。
 
-| 模块 | 职责 |
-|---|---|
-| `src/trimum_core/mcp_catalog.py` | 解析 README 快照 → 条目分类（语言 / 范围 / 系统 / 官方 / 分发）→ 红线筛选 → 渲染候选清单；只读输入、离线、确定性输出 |
-| `config/mcp-catalog.yaml` | 产物（tracked）：232 条候选，按分类分组，条目一律 `reviewed: false` |
-| `cli/commands/mcp.py` | `trm mcp catalog import [--dry-run\|--force\|--limit\|--category …]`、`trm mcp catalog list [--unreviewed\|--category\|--dist\|--lang]` |
+当前 eBPF 实现的完整链路：`bpf/*.bpf.c` → 特权 helper（`bpf_helper*.py`）→ `bpf_loader.py`（libbpf/ctypes）
+→ ring buffer → `/run/trimum-bpf/bpf-alerts.jsonl` → `bpf_audit.py` → `security.ebpf_alert` 审计/事件。
+helper 只接受 `bpf.load` / `bpf.unload` / `bpf.stats` / `bpf.tail` 四个动词，不提供命令面。
 
-### 关键设计
+### 4.2 Workload Analysis Engine
 
-- **候选 ≠ 生效**：导入器**不写** `~/.trimum/mcp/`、不启动任何 server、不联网；产物里每条都是 `reviewed: false`，
-  启用仍走 §4.2 的文件化注册（deny-by-default 不破）。
-- **红线可解释**：拒绝原因按 `section:*` / `language:*` / `dist:*` 计数写进产物摘要 —— 4,118 条 → 232 条候选的
-  差额逐项可查（ts 2,219 / 描述无安装方式 1,356 / npx+npm 16 / brew 7 / 非 server 小节 27 …），不静默丢弃。
-- **确定性**：无时间戳、稳定排序（官方 → 本地 → 分类 → repo），同输入同字节；`--force` 重导入按 `repo`
-  保留人工写下的 `reviewed` / `name` / `note`，审核成果不会被下一次刷新冲掉。
-- **名称直接可用**：`name` 满足 `^[a-z0-9][a-z0-9_-]{0,63}$`（与 `mcp_registry.NAME_PATTERN` 同规则），
-  重名自动退避（`mcp-server` → `other-mcp-server` → `…-2`），条目可原样落成 `<name>.json5`。
-- **写入策略**：默认拒绝覆盖已存在的清单，`--force` 才写（写前先读旧文件做 carry-over）；落盘强制 LF
-  （tracked 文件，Windows 检出不得变 CRLF）。
-- 测试：`tests/test_mcp_catalog.py`（52）—— 离线 fixture（`tests/fixtures/awesome-mcp-sample.md`）
-  + 真实快照（`tmp/research/awesome-README.md`，缺失时自动 skip）。
-## MCP 远端工具聚合（M4.5，2026-09-20 已实现）
+负责：
 
-> E2 差距表（`docs/MCP-INTEGRATION-PLAN.md` §2.2）里的第 ③ 项：远端工具以 `<server>__<tool>`
-> 并进 `ToolRegistry`，Agent 从一张表里就能看到「本地 + 远端」全部工具，不必先 `mcp.tools.list`
-> 再照抄参数去 `mcp.tools.call`。
+- 收集和分析系统负载。
+- 识别工作负载类型。
+- 分析 Agent 和 Tool 的资源使用情况。
+- 发现资源竞争和性能瓶颈。
+- 为策略选择提供系统状态依据。
 
-### 模块
+**状态：⚪ Future Design**。当前只有 `system_monitor.py`（阈值告警）、`resource_controller.py`（用量采样）
+与 `behavior_monitor.py`（安全行为基线）这几块「原材料」，还没有统一的工作负载分类/瓶颈分析引擎。
 
-| 模块 | 职责 |
-|---|---|
-| `src/trimum_core/mcp_bridge.py` | 命名（`flat_name` / `split_name`）、定义指纹（`fingerprint`）、缓存（`MCPToolIndex`：`load` / `record` / `entries` / `forget` / `prune`，原子写） |
-| `tool_gateway.ToolRegistry` | `load_mcp_tools()` 读缓存并把聚合条目注册成 `ToolType.MCP_TOOLS_CALL` 定义；`mcp_binding()` / `list_mcp_tools()` 给出处；`register()` / `unregister()` 会撤掉同名的聚合来源 |
-| `tool_dispatchers.MCPDispatcher` | 每次成功 `tools/list` 顺手 `record()`；`mcp.tools.call` 接受聚合名（`_split_call`） |
-| `api_server.start_mcp()` | **一个** `MCPToolIndex` 实例同时交给 dispatcher（写）与 `ToolRegistry`（读）；启动时 `prune_mcp_index()` 对一次账 |
-| `mcp_registry.definitions_readable()` | 清缓存前分清「目录不存在」（= 一个都没配，可清）与「目录在但列不出来」（= 不知道，别动） |
-| `cli/commands/tool.py` | `trm tool list [--mcp]` 标注 `source: local\|mcp` 与 `mcp.{server,tool,transport,trust}` |
+### 4.3 Policy Repository
 
-### 关键设计
+系统策略仓库，计划沉淀：
 
-- **缓存，不是实时拉取**：M4 之后 MCP server 是懒启动 + 空闲回收的，「列远端工具」若得先把每个
-  server 拉起来，就等于把懒启动整个抵消掉。所以 `~/.trimum/mcp-tools.json`（`TRIMUM_MCP_INDEX`
-  可覆盖）只记「上一次成功 `tools/list` 的结果」，**读它不启动任何进程**。
-- **命名与歧义**：`<server>__<tool>`，`split_name` 按**第一个** `__` 切（工具名里再含 `__` 不影响）。
-  服务端名字本身允许 `__`，所以调用时由注册表裁决：`args[0]` 是个真存在的 server 就走经典两参数
-  解释，否则当聚合名 —— `mcp.tools.call a__b c` 不会把 `a__b` 误拆成 `a` + `b`。
-- **失效**：条目带定义指纹（transport / command / args / env **键名** / url / header 键名 / trust /
-  allow_tools / deny_tools / enabled）。`record()` 整份替换该 server（撤掉的工具不会留成僵尸名字），
-  `forget()` 清一个 server，`prune()` 清「定义已经不存在」的 server。「不存在」包括**目录整个被删**（那时每一条都是幽灵条目）；只有目录
-  在、却列不出来（权限 / IO）才算「不知道有哪些 server」而不动缓存。`reap()` 回收进程时**不动**缓存：
-  清单是信息不是许可证，调用仍然走 `mcp.tools.call` 的完整分层与审计。
-- **密钥不入盘**：指纹只取 `env` / `headers` 的**键名**，测试断言密钥值不出现在缓存文件里。
-- **名字冲突**：聚合名撞上本地工具时本地工具赢（显式注册 > 缓存条目），并记 `skipped` 计数；
-  本地工具被一条缓存盖掉属于事故，远端工具少一个入口只是少一个入口。
-- **测试隔离**：`tests/conftest.py` 把 `TRIMUM_HOME` 指到临时目录，整套测试不再写真实 `~/.trimum`
-  —— 顺带修掉了 3 个长期因沙箱拒绝写宿主 home 而失败的用例。
-- 测试：`tests/test_mcp_bridge.py`（93）。
+- 已有调度策略。
+- eBPF 程序和调度器。
+- 工作负载特征。
+- 策略适用条件。
+- 历史执行结果。
+- 性能测试数据。
 
-## 环境层与工具链安装（E3，2026-09-20 已实现）
+**原则**：策略优化优先复用已有策略，而不是每次都让模型从零生成。
+**状态：⚪ Future Design**。现有 `config/policy.yaml`、威胁剧本、eBPF 程序清单是**前身**，不是完整的策略仓库。
 
-> 生态四层的 **L0**（`docs/ECOSYSTEM-STRATEGY.md` §3）。定位：**软件生态交给发行版** ——
-> trimum 不自建包仓库，只回答「机器上有什么 / 能不能装 / 装的时候会执行什么」。
+### 4.4 Policy Engine
 
-### 模块（`src/trimum_core/env_toolchain.py`）
+负责：
 
-- **包管理器表**：每个管理器声明探测命令（`probe`）、列举已装（`list_cmd`）、安装命令（`install_cmd`）、
-  是否需要 `sudo`、适用平台；`INSTALLABLE_IDS` 决定「trimum 可代装」的集合（`mise` 不在其中）。
+- 根据工作负载分析选择策略。
+- 调整已有策略参数。
+- 必要时修改或组合已有策略。
+- 在适当情况下生成新策略。
+- 根据系统反馈进行策略优化。
 
-| 管理器 | 平台 | 探测 | 列举已装 | 安装 | sudo |
-|---|---|---|---|---|---|
-| `pacman` | linux | `pacman --version` | `pacman -Qq` | `pacman -S --noconfirm` | 是 |
-| `apt` | linux | `apt-get --version` | `dpkg-query -W -f ...` | `apt-get install -y` | 是 |
-| `dnf` | linux | `dnf --version` | `rpm -qa` | `dnf install -y` | 是 |
-| `zypper` | linux | `zypper --version` | `rpm -qa` | `zypper --non-interactive install` | 是 |
-| `apk` | linux | `apk --version` | `apk info` | `apk add` | 是 |
-| `brew` | darwin/linux | `brew --version` | `brew list -1` | `brew install` | 否 |
-| `winget` | win32 | `winget --version` | `winget list` | `winget install -e --id` | 否 |
-| `scoop` | win32 | `scoop --version` | `scoop list` | `scoop install` | 否 |
-| `mise` | 全平台 | `mise --version` | `mise ls` | **不代装**（只管运行时版本，只登记） | 否 |
+**状态：⚪ Future Design**。注意：现有 `policy_engine.py` 是 **Agent Runtime 的安全策略引擎**
+（allow / confirm / deny），不是 System Intelligence 的调度策略引擎，两者不要混名。
 
-- **顺序即优先级**：`KNOWN_MANAGERS` 的顺序决定 `inventory()` 的 `preferred_manager`
-  （pacman → apt → dnf → zypper → apk → brew → winget → scoop）。
-- **解析**：`parse_installed()` 按管理器的输出语言解析（dpkg 的 `name:arch` 去后缀；pacman / brew 一行一名；
-  **winget 按列对齐切分**取 `Id` 列 —— winget 的 Name 列可能含空格，不能用 `split()[1]`）。
-- **单遍探测**：`inventory(statuses=...)` 复用调用方已跑过的探测结果，`trm env install` 因此只探测一遍包管理器
-  （有测试断言 `detect_managers` 只被调用一次）。
-- **sudo 策略**：`build_command()` 在管理器需要且当前进程**不是 root** 时加 `sudo`；显式 `use_sudo=` 优先
-  （跨平台单测依赖这个显式开关）。`commands_for()` 决定调用次数：**winget 一包一条命令**，其余合并成一条。
-- **计划与执行分离**：`plan_install()` 只产出「确切命令 + `already_installed` / `unavailable` / `unknown` 三类清单」；
-  `run_install()` 是**唯一的执行点**，`dry_run=True` 时连 runner 都不调用。
+### 4.5 Execution Verifier
 
-### 命令（`src/trimum_core/cli/commands/env.py`）
+Execution Verifier 是 System Intelligence 的安全边界，负责：
 
-- `trm env inventory [--manager ID] [--catalog PATH]` —— **risk: low**，只读：管理器现状 + 目录覆盖（已装 / 可选 / 选装记录）。
-- `trm env install <name>... [--manager ID] [--dry-run] [--yes] [--catalog PATH]` —— **risk: high，requires_sudo**：
-  未知条目或该管理器无对应包 → 直接失败；否则打印计划与命令，确认后执行。
+- eBPF Verifier 检查。
+- 静态分析。
+- 运行前验证。
+- 隔离环境测试。
+- 性能基准测试。
+- 部署前策略检查。
+- 运行时监控。
+- 异常熔断和策略回滚。
 
-### 安装红线（契约，写进代码与测试）
+**硬约束**：AI 生成的内核策略绝不能未经验证直接部署。
+**状态：🟡 部分实现**。当前已有内核 verifier、程序 sha256 清单校验、uid 门、沙箱隔离；
+静态分析、基准测试、运行时熔断与自动回滚仍是 TBD。
 
-| 红线 | 落点 |
-|---|---|
-| 不自建包仓库 | 只调系统包管理器；`config/setup-catalog.yaml` 只登记包名 |
-| 探测与清单只读 | `detect_managers()` / `inventory()` 不做任何写操作（risk: low） |
-| 安装必须显式确认 | 交互确认，或非交互 `--yes`；否则 abort（退出码 1） |
-| `--dry-run` 不执行 | `run_install(dry_run=True)` 不调用 runner（有测试） |
-| 幂等 | 已装条目不再重装、不弹确认、退出码 0（不算失败） |
-| 错误不吞 | 探测失败不致命；安装逐条返回 `returncode` / `error`（含 sudo 无 tty） |
-| 与 `trm setup` 的分工 | 向导**只登记选装**、不安装；安装是显式动作，两者共用同一份 `config/setup-catalog.yaml` |
+### 4.6 Privileged Controller
 
-- 测试：`tests/test_env_toolchain.py`（34 项：探测 / 解析 / 计划 / 执行 / 清单 / CLI）。
+负责将通过验证的策略部署到系统。AI 不直接拥有任意内核控制权限；应由受控的用户态特权组件执行有限的、
+经过授权的系统操作。
 
-## 广接入：生态导入器（E4，2026-09-20 已实现）
+**状态：🟡 部分实现**。当前 `trimum-bpf-helper` 是一个受限特权控制器，只做四个 eBPF 动词，
+带 `CAP_BPF` + `CAP_PERFMON`、uid 校验、sha256 校验、只读程序目录；它不是通用内核控制接口。
 
-> 生态四层的入口（`docs/ECOSYSTEM-STRATEGY.md` §4 缺口 4 / 6 / 7）。一句话：**生态的东西都从这三个
-> 导入器进来，但一律落到「同一张表 + 同一套策略 + 同一份审计」**，第三方默认不启用。
-> 计划与切分见 `docs/E4-PLAN.md`。
+### 4.7 当前实现边界汇总
 
-### 模块
-
-| 模块 | 职责 |
-|---|---|
-| `src/trimum_core/ecosystem.py` | 统一条目 schema（`EcosystemEntry`：`trust` / `risk` / `requires` / `source_url` / `author` / `origin` / `enabled`）+ 分级器 `assess_risk` + 校验器 + 三个导入器共用的 `ImportRefused` |
-| `src/trimum_core/cli_adapter.py` | 通用 CLI 适配器：`--help` 探测 → 解析 → 定级 → 落 `tool.json5` + 薄壳 `main.py`；薄壳调 `generic_executor` |
-| `src/trimum_core/workflow_catalog.py` | Warp 式目录 YAML → 逐条校验 → 编译 `WorkflowDefV2` → `~/.trimum/workflows/<id>/workflow.yaml` |
-| `src/trimum_core/skill_import.py` | 技能导入：本地目录 / git URL → 校验 frontmatter → 复制进 `~/.trimum/skills/` |
-| `src/trimum_core/tool_file_loader.py`（改） | manifest 支持 `enabled`（缺省 true，兼容既有工具）；`set_manifest_enabled` 逐行就地改（保留 JSON5 注释）；`list_manifests`；`scan_tools(include_disabled=)` |
-| `src/trimum_core/tool_gateway.py`（改） | `load_all()` 只 import `enabled` 的 `main.py`，未启用记 `tool_file_loader.skipped_not_enabled` |
-| `src/trimum_core/cli/_ask.py` | 唯一的「问人」入口；非 TTY 直接取默认值（无人值守不挂死） |
-
-### 风险分级（`ecosystem.assess_risk`）
-
-输入是「命令里出现的词」，输出是 `(级别, 理由列表)` —— 每条理由写清是哪个词触发，**dry-run 直接展示，
-用户能反驳**：
-
-| 级别 | 触发 | 例 |
+| 能力 | 状态 | 说明 |
 |---|---|---|
-| `critical` | 破坏性形态（子串匹配整段文本） | `mkfs` / `dd if=` / `wipefs` / `rm -rf /` |
-| `high` | 变更系统或不可逆 | `install` / `remove` / `rm` / `kill` / `prune` / `push` / `format` / `sudo` |
-| `medium` | 有副作用但不破坏 | `run` / `start` / `create` / `set` / `clone` / `apply`；`--force` / `-y` 这类免确认旗标 |
-| `low` | 纯读 | `list` / `show` / `status` / `log` / `read` / `diff` |
-| 兜底 `medium` | 没有任何证据 —— **不猜低**（猜低会让第三方命令悄悄变成"低风险"），也不夸大成 high | 命令名不在任何动词表里 |
+| eBPF 观测链路（helper → loader → 审计回灌） | ✅ | 真机已跑通；只有观测，没有策略执行 |
+| cgroup 资源控制 | ✅ | `CgroupV2Controller`；Agent 级预算 |
+| 系统阈值告警 | ✅ | `SystemMonitor`；CPU / 内存 / 磁盘 / load |
+| 工作负载分类 / 瓶颈分析 | ⚪ | 没有统一引擎 |
+| 策略仓库 | ⚪ | 只有零散策略文件 |
+| 调度策略选择 / 生成 | ⚪ | 没有实现 |
+| 策略静态分析 / 基准 / 自动回滚 | ⚪ | 没有实现 |
+| BPF LSM / sched_ext | ⚪ | 没有实现 |
+| 通用特权控制器 | ⚪ | 只有受限制的 bpf helper |
 
-**声明不能降级**：workflow YAML 里写 `risk: low`、命令里有 `prune` 时，导入按 `high` 处理并给出理由
-（`max_risk(声明值, 探测值)`）。
+---
 
-### 三个导入器共有的红线（写进代码与测试）
+## 5. 两个核心的闭环
 
-| 红线 | 落点 |
-|---|---|
-| 导入不执行 | 适配器只跑 `--help`；workflow / skill 只读文本、只写文本，**绝不 import、绝不执行**导入物 |
-| `--dry-run` 不落盘 | 三个导入器同一条规则，测试逐条断言目标目录没有新增 |
-| 非交互要 `--yes` | 与 `env` / `mcp` / `install` 一致：非 TTY 直接 abort（退出码 1） |
-| 第三方默认不启用 | CLI 导入产物 `enabled: false`，要显式 `trm tool enable`；workflow / skill 是**惰性文本**（不点 `run` / 不被 harness 读到就不发生任何事），故 `enabled: true` |
-| 不覆盖已有 | 目标已存在即拒绝，除非显式 `--force`；**先全量检查再写**，不做半截导入 |
-| 不引入新依赖 | YAML 用已有 PyYAML；git 源走系统 `git clone --depth 1`，失败即报错，不静默降级 |
+Agent Runtime 与 System Intelligence 不是两个互不相关的系统。它们通过三个共同维度形成闭环：
 
-### 运行期仍然只有一条路
+### 5.1 资源管理
 
-导入进来的东西**不新增执行通道**：工具仍走 `main.py` 契约 → ToolGateway 六层 + SecurityRule + 审计；
-`generic_executor` 自己再兜一层白名单（子命令必须在探测集合里、旗标必须在 `allowed_flags` 里、二进制用
-`shutil.which` 现算）—— **手改 manifest 也绕不过这一层**。
+Agent Runtime 提出 Agent 和 Tool 的资源需求；System Intelligence 观察全局负载，分析资源竞争，辅助调整调度策略。
 
-### 三个真实缺陷（本轮踩到并修掉）
+### 5.2 安全治理
 
-1. **`subprocess.run(capture_output=True)` 在 Windows 上会永久挂死**：被探测 CLI 可能留下仍持有继承写句柄的
-   后台孙进程（分页器 / 凭据助手），而 Windows 上 `subprocess.run` 超时后会 `kill()` 再**无超时地**
-   `communicate()` 一次，于是永不 EOF 的管道把探测卡死（实测 `trm tool import-cli git` 挂住）。
-   修法：输出走**临时文件**，不用管道；`stdin=DEVNULL` 防分页器等输入。
-2. **默认根写死 `Path.home()`**：`tool_file_loader.list_manifests` / `WorkflowDefV2.load_from_dir` /
-   `skill_sync.default_source_roots` 三处都从 `Path.home()/".trimum"` 起步，会绕开 `TRIMUM_HOME`
-   —— 表现为「导入了却看不见」。三处统一走 `paths.trimum_path(...)`。
-3. **`--help` 的输出只用来描述能力**：解析不到子命令就**不写**（而不是编一个）。宁可少登记。
+Agent Runtime 管理 Agent 沙箱和工具权限；System Intelligence 观察实际系统行为，并通过受控机制执行系统级安全策略。
 
-### 已知取舍
+### 5.3 动态控制
 
-- **不做 `--help` 的语义理解**：解析是启发式的；`Commands:` / `命令：` 类标题块里才取子命令。
-- **CLI 适配器不自动接进 ToolGateway 分发器**：生成的工具走既有 `main.py` 契约，不新增 `ToolType`。
-- **不做 workflow 的远程目录**：`import` 只接受本地路径或 git URL，不做「订阅 / 自动更新」（那是 E5 的事）。
-- **skill 导入不做依赖解析**：只搬文件 + 校验 frontmatter，技能之间的引用留给后续。
-- ~~**`WorkflowDefV2.to_workflow_definition()` 不搬运 `instruction`**~~：E4 只在验收「导入 + 校验 +
-  能被 `trm workflow list` 列出」时把这条留给了后续一轮，**W1（2026-09-20）已修**——
-  见下一节「Workflow 执行语义（W1）」。
+Agent Runtime 管理 AI 工作负载；System Intelligence 根据系统状态反馈资源和执行策略；
+Agent Runtime 根据反馈调整后续任务的资源需求和执行方式。
 
-## Workflow 执行语义（W1，2026-09-20 已实现）
-
-> 计划与语义决策见 `docs/WORKFLOW-EXECUTION-PLAN.md`。E4 遗留的「v2 定义跑不起来」在这一轮闭环：
-> 定义齐全、执行缺席的那条线，现在接上了 Event Bus。
-
-### 模块
-
-| 模块 | 职责 |
-|---|---|
-| `src/trimum_core/workflow_runtime.py`（新） | `WorkflowRuntime`：注册表 + Event Bus 触发器 + 驱动执行 + 运行记录；`agent_type: shell` 处理器走 ToolGateway |
-| `src/trimum_core/workflow_engine.py`（改） | `to_workflow_definition()` 搬运 `instruction` / `input_data` / `trigger_event`；删掉 `return` 之后那段死代码与坏掉的模块级 `start_v2`；agent 节点缺 driver 时给可行动的错误 |
-| `src/trimum_core/threat_workflows.py`（改） | 16 条威胁响应剧本 → `WorkflowDefV2`（`builtin_workflows()`）：命令式步骤 `agent_type: shell`，散文式步骤 `trm-agent` |
-| `src/trimum_core/api_server.py`（改） | daemon 启动时建运行时并 `start()`；`GET /api/workflows`、`GET /api/workflows/runs` |
-| `src/trimum_core/cli/commands/workflow.py`（改） | `list --all` / `run [--event --payload --timeout --dry-run]` / `enable`；`run --event` 只对点名的 workflow 负责；2026-09-21 加 `submit "<指令>"`（意图驱动链的入口，命令面 78） |
-| `src/trimum_core/workflow_listener.py`（2026-09-21 接线） | `WorkflowListener`：意图驱动链 —— `submit()` → 变换 Agent → `event.transform.completed` → 三段式决策（高 → `workflow.trigger`；中 → 确认；低 → Planner）；`output_type: shell` 直接走 `ToolGateway`。daemon 启动装配，状态挂 `ServerState.workflow_listener` |
-
-### 执行路径
-
-```
-Event Bus ──(event_type + condition 命中)──> WorkflowRuntime
-                                              │ 编译 step → Node/Edge
-                                              ▼
-                                        WorkflowEngine.run()
-                                              │
-                        handler="shell" ──────┴──── handler 带 agent_type
-                                │                          │
-                        ToolGateway.execute()      WorkflowEventDriver
-                    （策略/风险/审计/脱敏/cwd jail）      （子 Agent 进程）
+```mermaid
+flowchart LR
+    AR[Agent Runtime] -->|Agent / Tool 执行| K[Linux Kernel]
+    K -->|eBPF 事件与资源指标| SI[System Intelligence]
+    SI -->|负载分析 / 策略选择 / 验证| PC[受控系统控制器]
+    PC --> K
+    K -->|系统状态反馈| AR
+    SI -->|资源与策略建议| AR
 ```
 
-### 红线（写进代码与测试）
+这不是严格的单向调用链，而是双向协作的控制闭环。
 
-| 红线 | 落点 |
+---
+
+## 6. 现有模块 → 新架构归属
+
+| 原有设计 / 模块 | 新归属 | 当前落点 | 状态 |
+|---|---|---|---|
+| Plan Agent | Agent Runtime | `planner_agent.py` / `transform_agent.py` | 🟡 |
+| Agent Scheduler / Agent Pool | Agent Runtime Kernel | `agent_manager.py` / `agent_runtime.py` / `agent_launcher.py` | ✅ |
+| Event Bus | Agent Runtime | `event_bus.py` / `event_index.py` | ✅ |
+| Workflow Engine | Agent Runtime | `workflow_engine.py` / `workflow_runtime.py` / `workflow_listener.py` | ✅ |
+| Agent Registry | Agent Runtime | `agent_registry.py` | ✅ |
+| TARL | Agent Runtime（上下文协议） | `tarl_parser.py` | ✅ |
+| Tool Gateway | Agent Runtime（Tool Manager） | `tool_gateway.py` / `tool_dispatchers.py` | ✅ |
+| MCP 管理 | Agent Runtime（MCP Manager） | `mcp_client.py` / `mcp_registry.py` / `mcp_bridge.py` | ✅ |
+| Context / Memory | Agent Runtime（Context Manager） | `context_manager.py` / `context_compactor.py` / `memory_bridge.py` | ✅ |
+| Landlock / seccomp / cgroup | Agent Runtime 安全治理（Sandbox Manager） | `sandbox_exec.py` / `seccomp_exec.py` / `resource_controller.py` | ✅ |
+| eBPF | System Intelligence | `bpf/` / `bpf_helper*.py` / `bpf_loader.py` / `bpf_audit.py` | 🟡 观测已实现，强制执行 TBD |
+| Workload Analysis | System Intelligence | 无统一引擎 | ⚪ |
+| Policy Repository | System Intelligence | 零散策略文件 | ⚪ |
+| Execution Verifier | System Intelligence | 内核 verifier + sha256 + 沙箱 | 🟡 |
+| Shell / 桌面交互入口 | 系统级 AI 的交互接口 | CLI / IPC / HTTP / Workflow | ✅ |
+
+**注意**：以上是逻辑归属，不代表所有模块都必须独立部署。保留有价值的技术方案，
+但不为了兼容旧架构而保留不必要的抽象。
+
+---
+
+## 7. 核心 / 可选扩展 / 未来规划 / 已废弃
+
+### 7.1 核心架构
+
+- Agent Runtime：Plan Agent、Runtime Kernel、沙箱、上下文、资源、工具、MCP、存储、Workflow。
+- System Intelligence：eBPF 观测、工作负载分析、策略仓库、策略引擎、执行验证、受控执行。
+- 两者的资源 / 安全 / 反馈闭环。
+
+### 7.2 可选扩展
+
+- 生态四层 L0–L3（环境清单、MCP、Agent Skills、workflow 目录）。
+- 编码智能体（`trm exec --code`）。
+- 官方分发渠道与包信任模型。
+- 多用户边界。
+- 浏览器工具、桌面 / GUI 前端。
+
+这些能力仍有价值，但不是 trimum 的核心创新叙事；文档中应明确标注「可选扩展」。
+
+### 7.3 未来规划
+
+- Workload Analysis Engine、Policy Repository、Policy Engine。
+- 策略静态分析、基准测试、自动回滚。
+- BPF LSM、sched_ext 等受控强制执行。
+- GPU 资源预算与系统级竞争调度。
+
+### 7.4 已废弃 / 不再采用
+
+- 把 trimum 做成「完整 Linux 发行版」。
+- 以桌面美化和桌面环境作为核心卖点。
+- 大规模插件生态 / 独立知识管理系统 / 独立系统 Agent 作为主线。
+- 为兼容旧架构而保留的重复抽象（例如把每个逻辑职责都拆成独立常驻服务）。
+
+历史设计不删除价值事实，但不再作为架构主线。
+
+---
+
+## 8. 文档地图与真源
+
+| 主题 | 真源 |
 |---|---|
-| 不新增执行通道 | 工作流的 shell 与 `trm exec` 走**同一个** ToolGateway：策略 / 风险分级 / SecurityRule / 审计 / 凭据脱敏 / 行为基线照常；流量标记 `SourceType.WORKFLOW` |
-| 失败不伪装 | 网关拒绝、非零退出、缺 `instruction` → 节点 `FAILED`、workflow `failed`；「跑失败」绝不记成成功 |
-| 命令不拆分 | `instruction` 整条进 `args=[command]`（dispatcher 原样 join 回去）；shlex 拆分再拼会吃掉引号，`ssh host "systemctl restart x"` 会被拆坏 |
-| 触发器不猜 | 空 `trigger.event_type` = 只能手动跑；条件表达式用受限 `eval`（空 `__builtins__`），写错按「不通过」 |
-| 事件环路有熔断 | 事件驱动下同一 workflow 每 `RUN_WINDOW_SECONDS`(10s) 最多自动跑 `MAX_RUNS_PER_WINDOW`(20) 次，超限发 `event.workflow.throttled` 并跳过；手动 `run` 不受限 |
+| 总体架构 | 本文 |
+| Agent Runtime 详细设计 | `docs/architecture/agent-runtime.md` |
+| System Intelligence 详细设计 | `docs/architecture/system-intelligence.md` |
+| 路线图 | `docs/ROADMAP.md` |
+| 安全治理 | `docs/SECURITY.md`、`docs/SECURITY-DEFENSE-PLAN.md` |
+| 沙箱机制 | `docs/SANDBOX-PLAN.md`、`docs/SANDBOX-SCOPE.md` |
+| 上下文协议 | `docs/TARL-SPEC.md` |
+| 记忆 | `docs/MEMORY-ARCH.md` |
+| 工具开发 | `docs/TOOL-DEVELOPER-GUIDE.md` |
+| MCP（可选扩展） | `docs/MCP-INTEGRATION-PLAN.md` |
+| 生态四层（可选扩展） | `docs/ECOSYSTEM-STRATEGY.md` |
+| 编码智能体（Agent Runtime 应用） | `docs/CODING-AGENT-PLAN.md` |
+| 包渠道 / 分发 | `docs/PACKAGE-CHANNEL-OPS.md` |
+| 多用户边界 | `docs/MULTI-USER-BOUNDARY.md` |
+| 运维 | `docs/OPERATIONS.md`（本地私有，不入库） |
+| 进度 / 待办 | `STATUS.md` / `TODO.md`（本地私有，不入库） |
 
-### 语义取舍
+---
 
-| 取舍 | 说明 |
-|---|---|
-| step 之间不串行等待 | 「监听器 → 执行组」的字面语义；要串行就把任务写进同一个 `execute` 组（组内是串行 DAG） |
-| 同一 step 已在跑 → 跳过 | 防止「事件风暴 / 自我触发」滚成死循环；跳过时发 `event.workflow.skipped`（`reason=already_running`）。收尾事件 `workflow.finished` 在运行仍算「在跑」时发出，所以「监听自己的 finished」的 workflow 不会自我续命 |
-| 内置剧本按性质分档武装 | **取证类 8 条**（`auto_trigger: True`）事件来了自动跑，**处置类 8 条**（含 `kill` / `firewall-cmd` / 快照写入 / 改基线）不武装 —— 处置要人点，不做「半自动处置」；`trm workflow enable <id>` 落盘成用户自己的文件后照旧常驻触发 |
-| 自动触发只跑取证步骤 | 事件触发的运行里，非取证步骤 `skipped`（`task.node.skipped`，`reason=auto_run_blocked:<kind>`）**且不派子 Agent**：散文步骤的子 Agent 会干什么不由剧本决定，所以「只读剧本」≠「只读运行」；人工 `run` 不受限。判据 `threat_workflows.step_kind()`（看不懂的散文当处置） |
-| 失败节点阻断后继 | 沿用引擎 DAG 语义（后继要求前驱 `completed` / `skipped`）——响应剧本前一步失败时不该继续动手 |
-| 运行记录只在内存 | 环形 200 条，进程重启即丢；`trm workflow status/log` 仍是桩，持久化留给后续一轮 |
-| 事件广播、退出码收窄 | 一次事件会触发**所有**命中的 workflow（运行时按 workflow 各自判定，不做独占）。但 `trm workflow run <id> --event ...` 的退出码只认 `<id>` 自己的运行，其余进 `other_triggered`；点名的那份没被命中而别的被命中 → 退出码 1 并回报实际触发到的 id |
-| 确认缺位 = 拒绝 | `WorkflowListener._request_confirm()` 在**没有**确认回调时返回「拒绝」（`listener.no_confirm_callback_denied`），此前是默认放行 —— 「没装确认通道」不能悄悄变成「自动批准」；中匹配（0.4 ~ 0.7）走的正是这条路 |
-| 散文式步骤会明确失败 | 内置剧本里「比对上次 hash 基线」这类步骤编译成 `trm-agent`，没有 driver / 没装 Agent 脚本时节点 FAILED 并说明原因，**不假装成功** |
+## 9. 待决策 / TBD
 
-## 官方分发渠道（E5，2026-09-21 已实现）
+以下问题不在本次文档重构中擅自决定，留给后续设计或人工裁决：
 
-> 信任模型与落地口径见 `docs/ECOSYSTEM-STRATEGY.md` §7（内置根 / `.trmpkg` 校验链 / 安装 ≠ 授权）、
-> §7.1（来源 + 身份 + 能力三层职责）、§7.4（包格式）、§7.5（本片）、§7.8（多用户边界）；多用户明细见 `docs/MULTI-USER-BOUNDARY.md`。
+1. **Runtime Kernel 是否引入统一门面对象**：现有模块按职责分散；是否需要一个 `RuntimeKernel` 统一入口与请求 schema？
+2. **Plan Agent 的输出契约**：计划 schema、资源需求表达、能力需求表达、失败回退策略。
+3. **Storage Manager 的边界**：工作区、产物、缓存、审计、记忆分别归谁管；是否需要统一配额。
+4. **系统级调度接口**：System Intelligence 向 Agent Runtime 反馈的指标与建议格式。
+5. **策略仓库的存储形态**：文件、SQLite、还是版本化目录；策略来源与签名如何记录。
+6. **Execution Verifier 的验证等级**：哪些策略必须静态分析 + 基准 + 隔离测试，哪些可以只过内核 verifier。
+7. **特权控制器的通用化边界**：是否扩展 bpf helper，还是另起一个受控 controller；能力如何最小化。
+8. **GPU / 网络 / 存储 IO 的预算模型**：当前未纳入或只有部分采样。
 
-### 模块
+---
 
-| 模块 | 职责 |
-|---|---|
-| `src/trimum_core/trmpkg.py` | 包格式（`manifest.json5` + 逐文件 sha256 + `SIGNATURE` + `chain.json`）、打包、校验、安全解包；`verify_chain()` 与 `verify_document_signature()` 是「什么算可信」的唯一实现 |
-| `src/trimum_core/pkg_index.py` | 官方目录索引（`trmindex/1`，容器 `{document, signature, chain}`）：回答「去哪拿这个包」，索引本身也必须签名；`entries_from_directory()` 是发布方的扫描+质检面（只收录验得过的包） |
-| `src/trimum_core/pkg_install.py` | 校验 → 按类型落地（`agents/` / `tools/` / `workflows/` / `skills/`）→ 登记 `~/.trimum/config/installed.json5`；`remove_package()` 是逆操作（删登记过的目录 + 划掉登记行） |
-| `src/trimum_core/capability.py` | 能力清单的运行期交集（E6 遗留）：多来源取最严，只收紧、不放宽 |
-| `src/trimum_core/cli/commands/pkg.py` | `trm pkg {verify,info,create,extract,index,root-init,signer-init}` |
-| `src/trimum_core/cli/commands/install.py` | `trm install [name]` / `--file` / `--list` / `--index` / `--allow-untrusted` / `--remove` / `--yes` / `--dry-run`（无参数仍是原向导） |
-| `config/trust/trimum-root.crt` | 内置官方根（只有公钥；私钥留在发布方 `~/.trimum/trust/`，仓库外） |
+## 10. 一句话总结
 
-### 关键设计
-
-- **信任链**：内置根 → 签名者证书（`issued_by` + `issuer_signature`）→ 签名 manifest 的**规范字节**
-  （`sort_keys` + 紧凑分隔符 + UTF-8）→ manifest 的逐文件 sha256 覆盖整个载荷。改一个字节都验不过，
-  且校验只依赖包内签名与内置根，不依赖 TLS。
-- **索引也是签名文档**：签名覆盖 `document`，`chain` 与包共用 `verify_chain()` —— 索引与包不可能对
-  「什么算可信」产生第二种解释；索引条目的 `sha256` 是索引对包的承诺，下载后先比哈希再进校验。
-- **安装三动作**：校验 → 落地 → 登记（trust / 签名者与根指纹 / 包哈希 / 来源 / requires / 能力块）。
-- **两档 trust**：`official`（链追到内置根）与 `untrusted`（显式 `--allow-untrusted`）。
-- **安装 ≠ 授权**：登记只回答「从哪来」；能不能执行仍由 ToolGateway 分层决定，`capability.py` 只收紧。
-- **requires**：安装时按 PATH 探测，缺依赖只警告不拒装（与 `AgentRegistry.check_dependencies` 同一口径）。
-- **发布方闭环**：`create`（打包签名）→ `index`（扫目录 → 签名索引 → 写完自检）。`trm pkg index` 只收录
-  **验得过**的包（一个不过就整体失败并列出原因，不写索引），条目字段取自**校验过的 manifest** 而不是
-  文件名，`url` 相对索引位置 —— 索引与包同目录即可离线安装。发布 / 上线 / 轮换流程见 `docs/PACKAGE-CHANNEL-OPS.md`。
-- **发布方工具**：`root-init` / `signer-init` 拒绝把私钥写进 git 工作树（除非 `--insecure-key-output`），
-  落盘 0600；换根 = 旧包全部作废（见 `config/trust/README.md`）。
-- **卸载只删登记过的那个路径**：`trm install --remove <name>` 读 ledger 里的 `path`，只有恰好等于
-  `<TRIMUM_HOME>/<TYPE_ROOTS[type]>/<name>` 才动手 —— 手改 `installed.json5` 把路径指到工作区外、
-  `certs/`、或兄弟 agent 的目录，一律拒（`TRM-4009`）且一个字节都不删。销账与删目录成对：
-  ledger 行划掉后，`--list` 与运行期 `untrusted_names()`（`capability.py` 读的就是它）同时不再认它。
-- **卸载是破坏性动作**：交互式问一句，非交互必须 `--yes`（stdin 不是 TTY 时 `ask_confirm` 直接答 no，
-  不挂住），`--dry-run` 恒不执行；`--remove` 与 `--file` 互斥。
-- **多用户边界（调研结论，不改代码）**：`~/.trimum/` 每用户一份是结构上成立的；缺的是**系统公共层**
-  （`/etc/trimum/` 只放公开信任根 / 策略基线 / 可选共享包，查找顺序「用户层 → 系统层 → 内置」）与
-  **审计归属**（`AuditEvent` 加 `user_id` + `machine_id`）。私钥保护三档建议先做文件权限（Windows 需 ACL，
-  `chmod` 不生 ACL）。方案与迁移顺序见 `docs/MULTI-USER-BOUNDARY.md`、`docs/ECOSYSTEM-STRATEGY.md` §7.8。
-- **运行期 Layer 2.6**：`ToolGateway` 在 L2.5 之后、L4 之前做能力交集 —— deny → `capability_denied`
-  审计并拒绝；confirm → 升级为 `Action.CONFIRM`（interactive 弹窗，非交互交给后续层）。
-  风险取管线判定的 risk（PolicyEngine / LLM 策略），不是执行后的观测值。
-
-### 红线（写进代码与测试）
-
-- `--allow-untrusted` 只放宽「来源」：包内绝对路径 / `..` / 符号链接 / 硬链接 / 设备文件一律照挡。
-- 私钥永不进仓库：CLI 守卫 + `.gitignore` 的 `*.key` / `*.pem` 双保险。
-- 校验不通过就不落地：先校验后解包，不留「先解开再判断」的中间态。
-- 能力清单读不懂（缺字段 / `max_risk` 非法）→ confirm，而不是当作无限制。
-- 内置（随发行版发布）agent 的目录不可被卸载删掉：名字命中 `discover_bundled_agents()` 的 agent 包即拒
-  （`install_package(force=True)` 可能覆盖过内置目录，而登记里没记「装之前 dest 在不在」，还原不回来）。
-- 卸载不碰 `certs/` / `audit/` / `memory/` —— 用户数据与安全记录跟包无关；agent 证书就是包目录里的
-  `cert.json`，随目录一起走，不单独删。
-
-### 测试
-
-`tests/test_trmpkg.py`（16）、`tests/test_cli_pkg.py`（35）、`tests/test_pkg_install.py`（43）、
-`tests/test_capability.py`（20）。
-
-## 范围边界与验收（生态轮）
-
-> 2026-09-21 由已删除的根 `PRD.md` 并入（PRD 的其余章节与 `STATUS.md` / `TODO.md` / `docs/ECOSYSTEM-STRATEGY.md` 重复）。
-
-**范围边界**
-
-- 生态四层只在 trimum 自有模块内新增代码（`src/trimum_core/`），不改既有对外接口语义、不引入 Node 生态依赖。
-- 不安装 / 不内嵌 CLI-Anything（需 Node，调研已否决）；第三方 harness 只作**可选导入源**。
-- **不自建包仓库**：`trm env install` 只调机器上的系统包管理器（pacman / apt / dnf / zypper / apk / brew / winget / scoop）。
-- MCP 按阶段推进：M0/M1/M2（stdio + 注册 + 审计）、M3（策展导入器）、M4/M4.5（传输与生命周期 + 远端工具聚合）已交付。
-- 官方分发渠道（E5）只做**分发面**：包格式 + 校验器 + 内置根 + 目录索引 + `trm install`；
-  不新增能力来源（四层仍是唯一来源），不自建包仓库，不托管官网服务端。
-
-**验收标准**
-
-- 文档中每一项勾选状态都能对应到代码实现，或明确标注为缺口。
-- 调研结论可复现：`docs/CLI-ANYTHING-RESEARCH.md` 每条结论都附证据（registry / README / 本机检查）。
-- 生态四层每项交付都能用一条命令复现：`trm commands --json`、`trm env inventory --json`、`trm setup --dry-run --json`、`trm pkg verify <pkg>`、`trm install --list --json`。
-- 安装类命令的安全红线可验证：`--dry-run` 不执行、非交互无 `--yes` 必 abort、已装幂等退出 0（`tests/test_env_toolchain.py`）。
-- 既有测试基线不回归（本地基线失败项均为宿主环境问题：Windows 沙箱 / PATH 缺 `python.exe` / LLM 断网）。
+> trimum = **Agent Runtime（管理 AI 工作负载）** + **System Intelligence（理解并优化系统）**，
+> 以资源、安全和反馈为共同维度，形成一个受控、可观测、可验证的 AI 原生系统运行环境。

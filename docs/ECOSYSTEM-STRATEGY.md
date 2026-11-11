@@ -1,5 +1,9 @@
 # 生态战略 — 做「生态集成器」，不做「生态复制品」
 
+> **架构归属（2026-11-11 重构）**：本文属于 **可选扩展层 L0–L3**（环境清单 / MCP / Agent Skills /
+> workflow 目录），不是 trimum 的核心架构。核心架构见 `docs/ARCH.md`；L1 细节见
+> `docs/MCP-INTEGRATION-PLAN.md`。生态能力仍统一登记、默认不启用、经 Tool Gateway 与审计。
+
 > 日期：2026-09-20
 > 触发问题：想极大扩大 trimum 的生态、复用别人的生态（灵感来自 Omarchy、Warp），CLI-Anything 是最优解吗？
 > **结论先行：不是。** 最优解是四层「集成」结构 —— 环境清单（Omarchy 式）+ 协议（MCP）+ 知识（Agent Skills）

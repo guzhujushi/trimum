@@ -1,5 +1,9 @@
 # Security Agent 纵深防御方案
 
+> **架构归属（2026-11-11 重构）**：本文属于 **Agent Runtime 安全治理**（威胁模型、安全响应链、纵深防御）。
+> 总体架构见 `docs/ARCH.md` §3.5；沙箱机制见 `docs/SANDBOX-PLAN.md`；System Intelligence 的观测/策略边界见
+> `docs/architecture/system-intelligence.md`。本文中的 eBPF 章节是威胁观测设计，不等于 System Intelligence 已全部实现。
+
 > 制定：2026-09-04
 > 目标：针对已知 Linux 威胁的完整检测-决策-阻断-审计链
 

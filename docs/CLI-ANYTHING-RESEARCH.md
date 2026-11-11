@@ -1,5 +1,8 @@
 # CLI-Anything 调研报告
 
+> **架构归属（2026-11-11 重构）**：本文是**研究记录 / 决策证据**，不是当前规划或核心架构。
+> 结论仍是「CLI-Anything 只作可选导入源，不进入默认安装与核心运行时」。
+
 > 调研日期：2026-09-20
 > 方法：经 7993 代理 + `.env` 中 `GITHUB_TOKEN` 调 GitHub API / raw 抓取；原始件落 `tmp/research/`（已 gitignore）
 > 目的：核对 P0「OpenCLI 弃用 → CLI-Anything 接入」的前提是否成立

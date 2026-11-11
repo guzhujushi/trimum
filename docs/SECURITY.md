@@ -1,6 +1,10 @@
 # 弹性沙箱体系（Security Agent）
 
-> 最后更新：2026-09-01
+> **架构归属（2026-11-11 重构）**：本文是 **Agent Runtime 安全治理**的细化文档，总体架构见
+> `docs/ARCH.md` §3.5；机制事实以 `docs/SANDBOX-PLAN.md` 为准，配置分层见 `docs/SANDBOX-SCOPE.md`。
+> 本文不重复 System Intelligence 的观测/策略设计，二者边界见 `docs/architecture/system-intelligence.md`。
+>
+> 最后更新：2026-11-11（归属标注）；机制内容沿用 2026-09-01 版本。
 > 三层沙箱：硬性 / 弹性 / 智能，可选切换
 
 ---

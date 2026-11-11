@@ -1,5 +1,9 @@
 # TARL — Trimum AI Representation Language
 
+> **架构归属（2026-11-11 重构）**：TARL 是 **Agent Runtime Context Manager** 的轻量上下文协议，
+> 用于 Agent 间、Agent ↔ Workflow、记忆检索的结构化传递。总体架构见 `docs/ARCH.md` §3；
+> 记忆实现见 `docs/MEMORY-ARCH.md`。
+
 > **Version:** v1.0-draft
 > **Status:** Draft specification
 > **Scope:** Agent ↔ Agent communication, Agent ↔ Workflow Engine messaging, memory retrieval

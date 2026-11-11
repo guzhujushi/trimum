@@ -1,5 +1,8 @@
 # 编码智能体调研：ECC 适合吗？+ 可直接复用的开源项目（2026-09-21）
 
+> **架构归属（2026-11-11 重构）**：本文是**研究记录**，服务于 Agent Runtime 的编码智能体应用形态；
+> 不是核心架构真源。当前设计见 `docs/CODING-AGENT-PLAN.md`，总体架构见 `docs/ARCH.md`。
+
 > 站位：回答 `TODO.md`「🌐 生态战略 → E7 自研编码智能体」与 `docs/CODING-AGENT-PLAN.md` 的前置问题。
 > 四个待答问题：① ECC 如何做成一个 coding Agent；② 参考 `~/.trimum/agents/` 别的 Agent 的文件格式能不能套上；③ 还有没有其他可直接复用的功能相近的开源项目；④ **先想清楚 ECC 适合吗**。
 > 本文只做**调研与判断**，不含代码改动。事实层材料在 `tmp/research/coding-agents/` 与 `tmp/research/ecosystem/ecc-*`（均已 gitignore）。

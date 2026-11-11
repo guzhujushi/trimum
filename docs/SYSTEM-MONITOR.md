@@ -1,13 +1,17 @@
 # System Monitor
 
-> 最后更新：2026-09-01
+> **架构归属（2026-11-11 重构）**：本文是 **System Intelligence Observation** 的早期采集器说明，
+> 不是完整的 Workload Analysis Engine。总体架构见 `docs/ARCH.md` §4，
+> 详细设计见 `docs/architecture/system-intelligence.md`。
+>
+> 最后更新：2026-11-11（归属标注 + 修正 EventBus 示例）；机制内容沿用 2026-09-01 版本。
 > 硬件状态监听 + Event Bus 通知，作为 Tool Gateway 内置工具运行
 
 ---
 
 ## 职责
 
-1. **定时采集** CPU/GPU/Disk/RAM 状态
+1. **定时采集** CPU/Disk/RAM 状态（GPU 采集尚未实现）
 2. **阈值告警** — 超过阈值时通过 Event Bus 发布 `system.alert`
 3. **查询接口** — 供其他组件（Security Agent、CLI、API）获取当前状态
 4. **健康检查** — 快速判断系统是否正常
@@ -53,8 +57,11 @@
 ```python
 from trimum_core.system_monitor import SystemMonitor
 
-monitor = SystemMonitor()
-monitor.set_event_callback(lambda event_type, payload: event_bus.emit(event_type, payload))
+# 传入 EventBus 后，采集结果与告警由 SystemMonitor 内部 publish。
+monitor = SystemMonitor(event_bus=event_bus)
+
+# 可选：额外回调（同步函数），用于打印 / 转发；不要在这里调用不存在的 event_bus.emit()。
+monitor.set_event_callback(lambda event_type, payload: print(event_type, payload))
 
 # 单次采集
 report = await monitor.collect()

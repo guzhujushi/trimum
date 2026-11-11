@@ -1,5 +1,8 @@
 # trimum Tool 创作指南（Tool Developer Guide）
 
+> **架构归属（2026-11-11 重构）**：本文是 **Agent Runtime Tool Manager** 的开发指南。
+> 工具最终经 Tool Gateway 注册、授权、审批、审计；总体架构见 `docs/ARCH.md` §3.2 / §3.5。
+
 > 本文档面向所有需要在 trimum 中创建/维护 tool 的开发者。
 > 目标是：**即使你完全没读过 trimum 源码，照着这份指南也能写出一个可用的 tool。**
 

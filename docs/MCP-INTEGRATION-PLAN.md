@@ -1,5 +1,9 @@
 # MCP 接入方案 — awesome-mcp-servers 引入准备
 
+> **架构归属（2026-11-11 重构）**：本文是 **可选扩展层 L1（MCP）** 的详细设计；
+> 在 Agent Runtime 中由 **MCP Manager** 承载。总体架构见 `docs/ARCH.md` §3.2；
+> 生态战略见 `docs/ECOSYSTEM-STRATEGY.md`。
+
 > 日期：2026-09-20
 > 数据来源：`punkpeye/awesome-mcp-servers`（经 7993 代理抓取，原始件在 `tmp/research/awesome-README.md`）
 > 结论先行：引入 awesome-mcp-servers 的第一步不是「抄列表」，而是实现 MCP 客户端 + 文件化 server 注册 + 权限接入。

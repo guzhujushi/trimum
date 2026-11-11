@@ -1,5 +1,8 @@
 # LLM 模型路由、限流与回退
 
+> **架构归属（2026-11-11 重构）**：本文是 Agent Runtime 的**支撑设施**（模型调用路由），
+> 不是核心架构主线。总体架构见 `docs/ARCH.md`。
+
 > 2026-09-21 定。**所有 LLM 调用点共用一处策略**：`src/trimum_core/llm_router.py`。
 > 一句话：交我算 Qwen 当主力（免费，10 次/分硬限 → 客户端压到 9），DeepSeek 官方当兜底；
 > 「跑代码/多步编排」的 agent 角色反过来——deepseek-flash 为主、Qwen 兜底。
