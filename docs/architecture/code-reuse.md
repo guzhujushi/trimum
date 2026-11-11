@@ -65,6 +65,7 @@
 | **SchedCP** | experimental / WIP；Rust；kernel 6.12+；sched_ext | MIT | 中：调度器选择与 workload profiling 有参考价值 | **B 可选外部工具 / MCP** | `list_schedulers` / `run_scheduler` / `system_monitor` / `workload` 的工具面；调度器选择与历史记录 | 项目未稳定；需要 Rust + scx 工具链；不作为默认依赖 |
 | **AgentSight** | 活跃；Rust + eBPF；local-first | MIT | 中：Agent 行为观测与事件关联 | **B 可选外部观测工具** | prompt / model / tool / file / network 关联视图；`top` / `vis` 展示；事件 schema | 需要外部二进制；不嵌入核心；观测失败不能影响业务 |
 | **ActPlane** | 活跃；Rust + eBPF LSM | MIT | 低：策略思路有参考价值，但权限模型冲突 | **C 仅设计参考 / 不采用运行时** | 信息流约束、进程血缘、BPF-LSM `block` / `notify` / `kill`、拒绝原因回灌 | 需要 root 或 `CAP_BPF` + `CAP_SYS_ADMIN`；与最小权限红线冲突 |
+| **AIOS / Cerebrum** | 活跃；Python 3.10–3.11；FastAPI kernel + 四类 syscall 队列 + FIFO/RR；可选 VM/MCP computer-use；37 个直接依赖；根 `LICENSE` 为 1 字节空文件；Cerebrum 的 `pyproject.toml` 标 MIT 但 `LICENSE` 同样为空 | **许可证未解决** | 中：同为 Python Agent runtime，但它是**应用层 LLM Agent OS**，不是 Linux 资源隔离层 | **当前 D：不复制代码；C：设计参考；许可证与隔离层完成后才考虑 B 可选外部运行时** | syscall 抽象、FIFO/RR 队列调度、hooks、agent manifest、用户记忆隔离 / write barrier、LSFS 语义文件系统 | 不能直接 import（Python <3.12）；依赖重（transformers / chromadb / llama_index / sentence-transformers 等）；无 cgroup/seccomp/Landlock；默认 CORS `*`、无鉴权；agent hub 可下载并自动 pip install；Redis / VMware 路径硬编码 |
 
 ---
 
@@ -131,7 +132,74 @@ AgentCgroup 解决的是「每次 tool call 都是一个新的资源控制单元
 
 ---
 
-## 6. Linux 7.0 前置检查
+## 6. AIOS / Cerebrum 补充调研（2026-11-11）
+
+### 6.1 它是什么
+
+AIOS 把自己定位为 **AI Agent Operating System**，但这里的“OS”是**应用层 Agent 内核**，不是 Linux 内核：
+
+- 一个 FastAPI kernel，把 LLM、memory、storage、tool 统一成四类 syscall。
+- 四组全局队列 + FIFO / RR scheduler 线程，负责把 syscall 分发给对应 manager。
+- Agent 通过独立的 Cerebrum SDK 连接 kernel；Agent 包可以从 Agent Hub 下载。
+- computer-use 路径通过 VM + MCP Server 控制桌面，不是用 cgroup / seccomp / Landlock 隔离进程。
+
+因此它和 trimum 的关系是**互补**：AIOS 更接近“Agent 应用层 SDK / syscall 抽象”，trimum 更接近“操作系统资源、安全与系统智能层”。
+
+### 6.2 当前不能直接复用的原因
+
+1. **许可证不成立**：AIOS 根 `LICENSE` 只有 1 个换行符；Cerebrum 的 `pyproject.toml` 写了 MIT classifier，但 `LICENSE` 也是空文件。没有明确授权前，不能复制、改编或 vendor 其代码。
+2. **Python 版本冲突**：AIOS 明确只支持 Python 3.10–3.11；trimum 要求 Python 3.12+。其 `numpy==1.24.3` 等旧 pin 也不能直接进入 trimum 环境。
+3. **依赖过重**：37 个直接依赖，包含 transformers、accelerate、chromadb、llama_index、sentence-transformers、scikit-learn、qdrant、mem0、zep 等；与“不引入大量依赖”直接冲突。
+4. **安全模型不一致**：AIOS 默认 FastAPI CORS `*` 且没有鉴权；Agent Hub 会下载 agent 并按其 `meta_requirements.txt` 自动 pip install；默认 ToolManager 还会启动 MCP 子进程。不能把这种运行时直接暴露给 trimum 的用户或网络。
+5. **没有 OS 级隔离**：AIOS 的 scheduler 调度的是 LLM/memory/storage/tool syscall，不是 CPU/内存/进程 cgroup；computer-use 依赖外部 VM，不能替代 trimum 的 Landlock / seccomp / cgroup 边界。
+6. **可移植性不足**：示例 MCP server 硬编码 VMware 路径；存储后端硬编码 `localhost:6379` Redis；这些都必须先配置化。
+
+**结论**：现在只能把它当 **C 设计参考**；不要复制代码，也不要让 AIOS 在 trimum 主进程中运行。若要接入，只能是**独立 venv/进程中的可选外部 Agent Runtime**，并先解决许可证与隔离问题。
+
+### 6.3 值得借鉴的设计
+
+- **syscall 抽象**：把 LLM、memory、storage、tool 都收敛为统一请求/响应，和 trimum 的 RuntimeKernel 门面方向接近。
+- **队列 + FIFO/RR**：对多 Agent 的 LLM 调用提供基本公平性；但 trimum 是个人 AI 工作站，不需要照搬高并发调度。
+- **hooks**：llm / memory / storage / tool / scheduler 的生命周期钩子可映射到 trimum EventBus 与审计。
+- **用户记忆隔离**：per-user collection、共享过滤、write barrier 值得研究；但实现必须接 trimum 的记忆桥与审计。
+- **Agent manifest / SDK**：`entry.py` + `config.json` + `meta_requirements.txt` 的形态可作为 Agent 包契约参考；下载与安装必须放进沙箱。
+- **LSFS**：语义文件系统 + 版本历史 + 向量检索的组合，可作为 Storage Manager 的研究输入，不直接引入 Redis / Chroma 依赖。
+
+### 6.4 如果以后接入：推荐形态
+
+**推荐 A：可选外部 Agent Runtime**
+
+```text
+trimum RuntimeKernel / Tool Gateway / Sandbox
+        ↓ 受控启动、能力交集、cgroup + Landlock + seccomp
+AIOS kernel（独立 Python 3.11 venv / 进程）
+        ↓ 仅回环地址 + token
+Cerebrum Agent（独立进程）
+```
+
+- trimum 是控制面；AIOS 只是被管理的 Agent 运行时。
+- AIOS 的 `/query`、`/agents/submit` 只绑回环地址，必须有认证；不能暴露公网。
+- AIOS 下载的 agent 与依赖必须安装到它自己的沙箱/venv，不能污染 trimum 环境。
+- AIOS 的 tool 调用要回灌到 trimum Tool Gateway，不能直接执行未经审批的系统命令。
+
+**不推荐 B：把 AIOS kernel 整体 import 进 trimum**。Python 版本、依赖、许可证和安全边界都不成立。
+
+**不推荐 C：让 AIOS 直接管理宿主机**。它的 VM/MCP 路径不是最小权限控制器，不能替代 trimum 的 helper 与 cgroup。
+
+### 6.5 接入前还缺的准备
+
+- [ ] **许可证澄清**：向 AIOS / Cerebrum 维护者确认根 LICENSE 与 SDK 许可证；拿到书面授权前只做设计参考。
+- [ ] **独立运行环境**：Python 3.11 venv、锁定依赖、独立进程；不与 trimum 的 3.12 环境混装。
+- [ ] **Adapter 契约**：Cerebrum `Query` ↔ trimum Plan schema / TARL / Tool Gateway 的字段映射；明确 user_id、agent_id、run_id。
+- [ ] **安全包装**：认证、回环绑定、CORS 收紧、Tool Gateway、沙箱、cgroup、审计；禁止默认 VM root / sudo。
+- [ ] **存储配置化**：Redis、vector DB、MCP server、VM 路径全部走配置；缺失走默认，不硬编码。
+- [ ] **观测映射**：AIOS hooks / metrics → trimum EventBus / `trm status`；观测失败不影响业务。
+- [ ] **兼容性测试**：AIOS demo agent、MCP tool、无网络暴露、无自动 pip install；computer-use 只作可选实验。
+- [ ] **明确非目标**：AIOS 是否可用与 Linux 7.0 无关；7.0 只影响 trimum 自己的 sched_ext / BPF LSM / memcg 评估。
+
+---
+
+## 7. Linux 7.0 前置检查
 
 升级内核只是打开评估窗口，不等于所有能力自动可用。升级后先跑以下检查，结果写回文档与 `trm doctor`：
 
@@ -147,7 +215,7 @@ AgentCgroup 解决的是「每次 tool call 都是一个新的资源控制单元
 
 ---
 
-## 7. 分阶段落地
+## 8. 分阶段落地
 
 | 阶段 | 内容 | 是否阻塞 MVP |
 |---|---|---|
@@ -160,7 +228,7 @@ AgentCgroup 解决的是「每次 tool call 都是一个新的资源控制单元
 
 ---
 
-## 8. 引入检查清单
+## 9. 引入检查清单
 
 引入任何外部代码前，至少回答：
 
@@ -174,8 +242,9 @@ AgentCgroup 解决的是「每次 tool call 都是一个新的资源控制单元
 
 ---
 
-## 9. 当前结论
+## 10. 当前结论
 
 > **复用优先，但不整体吞并。**
-> AgentCgroup 先复用小模块；SchedCP / AgentSight 作为可选外部工具；ActPlane 只作设计参考。
+> AgentCgroup 先复用小模块；SchedCP / AgentSight 作为可选外部工具；ActPlane 只作设计参考；
+> AIOS / Cerebrum 在许可证与隔离层完成前不复制代码，只借鉴其 syscall / SDK 设计。
 > Linux 7.0 打开 sched_ext / BPF LSM / memcg 的评估窗口，但 MVP 仍然先做 Runtime 与观测基线。

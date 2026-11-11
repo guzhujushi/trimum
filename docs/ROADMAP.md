@@ -200,6 +200,7 @@ Linux 7.0 升级后，BPF LSM / sched_ext 可以做能力检查与最小 PoC；�
 | 官方分发渠道 | 包格式、签名、索引、`trm install` | ✅ 主体已实现 |
 | 多用户边界 | `/etc/trimum` 公共层、审计归属、私钥保护 | 🟡 调研完成，未改代码 |
 | 浏览器 / 桌面 / GUI | 浏览器工具、桌面预设、远程桌面 | 🟡 可选前端，不是核心 |
+| AIOS / Cerebrum 兼容 | 可选外部 Agent Runtime / SDK 适配；独立 venv + 沙箱，不进入核心 | 🟡 调研完成，暂不接入 |
 | 语义记忆 / RAG | 本地 embedding + sqlite-vec + RRF | ⚪ 未来设计 |
 
 ---
