@@ -9,6 +9,7 @@
 |---|---|
 | `agent-runtime.md` | Plan Agent、Runtime Kernel、执行模型、资源层次、安全治理、当前模块与 TBD。 |
 | `system-intelligence.md` | eBPF 观测/执行、工作负载分析、策略仓库、策略引擎、验证、受控控制器、当前实现边界。 |
+| `code-reuse.md` | 外部项目复用矩阵、许可证边界、Linux 7.0 前置检查与分阶段落地。 |
 
 ## 状态记号
 
@@ -22,10 +23,12 @@
 1. `docs/ARCH.md`：先建立「两大核心 + 一个闭环」的全局认识。
 2. `agent-runtime.md`：理解 Agent 如何被规划、调度、隔离、授权与审计。
 3. `system-intelligence.md`：理解系统如何被观测、分析、验证与受控调整。
-4. `docs/ROADMAP.md`：看两条主线如何分阶段落地。
+4. `code-reuse.md`：看哪些外部项目直接复用、哪些只作可选工具或设计参考。
+5. `docs/ROADMAP.md`：看两条主线如何分阶段落地。
 
 ## 维护规则
 
 - 架构裁决写进 `docs/ARCH.md`；实现细节写进对应专题文档。
+- 外部代码复用、依赖与许可证边界写进 `code-reuse.md`；其他文档引用，不重复复制矩阵。
 - 不把规划写成已实现能力；未定细节标 TBD，不擅自做技术决定。
 - 同一事实只保留一个真源，其他文档引用而不是复制。

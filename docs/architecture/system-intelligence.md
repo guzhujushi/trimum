@@ -19,7 +19,8 @@ System Intelligence 的目标：让 AI 不只是调用操作系统接口，而�
 
 - **LLM 推理不进入内核执行路径**。AI 分析与策略决策在用户态完成。
 - **AI 不直接拥有任意内核控制权限**。内核侧只执行经过验证的有限程序；下发由受控特权组件完成。
-- **未实现的强制执行不写成已实现**。当前只有 cgroup 资源控制与 eBPF 观测链路；BPF LSM / sched_ext 是未来设计。
+- **未实现的强制执行不写成已实现**。当前只有 cgroup 资源控制与 eBPF 观测链路；BPF LSM / sched_ext 尚未实现。
+  目标内核基线是 Linux 7.0，升级后先做能力检查，再决定 PoC 与复用方式。
 
 ---
 
@@ -136,13 +137,17 @@ bpf/*.bpf.c
   （`/etc/sysctl.d/60-trimum-perf.conf`），**不给 helper 加 `CAP_SYS_ADMIN`**。
 - `EACCES(13)` 表示内核 perf 策略拦截；`EPERM(1)` 表示 seccomp 拦截。诊断时先分这两个错误码。
 
+**裁决（2026-11-11）**：短期保持 **A：`perf_event_paranoid=3` + 现有 tracepoint attach**。
+不在这轮改纯 `bpf(2)` attach；「去掉 sysctl 依赖」作为 R2 的后备设计项，等观测基线稳定后再评估。
+仍然**不给 helper 加 `CAP_SYS_ADMIN`**。
+
 ### 3.2 Enforcement（🟡 部分实现，未来扩展）
 
 目标方向：
 
 - cgroup 资源控制：✅ 已通过 `resource_controller.CgroupV2Controller` 落地。
-- BPF LSM 安全策略：⚪ 未来设计。
-- sched_ext 调度机制：⚪ 未来设计。
+- BPF LSM 安全策略：⚪ 未实现；目标 Linux 7.0，升级后先做能力检查与复用评估。
+- sched_ext 调度机制：⚪ 未实现；优先评估 AgentCgroup / SchedCP 等实现，不先自研内核调度器。
 - 与其他内核控制接口协作：⚪ TBD。
 
 **原则**：eBPF 不只是传感器，也可以参与受控的系统行为管理；但任何强制执行都必须经过
@@ -190,6 +195,28 @@ workload:
 没有统一引擎。`system_monitor.py` 只做阈值告警；`resource_controller.py` 只做采样与限额；
 `behavior_monitor.py` / `learning_engine.py` 是**安全行为**基线，不是工作负载分类器。
 
+### 4.5 参考项目结论（2026-11-11 调研）
+
+详细矩阵、许可证边界与落地顺序见 `docs/architecture/code-reuse.md`。这里只保留结论：
+
+- **AgentCgroup（GPL-2.0）第一优先**：复用其 Python cgroup 生命周期、tool-call 级临时 cgroup、
+  `AGENT_RESOURCE_HINT`、OOM 反馈与 JSONL metrics；不整体嵌入其 daemon。引入前核对
+  `GPL-2.0-only` / `GPL-2.0-or-later`，并确认 Linux 7.0 上 `memcg_bpf_ops` 是否可用。
+- **SchedCP（MIT，Rust）**：experimental / WIP，作为可选外部调度工具或 MCP 适配器，不进入核心依赖。
+- **AgentSight（MIT，Rust + eBPF）**：作为可选外部观测工具；常规观测仍走 trimum 自己的事件与 SystemMonitor。
+- **ActPlane（MIT，Rust + eBPF LSM）**：需要 root 或 `CAP_BPF` + `CAP_SYS_ADMIN`，与 trimum 最小权限红线冲突；
+  只作设计参考，不采用其运行时。
+- **依赖策略**：核心运行时保持纯 Python；不新增 Rust 工具链、第二套常驻服务或额外 root 控制器。
+- **内核策略**：目标 Linux 7.0；升级后先跑能力自检，再决定 sched_ext / BPF LSM / memcg 的 PoC 与复用。
+
+### 4.6 裁决（2026-11-11）：A 规则 / 阈值优先
+
+trimum 的定位是**个人 AI 工作站**，不是多租户高并发平台。因此 Workload Analysis MVP 采用：
+
+- **A 规则 / 阈值**：分类、阶段、瓶颈判断先用可解释规则 + 证据链。
+- 不先做 ML 分类；等数据量、标注和回放机制成熟后再评估 B/C。
+- 复用 AgentCgroup 的指标、cgroup 生命周期与反馈模式；SchedCP / AgentSight 只作为可选外部工具或设计参考。
+
 ---
 
 ## 5. Policy Repository（⚪ Future Design）
@@ -205,7 +232,7 @@ workload:
 - 历史执行结果。
 - 性能测试数据。
 
-### 5.2 建议条目结构（TBD）
+### 5.2 条目结构（2026-11-11 定：A Git 版本化 YAML）
 
 ```yaml
 id: sched.burst.coding.v1
@@ -213,7 +240,7 @@ kind: scheduler | ebpf_program | cgroup_profile | lsm_policy
 applies_to:
   workload_class: coding
   phase: burst
-  kernel: ">=6.8"
+  kernel: ">=7.0"
   prerequisites: [cgroup_v2, bpf_perfmon]
 program:
   source: bpf/xxx.bpf.c
@@ -239,6 +266,15 @@ provenance:
 
 现有 `config/policy.yaml`、威胁剧本、eBPF 程序清单是**前身**，不是完整策略仓库。
 
+### 5.5 裁决（2026-11-11）：A Git 版本化 YAML
+
+trimum 是个人 AI 工作站，策略量级与并发都不高，因此：
+
+- **策略真源 = Git 里的 YAML 文件**；评审、diff、回滚都走 Git。
+- 不先引入 SQLite 索引；等策略数量或查询需求真的增长，再考虑 YAML + SQLite 索引（C）。
+- 运行时只读策略文件；写入必须走显式导入 / 提交，不在热路径动态改仓库。
+- 每条策略必须有 `id` / `version` / `applies_to` / `evidence` / `provenance`，便于审计与淘汰。
+
 ---
 
 ## 6. Policy Engine（⚪ Future Design）
@@ -259,6 +295,13 @@ provenance:
 | System Intelligence Policy Engine | 系统调度 / 资源 / eBPF 策略选择 | ⚪ Future |
 
 两者不要混名。本文的 Policy Engine 不直接执行系统操作，只产出「候选策略 + 参数 + 理由 + 证据」。
+
+### 6.1 裁决（2026-11-11）：B AI 提议 + 人工审批 + 强制验证
+
+- AI 可以提议新策略或参数调整，但**不能直接部署**。
+- 提议必须落成一条候选策略，附带理由、证据、适用条件。
+- 人工审批后才进入 Execution Verifier；验证失败一律拒绝。
+- 不采用 C（自动生成 + 自动部署）；那会绕过 fail-safe 边界。
 
 ---
 
@@ -315,13 +358,12 @@ provenance:
 
 它**不是**通用内核控制器：不能执行任意 eBPF 程序、不能写任意内核参数、不能代替 root。
 
-### 8.3 未来扩展（⚪）
+### 8.3 裁决（2026-11-11）：C 先不拆，靠人类审批顶着
 
-- 是否扩展 helper 支持更多受控动词（如 sched_ext 相关操作）。
-- 是否另起一个独立 controller（按策略类型分权）。
-- 如何做到「能力最小化 + 可审计 + 可回滚」。
-
-这些都需要单独裁决，不在本文擅自定案。
+- 暂时**不扩展** `trimum-bpf-helper`，也**不另起**独立 controller。
+- 新的受控操作先由人类审批 + 现有最小权限组件执行；不做自动下发。
+- 人类审批是**额外闸门**，不是最小权限的替代品：helper 的能力集、动词白名单、sha256 校验仍然必须保留。
+- 等出现明确需求（例如 sched_ext / memcg 操作）再评估「扩展 helper」还是「按域拆 controller」。
 
 ---
 
@@ -356,6 +398,9 @@ sequenceDiagram
 2. **安全治理**：Runtime 管沙箱与工具权限，System Intelligence 管系统级策略与受控执行。
 3. **动态控制**：Runtime 根据反馈调整后续任务的资源需求与执行方式。
 
+**裁决（2026-11-11）**：反馈闭环**先等 R1 / R2 / R4 稳定**，不在当前 MVP 里做自动反馈控制。
+先把观测、规则分析、人工审批跑通；闭环的传输方式与频率以后再定。
+
 ---
 
 ## 10. 当前实现边界（汇总）
@@ -365,25 +410,45 @@ sequenceDiagram
 | eBPF 观测链路 | ✅ | helper + loader + 审计回灌，真机已跑通 |
 | cgroup 资源控制 | ✅ | Agent 级预算 |
 | SystemMonitor 阈值告警 | ✅ | CPU / 内存 / 磁盘 / load |
-| 工作负载分类 / 瓶颈分析 | ⚪ | 无统一引擎 |
-| Policy Repository | ⚪ | 零散策略文件 |
+| 工作负载分类 / 瓶颈分析 | ⚪ | 无统一引擎；已定 A 规则优先 |
+| Policy Repository | ⚪ | 已定 A Git 版本化 YAML；待实现 |
 | 调度策略选择 / 参数调整 / 生成 | ⚪ | 无实现 |
 | 静态分析 / 基准 / 自动回滚 | ⚪ | 无实现 |
-| BPF LSM / sched_ext | ⚪ | 无实现 |
-| 通用 Privileged Controller | ⚪ | 只有受限 bpf helper |
+| BPF LSM / sched_ext | ⚪ | 目标 Linux 7.0；升级后做能力检查、复用评估与 PoC，不阻塞 MVP |
+| 通用 Privileged Controller | ⚪ | 已定 C 冻结现状，人类审批顶着 |
 
 ---
 
-## 11. TBD / 待决策
+## 11. 已裁决与剩余 TBD（2026-11-11）
+
+### 11.1 已裁决
+
+| 决策 | 结论 |
+|---|---|
+| 内核基线 | **Linux 7.0**（计划升级）；升级后先做 sched_ext / BPF LSM / memcg 能力自检。 |
+| 外部复用 | **AgentCgroup 第一优先**；SchedCP / AgentSight 可选外部；ActPlane 只作设计参考。 |
+| eBPF perf gate | **A 短期保持 `perf_event_paranoid=3`**；纯 `bpf(2)` attach 作为后备设计项。 |
+| 审计链刷屏 | **先诊断（D）**；确认是密钥轮换/归档残留再隔离旧链 + 新链（C）；疑似篡改则保留证据、人工裁决。 |
+| Workload Analysis | **A 规则 / 阈值优先**；复用 AgentCgroup / SchedCP / AgentSight 的指标与事件设计，不整体嵌入其运行时。 |
+| Policy Repository | **A Git 版本化 YAML**；不先上 SQLite。 |
+| 策略生成 | **B AI 提议 + 人工审批 + 强制验证**；不允许自动部署。 |
+| Privileged Controller | **C 先不拆**：不扩 helper、不另起 controller；人类审批顶着。 |
+| 反馈闭环 | **暂缓**：等 R1 / R2 / R4 稳定后再做。 |
+
+### 11.2 剩余 TBD
 
 1. 工作负载分析的输入/输出 schema 与采样频率。
 2. 指标来源优先级：eBPF、cgroup、psutil、审计事件如何合并。
-3. Policy Repository 的存储形态、版本、签名与淘汰机制。
-4. Policy Engine 允许「生成新策略」的边界与人工审批点。
-5. Execution Verifier 的验证等级与准入清单。
-6. Privileged Controller 的通用化边界与分权模型。
-7. 运行时熔断、回滚与人工接管流程。
-8. 如何避免观测开销影响业务（采样、聚合、背压）。
+3. Policy Repository 的条目签名与淘汰机制（存储形态已定 A）。
+4. Execution Verifier 的验证等级与准入清单。
+5. Linux 7.0 上 sched_ext / BPF LSM / memcg_bpf_ops 的实际能力与 PoC 准入（见下方说明）。
+6. 运行时熔断、回滚与人工接管流程。
+7. 如何避免观测开销影响业务（采样、聚合、背压）。
+
+**关于 PoC**：PoC（Proof of Concept，概念验证）是用最小代价验证「这条路是否走得通」，
+不是生产实现。例如：写一个最小 sched_ext 程序，在支持的内核上加载、跑一组固定负载、记录吞吐/延迟，
+看是否值得继续。PoC 成功 ≠ 可上线；之后还要设计、验证、回滚。目标内核是 Linux 7.0，
+sched_ext 的版本门槛已满足，但加载权限、内核配置与实际稳定性仍需逐项验证；PoC 不阻塞 MVP。
 
 ---
 

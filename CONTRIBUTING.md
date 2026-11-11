@@ -110,5 +110,5 @@ feat(llm): 429 冷却改读 Retry-After（秒数 / HTTP 日期，缺失回退 60
 
 ## 文档分工
 
-`AGENTS.md` = 项目级指令（分支 / 真机 / 密钥 / 平台口径）；`docs/ARCH.md` = 架构总览；`docs/architecture/` = Agent Runtime / System Intelligence 详细设计；`docs/ROADMAP.md` = 路线图；专题文档 `docs/CODING-AGENT-PLAN.md` / `docs/SANDBOX-PLAN.md` / `docs/LLM-ROUTING.md` / `docs/MULTI-USER-BOUNDARY.md`；
+`AGENTS.md` = 项目级指令（分支 / 真机 / 密钥 / 平台口径）；`docs/ARCH.md` = 架构总览；`docs/architecture/` = Agent Runtime / System Intelligence / 代码复用与许可证边界；`docs/ROADMAP.md` = 路线图；专题文档 `docs/CODING-AGENT-PLAN.md` / `docs/SANDBOX-PLAN.md` / `docs/LLM-ROUTING.md` / `docs/MULTI-USER-BOUNDARY.md`；
 `STATUS.md` = **常驻区（就地小改）+ 追加日志（新进展只追加到文件末尾，不回填、不通读）**；`TODO.md` = **只剩未闭环 + 红线**，已完成项一律进 `STATUS.md`。

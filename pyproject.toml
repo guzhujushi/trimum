@@ -7,6 +7,11 @@ name = "trimum-core"
 version = "0.5.0"
 description = "trimum Core Daemon - system-level AI agent runtime"
 requires-python = ">=3.12"
+license = { text = "GPL-2.0-only" }
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
+    "Programming Language :: Python :: 3.12",
+]
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",

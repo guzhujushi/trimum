@@ -15,6 +15,9 @@ trimum 的技术主线收敛为两个相互关联的方向：
 1. **Agent Runtime** —— 管理 AI 工作负载：规划、调度、沙箱、上下文、资源预算、工具与 MCP、存储。
 2. **System Intelligence** —— 理解并优化系统：eBPF 观测、负载分析、策略仓库、策略选择、执行验证、受控下发。
 
+外部实现优先复用：AgentCgroup 是 cgroup / 资源控制方向的第一优先对象；SchedCP、AgentSight
+作为可选外部工具；ActPlane 仅作设计参考。核心运行时仍保持纯 Python，不引入 Rust 工具链或新的常驻服务。
+
 两者通过**资源管理、安全治理和系统反馈**形成闭环：
 
 ```mermaid
@@ -77,6 +80,8 @@ System Intelligence 让 AI 不只是「调用系统接口」，而是能在安�
 | **Modular** | 模块化，但避免过度拆分。 |
 | **Local-first** | 优先本地运行，减少不必要的数据外传。 |
 | **Fail-safe** | AI 决策失败时，系统仍保持安全和可控。 |
+| **Reuse-first** | 优先复用成熟实现；许可证、权限和依赖成本都可接受时才引入。 |
+| **No dependency bloat** | 核心保持轻量；可选工具按需安装，不默认启动。 |
 
 ---
 
@@ -84,6 +89,9 @@ System Intelligence 让 AI 不只是「调用系统接口」，而是能在安�
 
 trimum 已有可运行的 Agent Runtime 主体；System Intelligence 目前以 **eBPF 观测**为主，
 分析与策略闭环属于在建/未来设计。文档中不会把规划写成已实现能力。
+
+> **目标内核基线：Linux 7.0**（计划升级）。升级前真机 6.8 的实测事实保留在
+> `docs/SANDBOX-PLAN.md`；升级后必须重新跑能力自检，不能把 7.0 当作无条件可用。
 
 | 能力 | 状态 | 主要落点 |
 |---|---|---|
@@ -94,11 +102,11 @@ trimum 已有可运行的 Agent Runtime 主体；System Intelligence 目前以 *
 | Workflow / Event Bus / TARL | ✅ 已实现 | `workflow_runtime.py` / `event_bus.py` / `tarl_parser.py` |
 | MCP 客户端、注册、工具聚合 | ✅ 已实现 | `mcp_client.py` / `mcp_registry.py` / `mcp_bridge.py` |
 | eBPF 观测（helper + loader + 审计回灌） | ✅ 已实现 | `bpf_helper*.py` / `bpf_loader.py` / `bpf_audit.py` / `bpf/*.bpf.c` |
-| 统一 Agent Runtime Kernel 门面 | 🟡 逻辑职责已具备，统一对象/接口 TBD | `docs/architecture/agent-runtime.md` |
+| 统一 Agent Runtime Kernel 门面 | 🟡 已裁决 B 薄门面，待实现 | `docs/architecture/agent-runtime.md` |
 | Workload Analysis Engine | ⚪ 未来设计 | `docs/architecture/system-intelligence.md` |
 | Policy Repository / Policy Engine | ⚪ 未来设计 | `docs/architecture/system-intelligence.md` |
 | Execution Verifier 完整链路 | 🟡 已有内核 verifier、sha256、沙箱；静态分析/基准/回滚 TBD | `docs/architecture/system-intelligence.md` |
-| BPF LSM / sched_ext 强制执行 | ⚪ 未来设计 | `docs/architecture/system-intelligence.md` |
+| BPF LSM / sched_ext 强制执行 | ⚪ 目标 Linux 7.0；升级后做能力检查、复用评估与 PoC | `docs/architecture/code-reuse.md` |
 
 ---
 
@@ -133,6 +141,7 @@ trm doctor                    # 环境与配置自检
 | `docs/ARCH.md` | **架构单一事实源**：总体定位、两大核心、模块归属、实现边界。 |
 | `docs/architecture/agent-runtime.md` | Agent Runtime 详细设计：Plan Agent、Kernel、资源模型、安全治理。 |
 | `docs/architecture/system-intelligence.md` | System Intelligence 详细设计：观测、分析、策略、验证、受控执行。 |
+| `docs/architecture/code-reuse.md` | 代码复用矩阵、许可证边界、Linux 7.0 前置检查与分阶段落地。 |
 | `docs/ROADMAP.md` | 按新主线调整后的路线图与待决策项。 |
 | `docs/SECURITY.md` | Agent Runtime 安全治理与弹性沙箱。 |
 | `docs/SECURITY-DEFENSE-PLAN.md` | 纵深防御、威胁模型与安全响应链。 |
@@ -163,4 +172,7 @@ trm doctor                    # 环境与配置自检
 
 ## 许可
 
-MIT License — Copyright (c) 2026 guzhu jushi
+**GPL-2.0-only** — Copyright (c) 2026 guzhujushi
+
+从下一个发布版本起，trimum 以 GNU General Public License v2.0（仅限该版本）分发；
+历史提交与已发布版本仍按其当时的 MIT 许可证授权。引入第三方代码时保留其版权、许可证与来源说明。

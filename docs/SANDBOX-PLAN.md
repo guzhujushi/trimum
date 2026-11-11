@@ -6,6 +6,9 @@
 
 > 站位的由来：裁决项「**沙箱是否提到编码智能体（E7）之前**」已定为 **是** —— 编码智能体会大量写盘、跑测试，
 > 没有内核级边界就不敢让它自己动手。因此本文是 E7 的**前置片**。
+>
+> **2026-11-11 注**：真机计划升级到 Linux 7.0；本文的 6.8 实测数据保留为历史事实，升级后必须重新跑
+> Landlock ABI、sched_ext、BPF LSM、`memcg_bpf_ops` 与 perf 门限检查，不能直接沿用 6.8 结论。
 > 本文回答四问：① 现在主流的沙箱是怎么做的；② 需不需要 Docker；③ 真机还需要装什么；④ 怎么落到 trimum 既有的网关体系里。
 > 与既有文档的关系：威胁模型与 seccomp/Landlock 分层设计见 `docs/SECURITY-DEFENSE-PLAN.md`（本文**校正**它的两处前提）；
 > 执行一律经 `ToolGateway` 四层（不新增执行通道）；动作编排复用 `WorkflowRuntime`；多用户边界见 `docs/MULTI-USER-BOUNDARY.md`。

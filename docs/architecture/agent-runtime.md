@@ -106,13 +106,104 @@ Plan Agent **不是**底层资源管理器，也**不拥有系统最高权限**�
 | 规划 / 兜底规划 | `planner_agent.py` | 🟡 |
 | 任务编排 | `workflow_runtime.py` / `workflow_engine.py` | ✅ |
 | 父子委派与预算交集 | `delegation.py` | ✅ |
-| 统一 Plan Agent schema | 无 | ⚪ TBD |
+| 统一 Plan Agent schema | 契约已定（B 版本化 schema），实现待拆 | 🟡 |
+
+### 3.4 Plan Agent 输出契约（2026-11-11 定：B 版本化 schema）
+
+Plan Agent 不直接启动进程，也不直接分配资源；它输出一份**可验证的计划**，由 Kernel 校验后执行。
+契约采用版本化 schema，先冻结最小字段，再逐步扩展（不追求一次设计完整）。
+
+建议的最小结构（示意，不是已冻结代码）：
+
+```yaml
+schema: trimum.plan/v1
+plan_id: plan_20261111_001
+task: "修复 nginx 502"
+
+constraints:
+  risk_max: medium          # low | medium | high | critical
+  deadline_s: 600
+
+steps:
+  - id: inspect
+    agent: shell
+    depends_on: []
+    instruction: "查看 nginx 错误日志"
+    resources:
+      cpu_percent_max: 80
+      memory_mb_max: 512
+      timeout_s: 60
+      token_budget: 20000
+      storage_mb: 256
+      gpu: null             # 当前未纳入预算
+    sandbox:
+      mode: workspace-write # off | readonly | workspace-write | strict
+      read: ["/srv/repo", "<TRIMUM_HOME>"]
+      write: ["/srv/repo", "/tmp"]
+      deny_write: ["/etc", "~/.ssh"]
+      network: deny         # deny | allowlist（具体语法 TBD）
+      seccomp: l1           # l1 | strict | off
+    context:
+      read: [project, agent]
+      write: [agent]
+      max_tokens: 12000
+      tarl_handoff: true
+    tools:
+      allow: [shell, file]
+      deny: [git.push]
+    approvals:
+      allow: []             # 非交互 confirm 的声明式放行
+    on_failure: stop        # stop | retry | continue（策略 TBD）
+```
+
+**字段含义**
+
+- `resources`：Agent 级资源需求；实际分配由 Resource Manager 取交集，不能由 Plan Agent 直接放大。
+- `sandbox`：沙箱范围（文件读写、网络、seccomp）；由 Sandbox Manager 施加，失败 fail-closed。
+- `context`：上下文与记忆命名空间；由 Context Manager 分配，token 预算与压缩策略由它执行。
+- `tools`：能力需求；由 Tool Manager 做白名单 / 能力交集 / 审批。
+- `approvals`：非交互场景的声明式放行；未声明时保持 fail-closed。
+- `on_failure`：失败语义；默认 `stop`，不允许静默成功。
+
+**与 TARL 的关系**
+
+TARL 是**紧凑传输格式**，schema 是**语义契约**；两者不是一回事：
+
+- 完整计划以 schema 对象为准（JSON/YAML），可版本化、可校验、可回放。
+- TARL 负责 Agent ↔ Workflow ↔ 记忆之间的轻量 handoff；推荐只携带**扁平引用 + 少量关键字段**，
+  例如 `plan:id`、`step:id`、`sandbox:workspace-write`、`cpu:80`、`mem:512`、`ctx:project:foo`。
+- 不建议把完整的嵌套 sandbox / context / policy 树塞进一行 TARL：键值行会迅速变长，转义与歧义成本高。
+  需要完整策略时，用 `plan:id` 回查 schema 对象。
+
+> 这与「Plan Agent 在 TARL 里带上沙箱、文件访问、上下文」的想法方向一致；区别是：
+> **TARL 带的是引用与摘要，完整契约留在 schema 里**，这样既能保持 TARL 轻量，也能让 Kernel 做确定性校验。
 
 ---
 
 ## 4. Agent Runtime Kernel
 
 Kernel 是「把计划变成受控执行」的确定性组件集合。它不调用 LLM 做权限判断；LLM 只能在策略允许的范围内提供建议。
+
+### 4.0 `RuntimeKernel` 门面的含义（2026-11-11 定：B 薄门面）
+
+这里的「门面」是 **Facade**：对外只暴露一个统一入口，对内仍然调用现有模块；**不是把系统拆成微服务**。
+
+建议的最小接口（示意）：
+
+```text
+RuntimeKernel.submit(plan) -> RunHandle
+RuntimeKernel.status(run_id) -> RunStatus
+RuntimeKernel.cancel(run_id) -> bool
+RuntimeKernel.observe(run_id) -> Observation
+```
+
+- 外部调用方（CLI / API / Workflow）只和门面打交道，不再各自拼装 Scheduler / Sandbox / Tool Gateway。
+- 门面内部仍然调用现有模块，模块之间可以继续直接互调；不要求每个职责都变成独立进程。
+- 收益：请求/响应契约稳定、可测试、可观测、便于以后替换实现。
+- 代价：多一层适配与迁移；需要防止门面变成「上帝对象」。
+
+门面只做三件事：**参数归一化、权限/资源预检、把请求路由给现有模块**。它不替代 Plan Agent 做规划，
+也不替代 Tool Gateway 做安全裁决。
 
 ### 4.1 Agent Scheduler
 
@@ -184,7 +275,11 @@ Kernel 是「把计划变成受控执行」的确定性组件集合。它不调�
 - `resource_controller.py`：`ResourceController` 抽象、`CgroupV2Controller`、`PsutilController`、`TokenUsageTracker`。
 - `sandbox_limits.py`：沙箱限额。
 
-状态：🟡 Agent 级预算已实现；Workflow 级预算部分；系统级竞争调度、GPU 预算 ⚪ TBD。
+状态：🟡 Agent 级预算已实现；Workflow 级预算已裁决 B（独立 WorkflowBudget，待实现）；系统级竞争调度、GPU 预算 ⚪ TBD。
+
+**复用边界（2026-11-11）**：Resource Manager 优先复用 AgentCgroup 的 cgroup v2 fallback、session 分层、
+tool-call 级临时 cgroup 与 OOM 反馈模式；不整体嵌入其 daemon，也不让外部组件绕过 Tool Gateway / 沙箱。
+详见 `docs/architecture/code-reuse.md`。
 
 ### 4.5 Tool Manager
 
@@ -237,7 +332,21 @@ Kernel 是「把计划变成受控执行」的确定性组件集合。它不调�
 - 记忆、审计、工具、Agent、workflow 各有目录约定。
 - 配额与清理策略分散在模块内。
 
-统一接口与配额模型属 R1 待决策项。
+**裁决（2026-11-11）：B 统一 StorageManager API + 配额**。目标是清掉目录约定分散的问题，
+但先做接口与配额模型，不改变现有路径语义，也不引入独立存储服务。
+
+### 4.8 Event Bus（支撑组件）
+
+职责：
+
+- Agent / Workflow / Tool / Security 之间的异步事件分发。
+- 订阅匹配、优先级、背压、历史查询。
+- 为 System Intelligence 与审计提供观测出口。
+
+当前状态：✅ 内存事件总线已实现；历史只有内存 100 条，重启即丢。
+
+**裁决（2026-11-11）：B 追加写 JSONL/WAL + 启动回放**。持久化失败只降观测，不影响业务；
+轮转、背压、ack/重试/死信在实现单里细化。
 
 ---
 
@@ -287,7 +396,7 @@ created → queued → dispatching → running → completed
 | 层次 | 作用范围 | 控制方式 | 状态 |
 |---|---|---|---|
 | Agent 级 | 单个 Agent 进程 | cgroup / psutil / 内部计数器 | ✅ |
-| Workflow 级 | 一次编排 | `delegation.Budget` / workflow 运行记录 | 🟡 |
+| Workflow 级 | 一次编排 | 独立 `WorkflowBudget`，复用 `delegation.Budget` 的 tighten 语义 | 🟡 设计已定，待实现 |
 | Tool Call 级 | 单次工具调用 | 超时、输出上限、风险等级 | ✅ |
 | 系统级 | 全机 Agent 竞争 | System Intelligence 反馈调度 | ⚪ |
 
@@ -302,6 +411,35 @@ created → queued → dispatching → running → completed
 | CPU | 时间片 / cgroup 配额 | 不是 Token Budget |
 | GPU | 加速器配额 | 当前未纳入预算 |
 | Token Budget | LLM 输入/输出 token | 不是 CPU / RAM |
+
+### 6.3 预算执行策略（2026-11-11 定）
+
+**裁决：CPU / RAM 等硬资源用硬拒绝；token / 成本用 pending 审批；允许小幅浮动。**
+
+| 资源类型 | 默认动作 | 说明 |
+|---|---|---|
+| CPU / RAM / 存储 / 文件写入 | **硬拒绝（fail-closed）** | 超限直接拒绝，不进入执行；避免拖垮整机。 |
+| token / 成本 | **落 pending，等待审批** | 与现有 `approvals` 通道一致；未批准不放行。 |
+| 浮动余量 | **默认 10%，可配置** | 避免边界抖动导致频繁误杀；按「显式参数 > env > 配置 > 默认」解析。 |
+
+建议配置键（名称待实现时冻结）：
+
+```yaml
+budget:
+  margin_percent: 10          # 通用浮动余量
+  hard:
+    cpu_percent: 80
+    memory_mb: 512
+  soft:
+    token_budget: 20000
+    cost_usd: 5.0
+```
+
+- 硬资源超限：`denied` + 审计，不允许「只告警」。
+- token / 成本超限：落 pending，错误信息带 `trm approve <id>`；TTL 过期不放行。
+- 浮动只用于判断边界，不改变最终配额；实际配额仍由 Kernel 分配。
+- 配置缺失 / 坏值 ⇒ 静默走默认，不抛异常。
+- 成本视图放在 `trm status` + `--json`，**不新增顶层命令**（CLI 命令面计数是钉死的）。
 
 ---
 
@@ -338,15 +476,32 @@ created → queued → dispatching → running → completed
 
 ---
 
-## 9. TBD / 待决策
+## 9. 已裁决与剩余 TBD（2026-11-11）
 
-1. 是否引入统一 `RuntimeKernel` 门面对象与统一请求/响应 schema。
-2. Plan Agent 的输出契约与失败回退策略。
-3. Storage Manager 的边界、配额与清理策略。
-4. Workflow 级预算的正式模型。
-5. 系统级调度接口：哪些指标、什么频率、如何反馈给 Plan Agent。
-6. GPU / 网络 / 存储 IO 的预算与隔离。
-7. 多用户边界下的 Runtime 归属（每用户 Runtime vs 系统 Runtime）。
+### 9.1 已裁决
+
+| 决策 | 结论 |
+|---|---|
+| RuntimeKernel 门面 | **B 薄门面**：统一入口与请求/响应 schema，内部模块不拆不改。 |
+| Plan Agent 输出契约 | **B 版本化 schema**：先冻结最小字段，逐步统一；TARL 只带引用与摘要。 |
+| Storage Manager | **B 统一 StorageManager API + 配额**：先接口与配额，不改现有路径语义。 |
+| Workflow 级预算 | **B 独立 WorkflowBudget**：复用 tighten 语义，与 Agent 预算取交集。 |
+| 硬资源超限 | **A 硬拒绝 fail-closed**：CPU / RAM / 存储 / 文件写入。 |
+| token / 成本超限 | **B pending 审批**：落 pending，人工批准后放行。 |
+| 浮动余量 | **默认 10%，可配置**：只用于边界判断，不改变最终配额。 |
+| 成本视图 | **A 放在 `trm status` + `--json`**：不新增顶层命令。 |
+| 外部复用 | **复用优先**：AgentCgroup 第一优先；SchedCP / AgentSight 可选外部工具；ActPlane 只作设计参考。 |
+| 内核基线 | **Linux 7.0**（计划升级）；升级后先做能力自检，不假设所有内核特性自动可用。 |
+
+### 9.2 剩余 TBD
+
+1. Plan schema 的字段冻结时间表与兼容策略。
+2. StorageManager 的配额默认值、清理周期与迁移顺序。
+3. WorkflowBudget 与节点预算的具体组合规则。
+4. 系统级调度接口：哪些指标、什么频率、如何反馈给 Plan Agent。
+5. GPU / 网络 / 存储 IO 的预算与隔离。
+6. 多用户边界下的 Runtime 归属（每用户 Runtime vs 系统 Runtime）。
+7. 成本浮动是按资源分别配置，还是统一一个 `margin_percent`（当前先统一）。
 
 ---
 

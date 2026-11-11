@@ -3,7 +3,7 @@
 > **架构单一事实源**（2026-11-11 重构）。
 > 本文只回答「trimum 是什么、由哪两大核心组成、现有模块归属哪里、哪些已实现、哪些仍是 TBD」。
 > 文件名沿用 `docs/ARCH.md`，不另建重复的 `ARCHITECTURE.md`。
-> 详细设计：`docs/architecture/agent-runtime.md`、`docs/architecture/system-intelligence.md`；
+> 详细设计：`docs/architecture/agent-runtime.md`、`docs/architecture/system-intelligence.md`、`docs/architecture/code-reuse.md`；
 > 路线图：`docs/ROADMAP.md`；安全机制：`docs/SECURITY.md`、`docs/SECURITY-DEFENSE-PLAN.md`、`docs/SANDBOX-PLAN.md`。
 
 **状态记号**：✅ 已实现　🟡 部分实现 / 原型　⚪ 未来设计（TBD）　🚫 已废弃 / 不再采用
@@ -100,6 +100,8 @@ flowchart TB
 8. **Modular**：模块化，但避免过度拆分。
 9. **Local-first**：优先本地运行，减少不必要的数据外传。
 10. **Fail-safe**：AI 决策失败时，系统仍应保持安全和可控。
+11. **Reuse-first**：优先复用成熟实现；许可证、权限模型和依赖成本都可接受时才引入。
+12. **No dependency bloat**：核心保持纯 Python；外部工具按需、可选，不默认启动。
 
 由这些原则派生出的硬约束：
 
@@ -108,6 +110,8 @@ flowchart TB
 - **LLM 推理不进入内核执行路径**；AI 分析与策略决策在用户态完成。
 - **未实现的能力不写成已实现**；不确定的实现细节标记 TBD 或 Future Design。
 - **配置优先**：路径 / 端口 / 阈值按「显式参数 > 环境变量 > 配置文件 > 默认值」解析，缺失或坏值静默走默认。
+- **复用不绕过安全边界**：第三方组件仍须经过 Tool Gateway、沙箱、最小权限与审计。
+- **许可证可追溯**：项目采用 GPL-2.0-only；引入第三方代码必须兼容并保留来源与许可证。
 
 ---
 
@@ -129,7 +133,11 @@ Plan Agent 是 Agent 系统的逻辑规划和调度中枢，负责：
 Agent Runtime 的确定性组件执行。
 
 当前实现：`planner_agent.py`、`transform_agent.py`、`workflow_runtime.py`、`delegation.py` 已承担部分规划/
-委派职责；**统一的 Plan Agent 接口与计划 schema 仍属 🟡 TBD**。
+委派职责；**统一 Plan Agent 契约已裁决 B（版本化 schema），实现仍待拆单**。
+
+**已裁决（2026-11-11）**：Plan Agent 输出采用 **版本化 schema（B）**，包含任务、步骤、资源需求、
+沙箱范围、上下文命名空间、工具能力与审批声明；TARL 只携带引用与摘要。完整字段见
+`docs/architecture/agent-runtime.md` §3.4。
 
 ### 3.2 Agent Runtime Kernel
 
@@ -143,11 +151,11 @@ Kernel 是「把计划变成受控执行」的确定性管理层。逻辑职责�
 | **Resource Manager** | CPU / RAM / IO / 文件写入 / 网络请求预算；cgroup 与 token 计量 | `resource_controller.py`（`CgroupV2Controller` / `PsutilController` / `TokenUsageTracker`） | 🟡 无 GPU 预算；系统级竞争调度 TBD |
 | **Tool Manager** | 工具注册、发现、授权、调用、审计 | `tool_gateway.py` / `tool_dispatchers.py` / `tool_file_loader.py` / `capability.py` | ✅ |
 | **MCP Manager** | MCP Server 管理、连接、工具聚合与权限分配 | `mcp_client.py` / `mcp_registry.py` / `mcp_bridge.py` / `mcp_catalog.py` | ✅ |
-| **Storage Manager** | Agent 工作区、持久化存储、执行产物 | `paths.py` + 现有目录约定；**无统一 Storage Manager 对象** | 🟡 目录约定已存在，统一接口 TBD |
+| **Storage Manager** | Agent 工作区、持久化存储、执行产物 | `paths.py` + 现有目录约定；**无统一 Storage Manager 对象** | 🟡 已裁决 B（统一 API + 配额），待实现 |
 
 **Kernel 的形态**：当前这些模块是**逻辑职责划分**，不是一个叫 `RuntimeKernel` 的类。
-是否需要引入统一门面对象、统一请求/响应 schema，属于 R1 的待决策项（见 `docs/ROADMAP.md`）。
-不要求立即拆成独立服务或进程。
+**已裁决（2026-11-11）：B 薄门面** —— 引入统一入口与请求/响应 schema，但内部模块不拆不改，
+也不要求立即拆成独立服务或进程。门面的职责与接口见 `docs/architecture/agent-runtime.md` §4.0。
 
 ### 3.3 Agent 执行模型
 
@@ -249,8 +257,8 @@ eBPF 是 System Intelligence 的重要基础设施，分两个方向：
 **Enforcement（受控、渐进）**
 
 - cgroup 资源控制：✅ 已通过 `resource_controller.py` 落地。
-- BPF LSM 安全策略：⚪ 未来设计。
-- sched_ext 调度机制：⚪ 未来设计。
+- BPF LSM 安全策略：⚪ 未实现；目标 Linux 7.0，升级后先做能力检查与复用评估。
+- sched_ext 调度机制：⚪ 未实现；目标 Linux 7.0，优先评估 AgentCgroup / SchedCP 等实现，不先自研内核调度器。
 - 与其他内核控制接口协作：⚪ TBD。
 
 **边界**：eBPF 不只是传感器，也可以参与受控的系统行为管理；但 **LLM 推理不得放入内核执行路径**。
@@ -273,6 +281,10 @@ helper 只接受 `bpf.load` / `bpf.unload` / `bpf.stats` / `bpf.tail` 四个动�
 **状态：⚪ Future Design**。当前只有 `system_monitor.py`（阈值告警）、`resource_controller.py`（用量采样）
 与 `behavior_monitor.py`（安全行为基线）这几块「原材料」，还没有统一的工作负载分类/瓶颈分析引擎。
 
+**已裁决（2026-11-11）：A 规则 / 阈值优先**。trimum 定位是个人 AI 工作站，不做多租户高并发；
+分析层复用 AgentCgroup / SchedCP / AgentSight 的指标与事件设计，但不把其运行时整体嵌入。
+目标内核基线为 Linux 7.0；升级后先跑能力自检，再决定哪些复用进入主线。详见 `docs/architecture/code-reuse.md`。
+
 ### 4.3 Policy Repository
 
 系统策略仓库，计划沉淀：
@@ -286,6 +298,7 @@ helper 只接受 `bpf.load` / `bpf.unload` / `bpf.stats` / `bpf.tail` 四个动�
 
 **原则**：策略优化优先复用已有策略，而不是每次都让模型从零生成。
 **状态：⚪ Future Design**。现有 `config/policy.yaml`、威胁剧本、eBPF 程序清单是**前身**，不是完整的策略仓库。
+**已裁决（2026-11-11）：A Git 版本化 YAML**；不先上 SQLite，签名与淘汰机制待实现时细化。
 
 ### 4.4 Policy Engine
 
@@ -299,6 +312,7 @@ helper 只接受 `bpf.load` / `bpf.unload` / `bpf.stats` / `bpf.tail` 四个动�
 
 **状态：⚪ Future Design**。注意：现有 `policy_engine.py` 是 **Agent Runtime 的安全策略引擎**
 （allow / confirm / deny），不是 System Intelligence 的调度策略引擎，两者不要混名。
+**已裁决（2026-11-11）：策略生成 = B AI 提议 + 人工审批 + 强制验证**；不允许自动部署。
 
 ### 4.5 Execution Verifier
 
@@ -324,6 +338,8 @@ Execution Verifier 是 System Intelligence 的安全边界，负责：
 
 **状态：🟡 部分实现**。当前 `trimum-bpf-helper` 是一个受限特权控制器，只做四个 eBPF 动词，
 带 `CAP_BPF` + `CAP_PERFMON`、uid 校验、sha256 校验、只读程序目录；它不是通用内核控制接口。
+**已裁决（2026-11-11）：C 先不拆**；不扩 helper、不另起 controller，人类审批顶着，最小权限不放松。
+Linux 7.0 只打开 sched_ext / BPF LSM / memcg 的评估窗口；实际 capability 与加载权限必须先验证。
 
 ### 4.7 当前实现边界汇总
 
@@ -332,12 +348,12 @@ Execution Verifier 是 System Intelligence 的安全边界，负责：
 | eBPF 观测链路（helper → loader → 审计回灌） | ✅ | 真机已跑通；只有观测，没有策略执行 |
 | cgroup 资源控制 | ✅ | `CgroupV2Controller`；Agent 级预算 |
 | 系统阈值告警 | ✅ | `SystemMonitor`；CPU / 内存 / 磁盘 / load |
-| 工作负载分类 / 瓶颈分析 | ⚪ | 没有统一引擎 |
-| 策略仓库 | ⚪ | 只有零散策略文件 |
+| 工作负载分类 / 瓶颈分析 | ⚪ | 没有统一引擎；已定 A 规则优先 |
+| 策略仓库 | ⚪ | 已定 A Git 版本化 YAML；待实现 |
 | 调度策略选择 / 生成 | ⚪ | 没有实现 |
 | 策略静态分析 / 基准 / 自动回滚 | ⚪ | 没有实现 |
-| BPF LSM / sched_ext | ⚪ | 没有实现 |
-| 通用特权控制器 | ⚪ | 只有受限制的 bpf helper |
+| BPF LSM / sched_ext | ⚪ | 未实现；Linux 7.0 升级后做能力检查、复用评估与 PoC，不阻塞 MVP |
+| 通用特权控制器 | ⚪ | 已定 C 冻结现状，人类审批顶着 |
 
 ---
 
@@ -419,7 +435,7 @@ flowchart LR
 
 - Workload Analysis Engine、Policy Repository、Policy Engine。
 - 策略静态分析、基准测试、自动回滚。
-- BPF LSM、sched_ext 等受控强制执行。
+- BPF LSM、sched_ext 等受控强制执行；优先评估 AgentCgroup / SchedCP 等实现，能复用则复用，不能复用才自研。
 - GPU 资源预算与系统级竞争调度。
 
 ### 7.4 已废弃 / 不再采用
@@ -440,6 +456,7 @@ flowchart LR
 | 总体架构 | 本文 |
 | Agent Runtime 详细设计 | `docs/architecture/agent-runtime.md` |
 | System Intelligence 详细设计 | `docs/architecture/system-intelligence.md` |
+| 代码复用与许可证边界 | `docs/architecture/code-reuse.md` |
 | 路线图 | `docs/ROADMAP.md` |
 | 安全治理 | `docs/SECURITY.md`、`docs/SECURITY-DEFENSE-PLAN.md` |
 | 沙箱机制 | `docs/SANDBOX-PLAN.md`、`docs/SANDBOX-SCOPE.md` |
@@ -456,18 +473,41 @@ flowchart LR
 
 ---
 
-## 9. 待决策 / TBD
+## 9. 已裁决与剩余 TBD（2026-11-11）
 
-以下问题不在本次文档重构中擅自决定，留给后续设计或人工裁决：
+### 9.1 已裁决
 
-1. **Runtime Kernel 是否引入统一门面对象**：现有模块按职责分散；是否需要一个 `RuntimeKernel` 统一入口与请求 schema？
-2. **Plan Agent 的输出契约**：计划 schema、资源需求表达、能力需求表达、失败回退策略。
-3. **Storage Manager 的边界**：工作区、产物、缓存、审计、记忆分别归谁管；是否需要统一配额。
-4. **系统级调度接口**：System Intelligence 向 Agent Runtime 反馈的指标与建议格式。
-5. **策略仓库的存储形态**：文件、SQLite、还是版本化目录；策略来源与签名如何记录。
-6. **Execution Verifier 的验证等级**：哪些策略必须静态分析 + 基准 + 隔离测试，哪些可以只过内核 verifier。
-7. **特权控制器的通用化边界**：是否扩展 bpf helper，还是另起一个受控 controller；能力如何最小化。
-8. **GPU / 网络 / 存储 IO 的预算模型**：当前未纳入或只有部分采样。
+| 决策 | 结论 |
+|---|---|
+| 内核基线 | **Linux 7.0**（计划升级）；升级前 6.8 只作当前实测事实，不作为长期约束。 |
+| 项目许可证 | **GPL-2.0-only**；从下一个发布版本起，历史版本仍为 MIT。 |
+| 代码复用 | **复用优先**：AgentCgroup 第一优先；SchedCP / AgentSight 可选外部工具；ActPlane 只作设计参考；核心不引入 Rust 工具链或新常驻服务。 |
+| RuntimeKernel 门面 | **B 薄门面**：统一入口与 schema，内部模块不拆不改。 |
+| Plan Agent 输出契约 | **B 版本化 schema**：先冻结最小字段；TARL 只带引用与摘要。 |
+| Storage Manager | **B 统一 API + 配额**：先接口与配额，不改现有路径语义。 |
+| Workflow 级预算 | **B 独立 WorkflowBudget**：复用 tighten，与 Agent 预算取交集。 |
+| EventBus 历史 | **B JSONL/WAL + 启动回放**：持久化失败不影响业务。 |
+| 硬资源超限 | **A 硬拒绝 fail-closed**：CPU / RAM / 存储 / 文件写入。 |
+| token / 成本超限 | **B pending 审批**：默认 10% 浮动，可配置。 |
+| 成本视图 | **A 放在 `trm status` + `--json`**：不新增顶层命令。 |
+| eBPF perf gate | **A 短期保持 `perf_event_paranoid=3`**；纯 `bpf(2)` 作后备设计。 |
+| 审计链刷屏 | **先诊断**；确认良性后隔离旧链 + 新链；疑似篡改保留证据。 |
+| Workload Analysis | **A 规则 / 阈值优先**；复用 AgentCgroup / SchedCP / AgentSight 的指标与事件设计，不整体嵌入其运行时。 |
+| Policy Repository | **A Git 版本化 YAML**；不先上 SQLite。 |
+| 策略生成 | **B AI 提议 + 人工审批 + 强制验证**。 |
+| Privileged Controller | **C 先不拆**；人类审批顶着，最小权限不放松。 |
+| 反馈闭环 | **暂缓**，等 R1 / R2 / R4 稳定。 |
+
+### 9.2 剩余 TBD
+
+1. **Plan schema 的字段冻结与兼容策略**：最小字段先定哪些，后续如何演进。
+2. **StorageManager 的配额默认值与迁移顺序**。
+3. **系统级调度接口**：System Intelligence 向 Agent Runtime 反馈的指标与建议格式。
+4. **Execution Verifier 的验证等级**：哪些策略必须静态分析 + 基准 + 隔离测试。
+5. **Linux 7.0 的实际能力与 PoC 准入**：sched_ext、BPF LSM、memcg_bpf_ops 是否可用，需升级后逐项验证。
+6. **GPU / 网络 / 存储 IO 的预算模型**：当前未纳入或只有部分采样。
+7. **多用户边界下的 Runtime 归属**：每用户 Runtime vs 系统 Runtime。
+8. **AgentCgroup 许可证精确版本与 vendor 边界**：确认 `GPL-2.0-only` / `GPL-2.0-or-later`，确定可复用模块与来源记录。
 
 ---
 

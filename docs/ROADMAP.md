@@ -3,6 +3,7 @@
 > 2026-11-11 按新架构主线重写。
 > 本文只描述方向、阶段与验收口径；具体任务与进度见 `STATUS.md` / `TODO.md`，架构裁决见 `docs/ARCH.md`。
 > 状态：✅ 已完成　🟡 进行中　⚪ 未开始　🚫 不做
+> 目标内核基线：**Linux 7.0**（计划升级）；升级前 6.8 只作当前实测事实，不作为长期约束。
 
 ---
 
@@ -33,6 +34,8 @@ flowchart LR
 
 - 重写 `README.md` 与 `docs/ARCH.md`。
 - 新增 `docs/architecture/agent-runtime.md`、`docs/architecture/system-intelligence.md`。
+- 新增 `docs/architecture/code-reuse.md`，记录复用矩阵、许可证边界与 Linux 7.0 前置检查。
+- 许可证从 MIT 改为 GPL-2.0-only（从下一个发布版本起；历史版本仍为 MIT）。
 - 清理过期快照与已被取代的实现蓝图。
 - 更新相关设计文档的归属标注。
 
@@ -50,7 +53,7 @@ flowchart LR
 
 候选工作：
 
-1. **Kernel 门面**：是否引入统一 `RuntimeKernel` 对象 / 请求 schema（待裁决）。
+1. **Kernel 门面**：**已裁决 B 薄门面**（统一入口/schema，内部模块不拆不改）。
 2. **Plan Agent 契约**：计划 schema、资源需求、能力需求、失败回退。
 3. **Storage Manager**：工作区、产物、缓存、日志、审计的配额与清理。
 4. **Workflow 级预算**：步数、token、并发、资源上限。
@@ -75,6 +78,9 @@ flowchart LR
 
 **目标**：把「系统正在发生什么」变成稳定、低成本、可查询的数据面。
 
+**已裁决（2026-11-11）：eBPF 短期保持 `perf_event_paranoid=3`（A）**；纯 `bpf(2)` attach 只作后备设计。
+审计链刷屏先诊断，不直接 rechain。
+
 候选工作：
 
 1. eBPF 事件 schema 与采样策略（避免高频事件拖垮业务）。
@@ -95,6 +101,10 @@ flowchart LR
 
 **目标**：从原始指标走向「工作负载分类 + 瓶颈判断」。
 
+**已裁决（2026-11-11）：A 规则 / 阈值优先**。个人 AI 工作站，不做高并发；
+复用 AgentCgroup 的 cgroup 生命周期、tool-call 临时 cgroup、hint / OOM 反馈与 JSONL metrics；
+SchedCP / AgentSight 作为可选外部工具，不整体嵌入。目标内核 Linux 7.0，升级后先做能力自检。
+
 候选工作：
 
 1. 工作负载分类：coding / shell / browser / mcp / batch / unknown。
@@ -114,6 +124,8 @@ flowchart LR
 ## R4 — 策略仓库与策略选择 ⚪
 
 **目标**：先复用，再调整，最后才生成。
+
+**已裁决（2026-11-11）：存储 A（Git 版本化 YAML）；生成边界 B（AI 提议 + 人工审批 + 强制验证）。**
 
 候选工作：
 
@@ -136,6 +148,9 @@ flowchart LR
 
 **目标**：让「AI 辅助的系统调整」可控、可验证、可回滚。
 
+**已裁决（2026-11-11）：Privileged Controller C（先不拆，人类审批顶着）。**
+Linux 7.0 升级后，BPF LSM / sched_ext 可以做能力检查与最小 PoC；仍不阻塞 MVP，也不放宽 helper 权限。
+
 候选工作：
 
 1. 静态分析 / 运行前验证。
@@ -157,6 +172,8 @@ flowchart LR
 ## R6 — 反馈闭环 ⚪
 
 **目标**：Agent Runtime 与 System Intelligence 形成稳定闭环。
+
+**已裁决（2026-11-11）：暂缓**，等 R1 / R2 / R4 稳定后再做。
 
 候选工作：
 
@@ -198,16 +215,37 @@ flowchart LR
 
 ---
 
-## 待决策清单
+## 已裁决（2026-11-11）
 
-1. Runtime Kernel 是否引入统一门面对象。
-2. Plan Agent 输出契约。
-3. Storage Manager 边界与配额。
-4. 系统级调度反馈接口。
-5. Policy Repository 存储形态。
-6. Execution Verifier 验证等级。
-7. Privileged Controller 通用化边界。
-8. GPU / 网络 / 存储 IO 预算模型。
-9. 多用户下 Runtime 的归属。
+| 决策 | 结论 |
+|---|---|
+| 内核基线 | Linux 7.0（计划升级）；升级前 6.8 只作实测事实。 |
+| 许可证 | GPL-2.0-only；历史版本仍为 MIT。 |
+| 代码复用 | AgentCgroup 第一优先；SchedCP / AgentSight 可选外部；ActPlane 只作设计参考；核心不引入 Rust 工具链或新常驻服务。 |
+| RuntimeKernel | B 薄门面：统一入口/schema，内部模块不拆。 |
+| Plan Agent | B 版本化 schema；TARL 只带引用与摘要。 |
+| Storage Manager | B 统一 API + 配额。 |
+| Workflow 预算 | B 独立 WorkflowBudget。 |
+| EventBus | B JSONL/WAL + 回放。 |
+| 成本视图 | A `trm status` + `--json`。 |
+| 硬资源 / token 成本 | 硬资源 A 硬拒绝；token/成本 B pending 审批；默认 10% 浮动。 |
+| eBPF perf gate | A 短期 `perf_event_paranoid=3`；纯 `bpf(2)` 后备。 |
+| 审计链刷屏 | 先诊断；良性则隔离旧链 + 新链。 |
+| Workload Analysis | A 规则/阈值优先；复用 AgentCgroup / SchedCP / AgentSight 的指标与事件设计，不整体嵌入其运行时。 |
+| Policy Repository | A Git 版本化 YAML。 |
+| 策略生成 | B AI 提议 + 人工审批 + 强制验证。 |
+| Privileged Controller | C 先不拆，人类审批顶着。 |
+| 反馈闭环 | 暂缓，等 R1/R2/R4 稳定。 |
 
-这些决策在 `docs/ARCH.md` §9 与两份详细设计文档中保持同步。
+## 剩余待决策
+
+1. Plan schema 字段冻结与兼容策略。
+2. StorageManager 配额默认值与迁移顺序。
+3. 系统级调度反馈接口。
+4. Execution Verifier 验证等级。
+5. Linux 7.0 上 sched_ext / BPF LSM / memcg_bpf_ops 的实际能力与 PoC 准入。
+6. GPU / 网络 / 存储 IO 预算模型。
+7. 多用户下 Runtime 归属。
+8. AgentCgroup 的 GPL 精确版本与可 vendor 模块边界。
+
+这些决策在 `docs/ARCH.md` §9、两份详细设计文档与 `docs/architecture/code-reuse.md` 中保持同步。

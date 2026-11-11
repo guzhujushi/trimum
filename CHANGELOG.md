@@ -4,6 +4,14 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## Unreleased
+
+### Changed
+- 许可证从 MIT 改为 **GPL-2.0-only**（从下一个发布版本起；历史提交与已发布版本仍按 MIT 授权）。
+- 架构文档明确 Linux 7.0 目标基线、复用优先策略与外部项目边界；新增 `docs/architecture/code-reuse.md`。
+- AgentCgroup 作为 cgroup / 资源控制方向的第一优先复用对象；SchedCP / AgentSight 仅作可选外部工具，
+  ActPlane 仅作设计参考；核心运行时继续使用纯 Python，不引入 Rust 工具链或新的常驻服务。
+
 ## v0.5.0 — 2026-10-03
 
 ### Added
