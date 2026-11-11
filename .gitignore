@@ -156,3 +156,7 @@ AGENTS.md
 #       下一次提交才会真正把它们从公开库 HEAD 移除（旧历史仍在，故本地私库/旧库口径不变）。
 scripts/gui_session.sh
 scripts/ubuntu_slim_desktop.sh
+
+# Omarchy 桌面配置参考件（过期、非 trimum 架构文档；2026-11-11 定）
+# 说明：这些文件此前被跟踪；本次 `git rm --cached` 后不再跟踪，本地文件保留。
+docs/omarchy-ref/

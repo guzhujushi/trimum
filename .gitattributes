@@ -42,7 +42,6 @@
 
 # 无扩展名的脚本 / 配置（真机 + 文档引用件）
 scripts/trm text eol=lf
-docs/omarchy-ref/git-config text eol=lf
 
 # Binary (images, etc)
 *.png binary
