@@ -157,6 +157,30 @@ AGENTS.md
 scripts/gui_session.sh
 scripts/ubuntu_slim_desktop.sh
 
+# 个人运维脚本（与 trimum 核心运行时无关；2026-11-22 清理）
+#   Gitea / 博客同步 / 代理 / 隧道 / VPS / 证书监控 / 真机 user-units / 本机编辑器修补
+# 说明：本地文件保留，只从 Git 索引移除；公开仓库不再携带这些机器与个人基础设施脚本。
+scripts/gitea_gen_token.sh
+scripts/setup_gitea_mailer.sh
+scripts/sync_blog_friends_to_gitea.py
+scripts/install_mihomo.sh
+scripts/mihomo_update.sh
+scripts/with_proxy.sh
+scripts/tunnel_up.sh
+scripts/serve_web_up.sh
+scripts/vps_health.sh
+scripts/enable_linger.sh
+scripts/install_user_units.sh
+scripts/cert-watch-motd.sh
+scripts/cert-watch.service
+scripts/cert-watch.timer
+scripts/cert_watch.sh
+scripts/fix_codex_audio_dep.sh
+scripts/fix_codex_ext_sandbox.sh
+scripts/fix_codex_webview_timeout.sh
+scripts/kill_vscode_cli_forkbomb.sh
+scripts/user-units/
+
 # Omarchy 桌面配置参考件（过期、非 trimum 架构文档；2026-11-11 定）
 # 说明：这些文件此前被跟踪；本次 `git rm --cached` 后不再跟踪，本地文件保留。
 docs/omarchy-ref/
