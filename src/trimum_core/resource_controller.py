@@ -68,6 +68,25 @@ class ResourceCheckResult:
     violations: list[Violation] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class CgroupApplyResult:
+    """Outcome of trying to place a PID under a cgroup.
+
+    ``verified is True`` means the PID was read back from ``cgroup.procs``.
+    ``None`` means the controller could not verify (for example, non-cgroup
+    platforms or an unreadable hierarchy); callers enforcing a *hard* limit
+    must treat that as failure rather than success.
+    """
+
+    applied: bool
+    verified: bool | None = None
+    detail: str = ""
+
+    @property
+    def enforced(self) -> bool:
+        return self.applied and self.verified is True
+
+
 @dataclass
 class TokenUsage:
     """Token usage for one or more LLM calls."""
@@ -203,7 +222,7 @@ class ResourceController(ABC):
         agent_id: str,
         pid: int,
         limits: ResourceLimits,
-    ) -> None:
+    ) -> "CgroupApplyResult | None":
         """Apply cgroup v2 constraints to a process."""
 
     async def assigned_pids(self, agent_id: str) -> list[int]:
@@ -290,8 +309,13 @@ class PsutilController(ResourceController):
         agent_id: str,
         pid: int,
         limits: ResourceLimits,
-    ) -> None:
+    ) -> CgroupApplyResult:
         log.warning("platform not supported")
+        return CgroupApplyResult(
+            applied=False,
+            verified=False,
+            detail="cgroup v2 is not supported on this platform",
+        )
 
     async def assigned_pids(self, agent_id: str) -> list[int]:
         """PIDs listed in the agent's ``cgroup.procs`` (empty when unreadable)."""
@@ -361,6 +385,38 @@ def _format_cpu_max(max_cpu_percent: float) -> str:
     return f"{quota} {period}"
 
 
+def _parse_io_stat(value: str) -> tuple[int, int]:
+    """Sum ``rbytes`` / ``wbytes`` from a cgroup v2 ``io.stat`` file.
+
+    Real format is one device per line, with the device number as the first
+    field::
+
+        8:0 rbytes=90430464 wbytes=299008000 rios=123 wios=456
+        8:16 rbytes=1024 wbytes=2048
+
+    The previous implementation treated the first field as a key, so it never
+    matched ``rbytes``/``wbytes``.  Sum across devices because
+    :class:`ResourceUsage` has one aggregate byte counter pair.
+    """
+
+    read_bytes = 0
+    write_bytes = 0
+    for line in value.splitlines():
+        for field_value in line.split():
+            key, sep, raw = field_value.partition("=")
+            if not sep:
+                continue
+            try:
+                number = int(raw)
+            except ValueError:
+                continue
+            if key == "rbytes":
+                read_bytes += number
+            elif key == "wbytes":
+                write_bytes += number
+    return read_bytes, write_bytes
+
+
 class CgroupV2Controller(ResourceController):
     """Linux cgroup v2 controller.
 
@@ -408,15 +464,7 @@ class CgroupV2Controller(ResourceController):
 
         io_stat = self._read_text(agent_id, "io.stat")
         if io_stat is not None:
-            for line in io_stat.splitlines():
-                key, _, value = line.partition(" ")
-                try:
-                    if key == "rbytes":
-                        usage.io_read_bytes = int(value)
-                    elif key == "wbytes":
-                        usage.io_write_bytes = int(value)
-                except ValueError:
-                    continue
+            usage.io_read_bytes, usage.io_write_bytes = _parse_io_stat(io_stat)
 
         return usage
 
@@ -489,7 +537,8 @@ class CgroupV2Controller(ResourceController):
         agent_id: str,
         pid: int,
         limits: ResourceLimits,
-    ) -> None:
+    ) -> CgroupApplyResult:
+        detail = ""
         try:
             agent_dir = self._agent_dir(agent_id)
             agent_dir.mkdir(parents=True, exist_ok=True)
@@ -506,12 +555,29 @@ class CgroupV2Controller(ResourceController):
                 str(int(pid)),
                 encoding="utf-8",
             )
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
+            detail = f"{type(exc).__name__}: {exc}"
             log.warning(
                 "apply_cgroup failed for %s",
                 agent_id,
                 exc_info=True,
             )
+            return CgroupApplyResult(applied=False, verified=False, detail=detail)
+
+        pids = await self.assigned_pids(agent_id)
+        if not pids:
+            return CgroupApplyResult(
+                applied=True,
+                verified=None,
+                detail="cgroup.procs is empty or unreadable",
+            )
+        if pid in pids:
+            return CgroupApplyResult(applied=True, verified=True, detail="pid listed")
+        return CgroupApplyResult(
+            applied=True,
+            verified=False,
+            detail="pid is not listed in cgroup.procs",
+        )
 
     async def assigned_pids(self, agent_id: str) -> list[int]:
         """PIDs listed in the agent's ``cgroup.procs`` (empty when unreadable)."""
@@ -676,6 +742,33 @@ def resource_limits_from_config(config: dict[str, Any] | None) -> ResourceLimits
     )
 
 
+def resource_enforcement_from_config(config: dict[str, Any] | None) -> str:
+    """Return ``hard`` or ``soft`` for an agent spawn request.
+
+    ``hard`` means resource constraints are a precondition: if the cgroup
+    cannot be applied and verified, the agent must not keep running.  ``soft``
+    preserves the historical best-effort behaviour and reports degradation in
+    the spawn result.  Missing/invalid values fall back to ``soft``.
+    """
+
+    if not isinstance(config, dict):
+        return "soft"
+
+    raw: Any = config.get("resource_enforcement")
+    nested = config.get("resource_limits")
+    if raw is None and isinstance(nested, dict):
+        raw = nested.get("enforcement")
+    if isinstance(raw, str) and raw.strip().lower() in {
+        "hard",
+        "strict",
+        "required",
+        "fail-closed",
+        "fail_closed",
+    }:
+        return "hard"
+    return "soft"
+
+
 def create_resource_controller() -> ResourceController:
     """Return the best available resource controller for this platform.
 
@@ -689,6 +782,7 @@ def create_resource_controller() -> ResourceController:
 
 
 __all__ = [
+    "CgroupApplyResult",
     "CgroupV2Controller",
     "PsutilController",
     "ResourceCheckResult",
@@ -699,5 +793,6 @@ __all__ = [
     "TokenUsageTracker",
     "Violation",
     "create_resource_controller",
+    "resource_enforcement_from_config",
     "resource_limits_from_config",
 ]

@@ -93,7 +93,7 @@ trimum 已有可运行的 Agent Runtime 主体；System Intelligence 目前以 *
 > **真机内核基线：Linux 7.0.0-31-generic（2026-11-22 已升级）。** 升级后只读自检确认：
 > Landlock **ABI 8**、seccomp `user_notif`、cgroup v2、`systemd-run --user` 的 `MemoryMax` / `CPUQuota`
 > 均可用；`CONFIG_BPF_LSM=y`、`CONFIG_SCHED_CLASS_EXT=y` 已具备，但实际接入仍待能力 PoC。
-> 7.0 上全量回归已复跑：`2507 passed / 4 skipped / 0 failed`。
+> 7.0 上全量回归已复跑：`2522 passed / 4 skipped / 0 failed`。
 > 6.8 的 ABI 4 / bwrap 被拒等实测数据保留在 `docs/SANDBOX-PLAN.md`，只作历史事实。
 
 | 能力 | 状态 | 主要落点 |

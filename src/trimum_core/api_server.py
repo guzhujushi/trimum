@@ -13,8 +13,8 @@ from typing import Any, Optional
 
 import json
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .models import (
@@ -41,6 +41,7 @@ from .logger import setup_logging, get_logger
 from .ipc_handler import IpcHandler, IpcUnavailableError
 from .workflow_event_driver import WorkflowEventDriver
 from .workflow_runtime import WorkflowRuntime
+from .http_auth import ADMIN_TOKEN_HEADER, MIN_TOKEN_LENGTH, check_admin_token
 
 logger = get_logger("api_server")
 
@@ -515,6 +516,51 @@ def create_app(config: Config) -> FastAPI:
 
     # Store state
     app.state.trimum = state
+
+    @app.middleware("http")
+    async def http_admin_auth(request: Request, call_next):
+        """Require caller authentication for every management API route.
+
+        ``/health`` stays public so liveness probes keep working.  Everything
+        under ``/api`` is management surface: it can execute tools, start or
+        stop agents, write context, and issue JIT approvals.  Binding to
+        loopback is not authentication — other local processes can connect.
+        """
+
+        path = request.url.path
+        if path != "/api" and not path.startswith("/api/"):
+            return await call_next(request)
+
+        verdict = check_admin_token(
+            config, request.headers.get(ADMIN_TOKEN_HEADER, "")
+        )
+        if verdict == "ok":
+            return await call_next(request)
+        if verdict == "disabled":
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": (
+                        "HTTP management API is disabled until an admin token is "
+                        "configured; use the Unix socket or set "
+                        "core.http_admin_token / TRIMUM_HTTP_ADMIN_TOKEN"
+                    )
+                },
+            )
+        if verdict == "weak":
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": (
+                        "configured HTTP admin token is too short; use at least "
+                        f"{MIN_TOKEN_LENGTH} characters"
+                    )
+                },
+            )
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "invalid HTTP admin token"},
+        )
 
     # ─── Routes ────────────────────────────────────────────────
 

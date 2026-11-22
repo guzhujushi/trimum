@@ -6,6 +6,9 @@ core:
   port: 8321
   socket_path: "/run/trimum/trimum.sock"
   workers: 1
+  # HTTP 管理面 token（至少 16 字符）；未设置时 /api/* 一律拒绝，只留 /health。
+  # 也可用环境变量 TRIMUM_HTTP_ADMIN_TOKEN 覆盖；本地管理优先走 Unix socket。
+  # http_admin_token: "change-me-0123456789abcdef"
 
 logging:
   level: info

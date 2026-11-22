@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from trimum_core.agent_manager import AgentManager
 from trimum_core.models import SpawnRequest
-from trimum_core.resource_controller import ResourceLimits
+from trimum_core.resource_controller import CgroupApplyResult, ResourceLimits
 
 
 class RecordingController:
@@ -33,6 +33,12 @@ class RecordingController:
 
     async def apply_cgroup(self, agent_id, pid, limits):
         self.applied.append((agent_id, pid, limits))
+
+
+class UnenforcedController(RecordingController):
+    async def apply_cgroup(self, agent_id, pid, limits):
+        self.applied.append((agent_id, pid, limits))
+        return CgroupApplyResult(False, False, "cgroup unavailable")
 
 
 SLEEPER = "import time\nwhile True: time.sleep(0.05)\n"
@@ -88,3 +94,43 @@ async def test_spawn_applies_cgroup_with_real_pid(tmp_path):
         assert applied_limits.max_memory_mb == 128.0
     finally:
         await manager.stop(resp.agent_id)
+
+
+@pytest.mark.asyncio
+async def test_hard_enforcement_failure_refuses_to_keep_agent_running(tmp_path):
+    """hard 模式：cgroup 施加失败 → 终止进程并返回 FAILED。"""
+    write_agent(tmp_path, "demo")
+    controller = UnenforcedController()
+    manager = AgentManager(resource_controller=controller, agents_root=str(tmp_path))
+
+    resp = await manager.spawn(SpawnRequest(
+        agent_type="demo",
+        config={"resource_enforcement": "hard"},
+    ))
+
+    assert resp.status.value == "failed"
+    assert "resource enforcement required" in resp.message
+    assert resp.pid is not None
+    assert not _pid_alive(resp.pid)
+
+
+@pytest.mark.asyncio
+async def test_soft_enforcement_failure_is_reported_but_keeps_running(tmp_path):
+    """soft 模式：允许降级，但 spawn 结果必须显式标注降级。"""
+    write_agent(tmp_path, "demo")
+    controller = UnenforcedController()
+    manager = AgentManager(resource_controller=controller, agents_root=str(tmp_path))
+
+    resp = await manager.spawn(SpawnRequest(agent_type="demo"))
+
+    try:
+        assert resp.status.value == "running"
+        assert "resource limits degraded" in resp.message
+    finally:
+        await manager.stop(resp.agent_id)
+
+
+def _pid_alive(pid: int) -> bool:
+    import psutil
+
+    return psutil.pid_exists(pid)

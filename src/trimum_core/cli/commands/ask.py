@@ -10,11 +10,17 @@ from .._utils import fail, is_quiet, load_config, print_json, wants_json
 
 
 class _QuietConsole:
-    """No-op console used for ``--json`` / ``--quiet`` output."""
+    """No-op console used for ``--json`` / ``--quiet`` output.
+
+    Non-interactive output is not consent.  ``confirm`` must fail closed:
+    callers that need high-risk operations approved have to use an explicit
+    approval channel (``trm approve`` / a pre-issued credential), not the
+    absence of a prompt.
+    """
 
     async def confirm(self, question: str, default: bool = False) -> bool:
         del question, default
-        return True
+        return False
 
     async def prompt(self, text: str, default: str = "") -> str:
         del text

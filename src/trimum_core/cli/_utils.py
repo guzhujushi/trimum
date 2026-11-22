@@ -185,12 +185,17 @@ def http_json(
     """Call the daemon HTTP API, returning ``None`` when it is unavailable."""
     try:
         import httpx
+        from trimum_core.http_auth import ADMIN_TOKEN_HEADER, configured_admin_token
 
         host = config.host
         if host in {"0.0.0.0", "::"}:
             host = "127.0.0.1"
         url = f"http://{host}:{config.port}{path}"
-        response = httpx.request(method, url, json=json_data, timeout=timeout)
+        token = configured_admin_token(config)
+        headers = {ADMIN_TOKEN_HEADER: token} if token else None
+        response = httpx.request(
+            method, url, json=json_data, headers=headers, timeout=timeout
+        )
         response.raise_for_status()
         return response.json()
     except Exception:

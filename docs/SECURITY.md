@@ -107,6 +107,23 @@ steps:
         approvals: {allow: []}        # 该节点整体覆盖顶层（空 = 不放行，收紧到默认 fail-closed）
 ```
 
+### HTTP 管理面认证（2026-11-22）
+
+HTTP（`127.0.0.1:8321`）与 Unix socket 暴露同一批管理操作：执行工具、启停 Agent、
+读写 Context、签发 JIT 一次性令牌。**loopback 不构成身份认证**——同机任何进程都能连
+`127.0.0.1`，所以 `core.http_enabled=true` 时 `/api/*` 一律要求调用者 token；
+只有 `/health` 保持公开。
+
+| 配置项 | 环境变量 | 默认 | 说明 |
+|---|---|---|---|
+| `core.http_admin_token` | `TRIMUM_HTTP_ADMIN_TOKEN` | 空 | HTTP 管理面 token；至少 16 字符。空 ⇒ `/api/*` 全部 403（fail-closed） |
+
+调用方通过 `X-Trimum-Admin-Token` 头提交。优先级按项目口径：环境变量 > 配置文件 > 空默认。
+状态码：未配置 ⇒ **403**；配置了但短于 16 字符 ⇒ **503**；缺失 / 错误 / 畸形 token ⇒ **401**。
+token 不写日志、不回显；比较使用常量时间的字节级 `hmac.compare_digest`。
+未配置 token 时应走 Unix socket（`TRIMUM_SOCKET` / `$XDG_RUNTIME_DIR/trimum.sock`）。
+非交互 `--quiet` / `--json` 的 `confirm()` 也按 fail-closed 处理，不会因为没有弹窗而自动放行。
+
 ## Behavior Monitor 检测项
 
 | 检测 | 方法 | 阈值 |

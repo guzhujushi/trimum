@@ -169,6 +169,9 @@ DEFAULT_CONFIG = {
         # HTTP（TCP 127.0.0.1:8321）面开关。默认先 True：socket 这一侧的覆盖面
         # 补齐之前就关掉它，CLI 会瘸（见 docs/SANDBOX-PLAN.md §9.3.5）。
         "http_enabled": True,
+        # HTTP 管理面调用者认证。为空时 /api/* 一律 fail-closed（只留 /health），
+        # 本地管理请走 Unix socket；显式配置键或 TRIMUM_HTTP_ADMIN_TOKEN 才能开。
+        "http_admin_token": "",
     },
     "logging": {
         "level": "INFO",

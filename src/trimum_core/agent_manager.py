@@ -19,8 +19,10 @@ from .agent_launcher import launch_agent, resolve_agent_script
 from .logger import get_logger
 from .models import AgentInfo, AgentStatus, SpawnRequest, SpawnResponse
 from .resource_controller import (
+    CgroupApplyResult,
     ResourceController,
     create_resource_controller,
+    resource_enforcement_from_config,
     resource_limits_from_config,
 )
 
@@ -154,20 +156,61 @@ class AgentManager:
                 info.pid = pid
                 message = f"Agent '{agent_id}' spawned (pid={pid})"
 
+            record = self._AgentRecord(info=info, process=process)
+
             limits = resource_limits_from_config(request.config)
+            enforcement = resource_enforcement_from_config(request.config)
+            enforcement_ok: bool | None = None
+            enforcement_detail = ""
             try:
                 await self._resource_controller.set_limits(agent_id, limits)
                 if pid is not None and info.status == AgentStatus.RUNNING:
                     # 真实 PID 绑定 cgroup v2（Linux）/ PsutilController（其它平台）
-                    await self._resource_controller.apply_cgroup(agent_id, pid, limits)
-            except Exception:
+                    result = await self._resource_controller.apply_cgroup(
+                        agent_id, pid, limits
+                    )
+                    if isinstance(result, CgroupApplyResult):
+                        enforcement_ok = result.enforced
+                        enforcement_detail = result.detail
+                    else:
+                        # 兼容只实现旧签名的 controller：读回确认，别假定成功。
+                        enforcement_ok = await self._verify_assignment(agent_id, pid)
+            except Exception as exc:
+                enforcement_ok = False
+                enforcement_detail = f"{type(exc).__name__}: {exc}"
                 log.warning(
                     "agent_manager.spawn.resource_limits_failed",
                     agent_id=agent_id,
                     exc_info=True,
                 )
 
-            record = self._AgentRecord(info=info, process=process)
+            if (
+                pid is not None
+                and info.status == AgentStatus.RUNNING
+                and enforcement_ok is not True
+            ):
+                detail = enforcement_detail or "cgroup assignment could not be verified"
+                if enforcement == "hard":
+                    await self._stop_record(record, timeout=5.0)
+                    info.status = AgentStatus.FAILED
+                    message = (
+                        "resource enforcement required but not applied: " + detail
+                    )
+                    log.error(
+                        "agent_manager.spawn.resource_enforcement_required",
+                        agent_id=agent_id,
+                        pid=pid,
+                        detail=detail,
+                    )
+                else:
+                    message = f"{message} (resource limits degraded: {detail})"
+                    log.warning(
+                        "agent_manager.spawn.resource_limits_degraded",
+                        agent_id=agent_id,
+                        pid=pid,
+                        detail=detail,
+                    )
+
             self._agents[agent_id] = record
 
         log.info(
@@ -198,60 +241,78 @@ class AgentManager:
             if record is None:
                 log.warning("agent_manager.stop.not_found", agent_id=agent_id)
                 return False
-
-            info = record.info
-            proc = record.process
-
-            if proc is not None and proc.returncode is None:
-                log.info(
-                    "agent_manager.stop.terminating",
-                    agent_id=agent_id,
-                    pid=info.pid,
-                )
-                try:
-                    proc.terminate()
-                    await asyncio.wait_for(proc.wait(), timeout=timeout)
-                except asyncio.TimeoutError:
-                    log.warning(
-                        "agent_manager.stop.timeout_killing",
-                        agent_id=agent_id,
-                        pid=info.pid,
-                    )
-                    proc.kill()
-                    await proc.wait()
-                except ProcessLookupError:
-                    # Process already gone
-                    pass
-            elif proc is not None:
-                log.info(
-                    "agent_manager.stop.already_exited",
-                    agent_id=agent_id,
-                    returncode=proc.returncode,
-                )
-
-            # If there's a PID but no asyncio.Process (stub case), try kill via psutil
-            if info.pid is not None and (proc is None or proc.returncode is None):
-                if psutil.pid_exists(info.pid):
-                    log.info(
-                        "agent_manager.stop.psutil_kill",
-                        agent_id=agent_id,
-                        pid=info.pid,
-                    )
-                    try:
-                        p = psutil.Process(info.pid)
-                        p.terminate()
-                        p.wait(timeout=timeout)
-                    except (psutil.NoSuchProcess, psutil.TimeoutExpired):
-                        try:
-                            p.kill()
-                        except psutil.NoSuchProcess:
-                            pass
-
-            info.status = AgentStatus.STOPPED
-            record.process = None
+            await self._stop_record(record, timeout=timeout)
 
         log.info("agent_manager.stop.done", agent_id=agent_id)
         return True
+
+    async def _verify_assignment(self, agent_id: str, pid: int) -> bool | None:
+        """Read back cgroup membership for controllers with the old signature."""
+
+        reader = getattr(self._resource_controller, "assigned_pids", None)
+        if not callable(reader):
+            return None
+        try:
+            pids = await reader(agent_id)
+        except Exception:
+            return None
+        if not pids:
+            return None
+        return pid in pids
+
+    async def _stop_record(self, record: "AgentManager._AgentRecord", timeout: float) -> None:
+        """Terminate one record.  Caller must hold ``self._lock``."""
+
+        info = record.info
+        proc = record.process
+
+        if proc is not None and proc.returncode is None:
+            log.info(
+                "agent_manager.stop.terminating",
+                agent_id=info.agent_id,
+                pid=info.pid,
+            )
+            try:
+                proc.terminate()
+                await asyncio.wait_for(proc.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                log.info(
+                    "agent_manager.stop.timeout_killing",
+                    agent_id=info.agent_id,
+                    pid=info.pid,
+                )
+                proc.kill()
+                await proc.wait()
+            except ProcessLookupError:
+                # Process already gone
+                pass
+        elif proc is not None:
+            log.info(
+                "agent_manager.stop.already_exited",
+                agent_id=info.agent_id,
+                returncode=proc.returncode,
+            )
+
+        # If there's a PID but no asyncio.Process (stub case), try kill via psutil
+        if info.pid is not None and (proc is None or proc.returncode is None):
+            if psutil.pid_exists(info.pid):
+                log.info(
+                    "agent_manager.stop.psutil_kill",
+                    agent_id=info.agent_id,
+                    pid=info.pid,
+                )
+                try:
+                    p = psutil.Process(info.pid)
+                    p.terminate()
+                    p.wait(timeout=timeout)
+                except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+                    try:
+                        p.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+
+        info.status = AgentStatus.STOPPED
+        record.process = None
 
     async def list(self) -> list[AgentInfo]:
         """Return all managed agents' info."""

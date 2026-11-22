@@ -17,6 +17,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from trimum_core.resource_controller import (
+    CgroupApplyResult,
     PsutilController,
     CgroupV2Controller,
     TokenUsageTracker,
@@ -26,7 +27,9 @@ from trimum_core.resource_controller import (
     Violation,
     ResourceCheckResult,
     ResourceController,
+    _parse_io_stat,
     create_resource_controller,
+    resource_enforcement_from_config,
     resource_limits_from_config,
 )
 from trimum_core.live_console import TokenStatusPanel
@@ -289,3 +292,65 @@ class TestSecurityRuleIntegration:
             await rule.can_execute("test", "ls -la /tmp", resource_ctx={})
         # 超限时抛异常是预期行为（ResourceLimitExceeded 异常）
         assert exc_info.value is not None
+
+
+class TestCgroupMetrics:
+    """cgroup v2 数据面解析：io.stat 的真实格式是「设备号 key=value ...」。"""
+
+    def test_parse_io_stat_sums_devices(self):
+        text = "\n".join(
+            [
+                "8:0 rbytes=100 wbytes=200 rios=1 wios=2",
+                "8:16 rbytes=300 wbytes=400 rios=3 wios=4",
+                "259:0 rbytes=5 wbytes=6",
+            ]
+        )
+        assert _parse_io_stat(text) == (405, 606)
+
+    def test_parse_io_stat_ignores_malformed_fields(self):
+        text = "8:0 rbytes=oops wbytes=42 broken rbytes=7\nrbytes=3 wbytes=4"
+        assert _parse_io_stat(text) == (10, 46)
+
+    @pytest.mark.asyncio
+    async def test_get_usage_reads_io_stat_from_cgroup_tree(self, tmp_path):
+        agent_dir = tmp_path / "trimum" / "agent_a"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "io.stat").write_text(
+            "8:0 rbytes=1024 wbytes=2048\n8:16 rbytes=4096 wbytes=8192\n",
+            encoding="utf-8",
+        )
+
+        controller = CgroupV2Controller(cgroup_root=tmp_path)
+        usage = await controller.get_usage("agent_a")
+
+        assert usage.io_read_bytes == 5120
+        assert usage.io_write_bytes == 10240
+
+    @pytest.mark.asyncio
+    async def test_unwritable_cgroup_reports_failure(self, tmp_path):
+        # A regular file at the cgroup root makes mkdir fail deterministically.
+        blocker = tmp_path / "trimum"
+        blocker.write_text("not a directory", encoding="utf-8")
+        controller = CgroupV2Controller(cgroup_root=tmp_path)
+
+        result = await controller.apply_cgroup("agent_a", 1234, ResourceLimits())
+
+        assert isinstance(result, CgroupApplyResult)
+        assert result.applied is False
+        assert result.verified is False
+        assert result.enforced is False
+
+
+class TestResourceEnforcementConfig:
+    def test_default_is_soft(self):
+        assert resource_enforcement_from_config(None) == "soft"
+        assert resource_enforcement_from_config({}) == "soft"
+
+    def test_hard_variants(self):
+        assert resource_enforcement_from_config({"resource_enforcement": "hard"}) == "hard"
+        assert resource_enforcement_from_config(
+            {"resource_limits": {"enforcement": "required"}}
+        ) == "hard"
+
+    def test_unknown_values_fall_back_to_soft(self):
+        assert resource_enforcement_from_config({"resource_enforcement": "maybe"}) == "soft"
