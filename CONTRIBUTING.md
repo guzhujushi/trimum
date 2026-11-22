@@ -1,20 +1,23 @@
 # Contributing
 
 > 协作口径以 `AGENTS.md` 为准；进度与待办以 `STATUS.md`（常驻区 + 追加日志）/ `TODO.md`（只留未闭环）为准。
-> 注意：`STATUS.md` / `TODO.md` / `docs/OPERATIONS.md` 含个人主机与账号信息，**已移出 git 跟踪**（本仓库是公开的）。
+> 注意：`AGENTS.md` / `STATUS.md` / `TODO.md` / `docs/OPERATIONS.md` / `docs/QWEN-PROMPTS.md`
+> 含个人主机、账号或本地派活信息，**已移出 git 跟踪**（本仓库是公开的）。
 
 ## 开发状态
 
-主线 = **§1 工程缺口（自用口径）**（见 `TODO.md`）；E7 自研编码智能体五片全闭、沙箱 S1–S6 全闭。
-当前在推的队列：`cfm1`（非 CLI 确认通道）→ `pol1`（`LlmPolicyEngine` 接线）→ `dog1` → `ebpf1` → `dboot1`，另有 `cfg2`。
-测试基线：全量 **`0 failed / 2169 passed / 4 skipped`**（`--collect-only` 2178）；剩 4 skipped = 2 条平台专有 + 2 条 mcp snapshot 缺件。
+主线 = **`docs/ROADMAP.md` 的 R1 Agent Runtime 收敛 + R2 观测基线**；具体未闭环任务以本地
+`TODO.md` 为准（公开仓库不含该文件）。E7 自研编码智能体五片全闭、沙箱 S1–S6 全闭。
+真机已于 2026-11-22 升级到 **Linux 7.0.0-31-generic**；7.0 上已复跑全量，
+基线为 **`2507 passed / 4 skipped / 0 failed`**（约 140 秒）。
 
 ## 分支策略
 
 **只有 `server` 一支**（= 默认 / 主分支）：日常只在 `server` 上提交、只推 `server`（`git push origin server`，SSH 直连）。
 历史 `main` / `ubuntu` / `arch-linux` 三分支与「四分支 cherry-pick 收尾」**已废止**（2026-10-03 迁移后）。
 旧历史归档在私有库 `guzhujushi/trimum-legacy`，本地 remote `legacy` + 分支 `legacy-archive` 仅作快照，不再开发。
-本仓库**是公开的**：不提交密钥 / 真机 IP / 隧道名 / 个人运维细节（`STATUS.md` / `TODO.md` / `docs/OPERATIONS.md` / `.env` / `.codex/` 等已 gitignore）。
+本仓库**是公开的**：不提交密钥 / 真机 IP / 隧道名 / 个人运维细节
+（`AGENTS.md` / `STATUS.md` / `TODO.md` / `docs/OPERATIONS.md` / `docs/QWEN-PROMPTS.md` / `.env` / `.codex/` 等已 gitignore）。
 
 ## 提交规范
 
@@ -52,7 +55,9 @@ feat(llm): 429 冷却改读 Retry-After（秒数 / HTTP 日期，缺失回退 60
 **验收口径**：① failed 集合逐条相同；② collect 增量必须等于新增用例数（别拿 passed 反推）。
 
 - **实现与验收分权**：写实现的一方不写验收结论、不跑全量、不提交；验收方独立跑测试 + 接口校验 + 质量检查，末尾给 `VERDICT: PASS|FAIL`。
-- 批量派活（qwen 实现 → 门禁 → ds 验收 → 通过才提交）走 `scripts/trimum-dev.sh`，口径见 `~/.codex/skills/trimum-dev/SKILL.md`：改动必须 ⊆ `allowed.txt`，越界即停手。
+- 批量派活（qwen 实现 → 门禁 → ds 验收 → 通过才提交）走 `scripts/trimum-dev.sh`；
+  工单格式、白名单门禁、验收分权与交接前置条件见 **`docs/AGENT-TASK-PIPELINE.md`**，
+  操作细节另见 `~/.codex/skills/trimum-dev/SKILL.md`。改动必须 ⊆ `allowed.txt`，越界即停手。
 - 真机验收脚本：`scripts/accept_w1.py`(48/0) / `accept_e4.py`(43/0) / `accept_ipc_only.sh`(15/0) / `accept_s3.py`(35/0) / `accept_s4.py` / `accept_m4.py` / `accept_e7.py`。
 
 ## 平台口径（先判自己在哪台机器上跑）
@@ -62,7 +67,10 @@ feat(llm): 429 冷却改读 Retry-After（秒数 / HTTP 日期，缺失回退 60
 
 两边的写文件 / 行尾 / 后台常驻 / 网络代理 / sudo 口径都不同，完整对照表见 `AGENTS.md`。真机上 **agent 不代跑 sudo**：需要 sudo 的活写成脚本交本人。
 
-## Agent 开发标准（已按代码现状复核，2026-09-26）
+## 运行时 Agent 开发标准（不是 qwen 派活规范；2026-09-26 复核）
+
+> 这里讲的是**被 trimum 拉起的子 Agent 脚本 / manifest 契约**。把仓库开发任务写成工单、
+> 交给 qwen 实现并交 ds 验收，见 `docs/AGENT-TASK-PIPELINE.md`。
 
 ### 目录：两套，别混
 
@@ -110,5 +118,5 @@ feat(llm): 429 冷却改读 Retry-After（秒数 / HTTP 日期，缺失回退 60
 
 ## 文档分工
 
-`AGENTS.md` = 项目级指令（分支 / 真机 / 密钥 / 平台口径）；`docs/ARCH.md` = 架构总览；`docs/architecture/` = Agent Runtime / System Intelligence / 代码复用与许可证边界；`docs/ROADMAP.md` = 路线图；专题文档 `docs/CODING-AGENT-PLAN.md` / `docs/SANDBOX-PLAN.md` / `docs/LLM-ROUTING.md` / `docs/MULTI-USER-BOUNDARY.md`；
+`AGENTS.md` = 项目级指令（分支 / 真机 / 密钥 / 平台口径）；`docs/ARCH.md` = 架构总览；`docs/architecture/` = Agent Runtime / System Intelligence / 代码复用与许可证边界；`docs/ROADMAP.md` = 路线图；`docs/AGENT-TASK-PIPELINE.md` = qwen / ds 工单流水线；专题文档 `docs/CODING-AGENT-PLAN.md` / `docs/SANDBOX-PLAN.md` / `docs/LLM-ROUTING.md` / `docs/MULTI-USER-BOUNDARY.md`；
 `STATUS.md` = **常驻区（就地小改）+ 追加日志（新进展只追加到文件末尾，不回填、不通读）**；`TODO.md` = **只剩未闭环 + 红线**，已完成项一律进 `STATUS.md`。

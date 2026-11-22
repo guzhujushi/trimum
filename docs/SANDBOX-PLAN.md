@@ -7,8 +7,15 @@
 > 站位的由来：裁决项「**沙箱是否提到编码智能体（E7）之前**」已定为 **是** —— 编码智能体会大量写盘、跑测试，
 > 没有内核级边界就不敢让它自己动手。因此本文是 E7 的**前置片**。
 >
-> **2026-11-11 注**：真机计划升级到 Linux 7.0；本文的 6.8 实测数据保留为历史事实，升级后必须重新跑
-> Landlock ABI、sched_ext、BPF LSM、`memcg_bpf_ops` 与 perf 门限检查，不能直接沿用 6.8 结论。
+> **2026-11-22 7.0 复核（覆盖摘要）**：真机已升级到 **Linux 7.0.0-31-generic**。只读自检结果：
+> **Landlock ABI 8**；seccomp `actions_avail` 含 `user_notif` / `kill_process`；cgroup v2 控制器
+> `cpuset cpu io memory hugetlb pids rdma misc dmem`；`systemd-run --user` 的 `MemoryMax` / `CPUQuota` 可用；
+> **bwrap 非特权可用**（`unshare --user` 也通过）；`unprivileged_bpf_disabled=2`、`perf_event_paranoid=3` 未变；
+> BTF 在；内核配置 `CONFIG_BPF_LSM=y`、`CONFIG_SCHED_CLASS_EXT=y`、`CONFIG_MEMCG=y`、`CONFIG_CGROUP_BPF=y`。
+> 自检汇总 **PASS=10 WARN=4 FAIL=0**（WARN 为 cgroup 直接写需 root、mount/net ns 非特权限制等预期项）；
+> 同日全量回归 **2507 passed / 4 skipped / 0 failed**。
+> 本文的 6.8 数据（ABI 4、bwrap 被拒）保留为**历史事实**。代码目前只消费到 ABI 5 的 `FS_IOCTL_DEV` 分支，
+> 尚未启用 ABI 6+ 的 socket / signal scope；新增能力仍需单独设计与测试。
 > 本文回答四问：① 现在主流的沙箱是怎么做的；② 需不需要 Docker；③ 真机还需要装什么；④ 怎么落到 trimum 既有的网关体系里。
 > 与既有文档的关系：威胁模型与 seccomp/Landlock 分层设计见 `docs/SECURITY-DEFENSE-PLAN.md`（本文**校正**它的两处前提）；
 > 执行一律经 `ToolGateway` 四层（不新增执行通道）；动作编排复用 `WorkflowRuntime`；多用户边界见 `docs/MULTI-USER-BOUNDARY.md`。
@@ -21,11 +28,11 @@
 | 问题 | 结论 |
 |---|---|
 | 主流沙箱怎么做 | **三层收敛**：① **策略层**（谁能做什么——平台策略/策略引擎，如 K8s Pod Security Standards）；② **内核层**（LSM + seccomp + namespace + cgroup，如 Landlock / seccomp-BPF / AppArmor）；③ **边界层**（换运行时拿更强边界：OCI 容器 → gVisor(runsc) → microVM(Firecracker)）。**接口收敛在 OCI runtime-spec**（namespace / seccomp / cgroup / maskedPaths 都是可移植字段）。绝大多数所谓「沙箱」= 内核层机制的组合 + 一份默认 profile。 |
-| 需不需要 Docker | **不进主干**。三条理由：① trimum 要的是**每次工具调用**的边界，Docker 给的是**整机/整容器**的边界，粒度不匹配（每次 spawn 一个容器太慢）；② Docker 是**第二条执行通道**，与「一切动作经 ToolGateway」的红线冲突；③ 真机上 docker 已装（29.8.1）但**本地 0 个镜像**，用一次就要拉网。**保留为 Phase 5 的「不可信第三方 Agent 包」隔离档**（见 §6.3）。 |
-| 真机能不能做 | **能，而且不需要 root**：Landlock ABI=4 已实测可拦（40 行 Python+ctypes PoC，见 §5）；seccomp 走自带 `libseccomp 2.5.5`（ctypes 可加载）；资源边界走 systemd 用户级 cgroup 委派。 |
-| 两个硬限制 | ① **非特权 user namespace 被 AppArmor 禁**（`apparmor_restrict_unprivileged_userns=1`）→ `bwrap` / rootless 容器**都不可用**；② **`unprivileged_bpf_disabled=2`** → eBPF 监控**必须提权**。 |
+| 需不需要 Docker | **不进主干**。两条主因：① trimum 要的是**每次工具调用**的边界，Docker 给的是**整机/整容器**的边界，粒度不匹配（每次 spawn 一个容器太慢）；② Docker 是**第二条执行通道**，与「一切动作经 ToolGateway」的红线冲突。真机已装 docker（2026-11-22 自检有 17 个本地镜像），但这不改变上述边界判断。**保留为 Phase 5 的「不可信第三方 Agent 包」隔离档**（见 §6.3）。 |
+| 真机能不能做 | **能，而且不需要 root**：7.0 上 Landlock ABI=8（当前代码按 ABI≥5 分支使用）；seccomp 走自带 `libseccomp 2.5.5`（ctypes 可加载）；资源边界走 systemd 用户级 cgroup 委派。 |
+| 7.0 复核后的限制 | ① **`unprivileged_bpf_disabled=2`** → eBPF 监控**仍必须提权**；② 非特权 user namespace / bwrap 在 7.0 上已实测可用（6.8 的“被 AppArmor 拒绝”只作历史）；③ cgroup 仍不能直接写 `/sys/fs/cgroup`，走 `systemd-run --user`。 |
 | **裁决（2026-09-21，已定）** | 沙箱**提到编码智能体之前**；eBPF 走 **`CAP_BPF` + root helper**（daemon 仍非特权）；非特权 userns **不全局放开**（需要时定向给 `bwrap` 写 AppArmor profile）；Docker 档**留 Phase 5**；剩余待裁决见 §9.2 |
-| 与既有设计的最大出入 | `docs/SECURITY-DEFENSE-PLAN.md` 把 **eBPF 当常规手段**写进了方案；真机上非特权完全不能用 BPF（见 §3.2）。另一处：该文档设想的 seccomp **L1/L2/L3 白名单**需要按 ABI 4 的现实重写（见 §6.2）。 |
+| 与既有设计的最大出入 | `docs/SECURITY-DEFENSE-PLAN.md` 把 **eBPF 当常规手段**写进了方案；真机上非特权完全不能用 BPF（见 §3.2）。另一处：该文档设想的 seccomp **L1/L2/L3 白名单**需要按当前 Landlock ABI（7.0=8；6.8 历史=4）重写（见 §6.2）。 |
 
 ## 1. 主流是怎么做的：三层 + 一份默认 profile
 
@@ -44,19 +51,21 @@
 |---|---|---|---|---|
 | 策略 | 策略引擎 / 平台策略 | 决策：允许/确认/拒绝 | 极低（字符串/模式匹配） | ✅ 已有（ToolGateway 四层） |
 | 系统调用 | **seccomp-bpf** | 危险 syscall（`bpf`/`mount`/`ptrace`…） | 低 | ✅ 可（非特权，libseccomp） |
-| 文件系统 | **Landlock LSM** | 路径级读/写/执行 | 低 | ✅ 可（非特权，ABI 4） |
+| 文件系统 | **Landlock LSM** | 路径级读/写/执行 | 低 | ✅ 可（非特权，7.0=ABI 8；代码按 ABI≥5 分支） |
 | 进程/资源 | namespace + **cgroup v2** | 进程可见性、CPU/内存/PID 上限 | 低 | ⚠️ 部分（cgroup 走 systemd 委派；**非特权 userns 被禁**） |
 | 整机边界 | OCI 容器 / gVisor / microVM | 全部（换内核面或换内核） | 高（运行时 + 镜像 + 启动开销） | ⚠️ Docker 有、镜像无；gVisor/Firecracker 未装 |
 | MAC | AppArmor | 按 profile 限制程序行为 | 中（要写 profile） | ✅ 已启用（Ubuntu 默认） |
 
 ## 2. 各机制的关键事实（只列会改变决策的）
 
-### 2.1 Landlock：ABI 决定能力，**kernel 6.8 = ABI 4**
+### 2.1 Landlock：ABI 决定能力（6.8 = ABI 4；7.0 = ABI 8）
 `man 7 landlock` 的 VERSIONS 给出权威对照：**1=5.13 / 2=5.19 / 3=6.2 / 4=6.7 / 5=6.10 / 6=6.12 / 7=6.15 / 8=7.0 / 9=7.1**。
 > 文档明确要求：**用 ABI 而不是内核版本判断能力**（*"Users should use the Landlock ABI version rather than the kernel version"*）。
 
-真机 6.8.0-41 ⇒ **ABI 4**，即：文件系统访问位（ABI 1–3 全套，含 `TRUNCATE`/`REFER`）+ **TCP bind/connect 端口规则**；
-**没有** `FS_IOCTL_DEV`（ABI 5）、**没有** `SCOPE_ABSTRACT_UNIX_SOCKET` / `SCOPE_SIGNAL`（ABI 6）。
+历史：真机 6.8.0-41 ⇒ **ABI 4**，即文件系统访问位（ABI 1–3 全套，含 `TRUNCATE`/`REFER`）+ TCP bind/connect 端口规则；
+没有 `FS_IOCTL_DEV`（ABI 5）、没有 `SCOPE_ABSTRACT_UNIX_SOCKET` / `SCOPE_SIGNAL`（ABI 6）。
+现状：真机 7.0.0-31 ⇒ **ABI 8**；内核具备更高 ABI，但 `sandbox_exec.py` 目前只按 `abi >= 5` 打开 `FS_IOCTL_DEV`，
+没有设置 network / scope 字段 ⇒ **仍不承诺 socket / signal 维度隔离**，不能把“ABI 8”写成“这些隔离已实现”。
 
 - ⚠️ **这条缺口对我们的意义**：trimum 自己的 RPC 走 UNIX socket（`/run/trimum/trimum.sock`）。Codex CLI 的 Linux 沙箱 README 正因为「Landlock 隔离不了 app-server 的 UNIX socket」而**否决了 Landlock 方案**（`codex-rs-linux-sandbox-README.md:40-41`）。我们与它的处境不同：trimum 的 socket 是**自己的**，且沙箱只加在**子进程**上，所以不受此限——但要在设计里写清楚「不做 socket 维度的隔离」。
 - Landlock 是**非特权**的（官方定性 *"unprivileged access control"*），前置条件只有 `PR_SET_NO_NEW_PRIVS`。
@@ -84,10 +93,10 @@
 
 **真机实测直接推翻了后一句的乐观解读**：见 §3.1 —— 在本机用户服务下，`ProtectSystem=strict` / `ProtectHome=read-only` / `PrivateTmp=yes` **连挂载命名空间都没建**，加不加 `PrivateUsers=true` 都一样。
 
-## 3. 真机实测（Ubuntu 24.04.1 / kernel 6.8.0-41-generic / systemd 255）
+## 3. 历史真机实测（Ubuntu 24.04.1 / kernel 6.8.0-41-generic / systemd 255；2026-11-22 已升级 7.0）
 
 复现命令：`scripts/check_sandbox_caps.sh`（非特权）与 `scripts/check_sandbox_caps_root.sh`（root）。
-本节数字全部来自 2026-09-21 在真机 `guzhujushi@100.x.x.x` 上的实测。
+本节数字全部来自 2026-09-21 在真机（地址不入库）上的实测。
 
 ### 3.1 systemd 用户级：**哪些真生效、哪些是静默 no-op**
 
@@ -164,7 +173,7 @@
 2. **跨 `execve` 继承**（PoC 第 5 步实测）：限制施加在**施加者及其后代**上。⇒ **只要在「派生子进程的那个点」施一次，整棵进程树（含 shell → 测试进程 → 编译器等）都被覆盖** —— 这正是编码智能体跑测试需要的语义。
 3. **不可逆、只能收紧**：政策是逐层叠加的（上限 16 层），进程无法自我放宽。⇒ 它可以作为**网关决策的「执行者」**，但绝不能被当作「可以事后撤销」的机制。
 
-**已知缺口（写进设计，不装作没有）**：ABI 4 没有 `FS_IOCTL_DEV`（设备 ioctl 不设限）、没有抽象 UNIX socket / signal 域（那是 ABI 6 / kernel 6.12+）。⇒ 沙箱**不承诺** socket 维度隔离；对 trimum 自己的 RPC socket 需要在文档里明确「不在隔离范围内」。
+**已知缺口（写进设计，不装作没有）**：6.8/ABI 4 时没有 `FS_IOCTL_DEV`（设备 ioctl 不设限）、没有抽象 UNIX socket / signal 域（ABI 6 / kernel 6.12+ 才有）。7.0/ABI 8 内核已具备更高能力，但当前代码只消费到 ABI 5 的 `FS_IOCTL_DEV`，没有设置 network / scope ⇒ 沙箱**仍不承诺** socket 维度隔离；对 trimum 自己的 RPC socket 需要在文档里明确「不在隔离范围内」。
 
 > **补（2026-09-29，E7 第 5 片真机验收抓到）**：还有一条**装不上**的缺口 —— Landlock 的
 > `path_beneath` 规则**装不上字符设备**（`/dev/null` / `/dev/zero` / `/dev/tty`… 一律 `EINVAL`，见 `_landlockable`），
@@ -215,7 +224,7 @@ ToolGateway.execute()
 **关键点**：Layer K **不做决策**（决策仍在上面的策略层），它只做两件事——**施加**与**如实记录**。
 施加失败时**默认拒绝执行**（fail-closed），不允许「沙箱没装上但命令照跑」。
 
-**三档档案（沿用 `docs/SECURITY-DEFENSE-PLAN.md` §7.3 的声明式思路，数值按 ABI 4 校正）**：
+**三档档案（沿用 `docs/SECURITY-DEFENSE-PLAN.md` §7.3 的声明式思路，数值按 6.8/ABI 4 校正；7.0 上待复核）**：
 
 | 档 | 适用 | Landlock | seccomp | 说明 |
 |---|---|---|---|---|
@@ -387,7 +396,7 @@ ring buffer 由后台线程按间隔吸干 → ① `bpf.tail` 能看到的内存
 `--apply` 全链（调用顺序 / `FAIL=0` 判定 / sync 失败即停 / `--skip-sync` / 旧配置进备份 / 二次运行零改动）。
 
 **内核策略前置：`perf_event_open(2)` 要 `CAP_SYS_ADMIN`（2026-10-08 真机定案，`ebpf1e` 上线卡住的最后一条）**：
-Ubuntu 的 6.8 内核按 `CONFIG_SECURITY_PERF_EVENTS_RESTRICT=y` 构建（`/boot/config-$(uname -r)` 里可验），
+Ubuntu 的 6.8 内核按 `CONFIG_SECURITY_PERF_EVENTS_RESTRICT=y` 构建；7.0.0-31 上该配置仍为 `y`（`/boot/config-$(uname -r)` 可验），
 只要 `kernel.perf_event_paranoid >= 4`（**Ubuntu 默认就是 4**；上游默认 2），**任何** `perf_event_open(2)`
 都必须有 `CAP_SYS_ADMIN` —— 连最宽松的「自己进程 + 用户态软件事件」也一样（uid 1000 实测 EACCES(13)；
 root 只带 `CAP_BPF|CAP_PERFMON` 也 EACCES）。libbpf 挂 tracepoint 用的正是这个系统调用，所以 helper 会以
@@ -438,7 +447,7 @@ exec 流时 `bpf.load exec_guard`。
 | core | `clang` `llvm` | 编译 eBPF C 程序；LLVM 工具的 BPF 后端 | ✅ 已装（clang 18.1.3 / `llvm-config` / `llvm-strip` / `llvm-objcopy`） |
 | core | `libseccomp-dev` `libcap-dev` `libbpf-dev` | C 侧头文件（Python 侧有 `libseccomp2` 就够，写 C helper / BPF 程序才要） | ✅ 已装（`/usr/include/bpf/bpf_helpers.h` + `libbpf.so.1.3.0`） |
 | core | `linux-tools-generic` | 版本匹配的 `perf` / `bpftool` | ✅ `bpftool` 在 `/usr/sbin/bpftool`（`perf` 未核） |
-| core | `linux-headers-$(uname -r)` | 编译 BPF 程序要 `asm/types.h` 这一档 | ✅ 已装（`linux-headers-6.8.0-41-generic`） |
+| core | `linux-headers-$(uname -r)` | 编译 BPF 程序要 `asm/types.h` 这一档 | ✅ 已装（7.0：`linux-headers-7.0.0-31-generic`；6.8 时代为 `6.8.0-41`） |
 | ops | `shellcheck` | 仓库里脚本多，统一 lint | ✅ 已装 |
 | ops | `apparmor-utils` | `aa-status` / `aa-complain`（查改 profile，userns 限制的处置要用） | ✅ 已装（profile 本身还没写，见 §6.7 补） |
 | ops | `auditd` | 内核审计（syscall 级取证、审计断链） | ✅ 已装 |
@@ -817,8 +826,9 @@ ImportError: cannot import name 'SecurityRuntime' from 'trimum_core.sec_executor
 - 已知取舍（**写进文档，不装作没有**）：
   1. `preexec_fn` 在多线程进程里是 CPython 文档点名「不保证安全」的用法。缓解：会失败的判定（模式合法性 /
      平台与内核能力 / 路径是否存在）**全在父进程做完**，子进程里只剩 syscall；ctypes 结构体也父进程预建。
-  2. kernel 6.8 = Landlock **ABI 4**：没有 `FS_IOCTL_DEV`（设备 ioctl 不设限），也没有 socket / signal 的抽象
-     → **不承诺 socket 维度隔离**（含 trimum 自己的 RPC socket）。ABI 2 起加 `REFER`、3 起加 `TRUNCATE`、
+  2. 历史 6.8 = Landlock **ABI 4**；现状 7.0 = **ABI 8**，但代码只消费到 ABI 5 的 `FS_IOCTL_DEV`，
+     没有设置 network / scope → **仍不承诺 socket / signal 维度隔离**（含 trimum 自己的 RPC socket）。
+     ABI 2 起加 `REFER`、3 起加 `TRUNCATE`、
      5 起加 `IOCTL_DEV`，规则位按探测到的 ABI 生成。
   3. `~/.cache` / `~/.local` **默认不放**（持久化面）：pip / npm 要写就在这里显式加 `sandbox.write_paths`。
   4. 设备面（`/dev/null` 等）与 `/tmp` 是「不放开就什么都跑不了」的最小放开，**不是安全边界**。

@@ -257,7 +257,7 @@ eBPF 是 System Intelligence 的重要基础设施，分两个方向：
 **Enforcement（受控、渐进）**
 
 - cgroup 资源控制：✅ 已通过 `resource_controller.py` 落地。
-- BPF LSM 安全策略：⚪ 未实现；目标 Linux 7.0，升级后先做能力检查与复用评估。
+- BPF LSM 安全策略：⚪ 未实现；Linux 7.0 内核配置已具备，但先做能力检查与最小 PoC，通过前不进入执行链。
 - sched_ext 调度机制：⚪ 未实现；目标 Linux 7.0，优先评估 AgentCgroup / SchedCP 等实现，不先自研内核调度器。
 - 与其他内核控制接口协作：⚪ TBD。
 
@@ -283,7 +283,8 @@ helper 只接受 `bpf.load` / `bpf.unload` / `bpf.stats` / `bpf.tail` 四个动�
 
 **已裁决（2026-11-11）：A 规则 / 阈值优先**。trimum 定位是个人 AI 工作站，不做多租户高并发；
 分析层复用 AgentCgroup / SchedCP / AgentSight 的指标与事件设计，但不把其运行时整体嵌入。
-目标内核基线为 Linux 7.0；升级后先跑能力自检，再决定哪些复用进入主线。详见 `docs/architecture/code-reuse.md`。
+真机已升级到 Linux 7.0.0-31；只读自检确认 Landlock ABI 8、BPF LSM / sched_ext 内核配置具备，
+但实际复用仍要先做能力自检与最小 PoC。详见 `docs/architecture/code-reuse.md`。
 
 ### 4.3 Policy Repository
 
@@ -479,7 +480,7 @@ flowchart LR
 
 | 决策 | 结论 |
 |---|---|
-| 内核基线 | **Linux 7.0**（计划升级）；升级前 6.8 只作当前实测事实；sched_ext / BPF LSM / memcg_bpf_ops / AgentCgroup eBPF 等升级后再开工。 |
+| 内核基线 | **Linux 7.0.0-31-generic**（2026-11-22 已升级）；6.8 只作历史实测事实；sched_ext / BPF LSM / memcg_bpf_ops / AgentCgroup eBPF 等仍需能力自检与最小 PoC，通过前不进入执行链。 |
 | 项目许可证 | **GPL-2.0-only**；从下一个发布版本起，历史版本仍为 MIT。 |
 | 代码复用 | **复用优先**：AgentCgroup 第一优先；SchedCP / AgentSight 可选外部工具；ActPlane 只作设计参考；核心不引入 Rust 工具链或新常驻服务。 |
 | RuntimeKernel 门面 | **B 薄门面**：统一入口与 schema，内部模块不拆不改。 |

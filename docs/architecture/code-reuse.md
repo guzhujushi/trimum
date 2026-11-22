@@ -8,8 +8,9 @@
 
 ## 1. 结论先行
 
-1. **内核不再是复用障碍**：真机计划升级到 Linux 7.0，sched_ext、BPF LSM、memcg 相关能力具备评估前提。
-   但「内核版本够」不等于「功能一定可用」，升级后仍要先做能力自检，不把 7.0 当成无条件可用承诺。
+1. **内核不再是复用障碍**：真机已升级到 Linux 7.0.0-31，只读自检确认 `CONFIG_BPF_LSM=y`、
+   `CONFIG_SCHED_CLASS_EXT=y`、Landlock ABI 8 与 BTF 均具备，sched_ext / BPF LSM / memcg 具备评估前提。
+   但「内核配置够」不等于「功能一定可用」，实际复用仍要先做能力自检与最小 PoC，不把 7.0 当成无条件可用承诺。
 2. **许可证改为 GPL-2.0-only**：这样可以直接复用 GPL-2.0 的 AgentCgroup 代码；历史版本仍是 MIT，
    从下一个发布版本起按 GPL-2.0-only 分发。
 3. **AgentCgroup 是第一优先复用对象**：它和 trimum 一样是 Python + cgroup v2 + eBPF 路线，最接近现有栈。
@@ -102,7 +103,8 @@ AgentCgroup 解决的是「每次 tool call 都是一个新的资源控制单元
 
 ### 4.4 落地顺序
 
-**2026-11-11 裁决：A 先做，C 尽快；B 不采用。** eBPF 相关能力等 Linux 7.0 升级后再开工。
+**2026-11-11 裁决：A 先做，C 尽快；B 不采用。** 真机已升级 Linux 7.0；eBPF 相关能力仍需能力自检与最小 PoC，
+通过前不开工生产接入。
 
 1. **A（现在）**：`systemd-run --user` + 纯 Python cgroup 生命周期，先用 `memory.high` / `memory.max`
    与 CPU 配额做出硬边界；不引入 AgentCgroup daemon、不依赖 `memcg_bpf_ops`。同步做许可证与来源审计：
@@ -209,7 +211,7 @@ Cerebrum Agent（独立进程）
 
 ## 7. Linux 7.0 前置检查
 
-升级内核只是打开评估窗口，不等于所有能力自动可用。升级后先跑以下检查，结果写回文档与 `trm doctor`：
+升级内核只是打开评估窗口，不等于所有能力自动可用。真机已升级 7.0，先跑以下检查，结果写回文档与 `trm doctor`：
 
 | 能力 | 要确认什么 | 不满足时 |
 |---|---|---|

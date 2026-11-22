@@ -90,8 +90,11 @@ System Intelligence 让 AI 不只是「调用系统接口」，而是能在安�
 trimum 已有可运行的 Agent Runtime 主体；System Intelligence 目前以 **eBPF 观测**为主，
 分析与策略闭环属于在建/未来设计。文档中不会把规划写成已实现能力。
 
-> **目标内核基线：Linux 7.0**（计划升级）。升级前真机 6.8 的实测事实保留在
-> `docs/SANDBOX-PLAN.md`；升级后必须重新跑能力自检，不能把 7.0 当作无条件可用。
+> **真机内核基线：Linux 7.0.0-31-generic（2026-11-22 已升级）。** 升级后只读自检确认：
+> Landlock **ABI 8**、seccomp `user_notif`、cgroup v2、`systemd-run --user` 的 `MemoryMax` / `CPUQuota`
+> 均可用；`CONFIG_BPF_LSM=y`、`CONFIG_SCHED_CLASS_EXT=y` 已具备，但实际接入仍待能力 PoC。
+> 7.0 上全量回归已复跑：`2507 passed / 4 skipped / 0 failed`。
+> 6.8 的 ABI 4 / bwrap 被拒等实测数据保留在 `docs/SANDBOX-PLAN.md`，只作历史事实。
 
 | 能力 | 状态 | 主要落点 |
 |---|---|---|
@@ -106,7 +109,7 @@ trimum 已有可运行的 Agent Runtime 主体；System Intelligence 目前以 *
 | Workload Analysis Engine | ⚪ 未来设计 | `docs/architecture/system-intelligence.md` |
 | Policy Repository / Policy Engine | ⚪ 未来设计 | `docs/architecture/system-intelligence.md` |
 | Execution Verifier 完整链路 | 🟡 已有内核 verifier、sha256、沙箱；静态分析/基准/回滚 TBD | `docs/architecture/system-intelligence.md` |
-| BPF LSM / sched_ext 强制执行 | ⚪ 目标 Linux 7.0；升级后做能力检查、复用评估与 PoC | `docs/architecture/code-reuse.md` |
+| BPF LSM / sched_ext 强制执行 | 🟡 Linux 7.0 内核配置已具备；待能力自检、复用评估与最小 PoC | `docs/architecture/code-reuse.md` |
 
 ---
 
@@ -143,6 +146,7 @@ trm doctor                    # 环境与配置自检
 | `docs/architecture/system-intelligence.md` | System Intelligence 详细设计：观测、分析、策略、验证、受控执行。 |
 | `docs/architecture/code-reuse.md` | 代码复用矩阵、许可证边界、Linux 7.0 前置检查与分阶段落地。 |
 | `docs/ROADMAP.md` | 按新主线调整后的路线图与待决策项。 |
+| `docs/AGENT-TASK-PIPELINE.md` | 把仓库任务写成工单、派给 qwen 实现并交 ds 验收的流水线规范。 |
 | `docs/SECURITY.md` | Agent Runtime 安全治理与弹性沙箱。 |
 | `docs/SECURITY-DEFENSE-PLAN.md` | 纵深防御、威胁模型与安全响应链。 |
 | `docs/SANDBOX-PLAN.md` | Landlock / seccomp / cgroup / eBPF helper 的机制事实与真机实测。 |

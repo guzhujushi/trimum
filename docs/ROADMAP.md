@@ -2,8 +2,9 @@
 
 > 2026-11-11 按新架构主线重写。
 > 本文只描述方向、阶段与验收口径；具体任务与进度见 `STATUS.md` / `TODO.md`，架构裁决见 `docs/ARCH.md`。
+> 注意：`STATUS.md` / `TODO.md` 是本地私有交接件，公开仓库没有；完整接手清单见 `docs/AGENT-TASK-PIPELINE.md` §1。
 > 状态：✅ 已完成　🟡 进行中　⚪ 未开始　🚫 不做
-> 目标内核基线：**Linux 7.0**（计划升级）；升级前 6.8 只作当前实测事实，不作为长期约束。
+> 真机内核基线：**Linux 7.0.0-31-generic**（2026-11-22 已升级）；6.8 的实测数据只作历史事实。
 
 ---
 
@@ -103,7 +104,8 @@ flowchart LR
 
 **已裁决（2026-11-11）：A 规则 / 阈值优先**。个人 AI 工作站，不做高并发；
 复用 AgentCgroup 的 cgroup 生命周期、tool-call 临时 cgroup、hint / OOM 反馈与 JSONL metrics；
-SchedCP / AgentSight 作为可选外部工具，不整体嵌入。目标内核 Linux 7.0，升级后先做能力自检。
+SchedCP / AgentSight 作为可选外部工具，不整体嵌入。真机已升级 Linux 7.0，内核配置具备；
+实际能力自检与最小 PoC 仍是后续工作，不把“配置为 y”写成“已实现”。
 
 候选工作：
 
@@ -149,7 +151,8 @@ SchedCP / AgentSight 作为可选外部工具，不整体嵌入。目标内核 L
 **目标**：让「AI 辅助的系统调整」可控、可验证、可回滚。
 
 **已裁决（2026-11-11）：Privileged Controller C（先不拆，人类审批顶着）。**
-Linux 7.0 升级后，BPF LSM / sched_ext 可以做能力检查与最小 PoC；仍不阻塞 MVP，也不放宽 helper 权限。
+Linux 7.0 已升级；BPF LSM / sched_ext 可以做能力检查与最小 PoC，但在 PoC 通过前仍不进入执行链；
+不阻塞 MVP，也不放宽 helper 权限。
 
 候选工作：
 
@@ -221,7 +224,7 @@ Linux 7.0 升级后，BPF LSM / sched_ext 可以做能力检查与最小 PoC；�
 
 | 决策 | 结论 |
 |---|---|
-| 内核基线 | Linux 7.0（计划升级）；升级前 6.8 只作实测事实。 |
+| 内核基线 | Linux 7.0.0-31-generic（2026-11-22 已升级）；6.8 只作历史实测事实；BPF LSM / sched_ext 待 PoC。 |
 | 许可证 | GPL-2.0-only；历史版本仍为 MIT。 |
 | 代码复用 | AgentCgroup 第一优先；SchedCP / AgentSight 可选外部；ActPlane 只作设计参考；核心不引入 Rust 工具链或新常驻服务。 |
 | RuntimeKernel | B 薄门面：统一入口/schema，内部模块不拆。 |
@@ -255,7 +258,7 @@ Linux 7.0 升级后，BPF LSM / sched_ext 可以做能力检查与最小 PoC；�
 7. 成本浮动是分资源配置还是统一 `margin_percent`（当前先统一）。
 8. AgentCgroup 的 GPL 精确版本（`only` / `or-later`）与 vendor 边界。
 
-Linux 7.0 升级前不开工 eBPF / sched_ext / BPF LSM / memcg_bpf_ops / AgentCgroup eBPF；
-升级后先做能力自检与最小 PoC，不阻塞 MVP。
+Linux 7.0 已升级；eBPF / sched_ext / BPF LSM / memcg_bpf_ops / AgentCgroup eBPF 仍需能力自检与最小 PoC，
+通过前不开工生产接入，不阻塞 MVP。
 
 这些决策在 `docs/ARCH.md` §9、两份详细设计文档与 `docs/architecture/code-reuse.md` 中保持同步。

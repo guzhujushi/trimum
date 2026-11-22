@@ -572,7 +572,7 @@ budget:
 | 浮动余量 | **默认 10%，可配置**：只用于边界判断，不改变最终配额。 |
 | 成本视图 | **A 放在 `trm status` + `--json`**：不新增顶层命令。 |
 | 外部复用 | **复用优先**：AgentCgroup 第一优先；SchedCP / AgentSight 可选外部工具；ActPlane 只作设计参考。 |
-| 内核基线 | **Linux 7.0**（计划升级）；sched_ext / BPF LSM / memcg_bpf_ops / AgentCgroup eBPF 等升级后再开工；升级后先做能力自检。 |
+| 内核基线 | **Linux 7.0.0-31-generic**（2026-11-22 已升级）；6.8 只作历史事实；sched_ext / BPF LSM / memcg_bpf_ops / AgentCgroup eBPF 仍需能力自检与最小 PoC，通过前不进入执行链。 |
 
 ### 9.2 剩余 TBD
 

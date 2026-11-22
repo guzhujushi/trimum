@@ -20,7 +20,8 @@ System Intelligence 的目标：让 AI 不只是调用操作系统接口，而�
 - **LLM 推理不进入内核执行路径**。AI 分析与策略决策在用户态完成。
 - **AI 不直接拥有任意内核控制权限**。内核侧只执行经过验证的有限程序；下发由受控特权组件完成。
 - **未实现的强制执行不写成已实现**。当前只有 cgroup 资源控制与 eBPF 观测链路；BPF LSM / sched_ext 尚未实现。
-  目标内核基线是 Linux 7.0，升级后先做能力检查，再决定 PoC 与复用方式。
+  真机已升级到 Linux 7.0.0-31；内核配置已具备，但仍要先做能力检查与最小 PoC，
+  再决定复用方式，不能把“配置为 y”当成“已实现”。
 
 ---
 
@@ -146,7 +147,7 @@ bpf/*.bpf.c
 目标方向：
 
 - cgroup 资源控制：✅ 已通过 `resource_controller.CgroupV2Controller` 落地。
-- BPF LSM 安全策略：⚪ 未实现；目标 Linux 7.0，升级后先做能力检查与复用评估。
+- BPF LSM 安全策略：⚪ 未实现；Linux 7.0 内核配置已具备，但先做能力检查与最小 PoC，通过前不进入执行链。
 - sched_ext 调度机制：⚪ 未实现；优先评估 AgentCgroup / SchedCP 等实现，不先自研内核调度器。
 - 与其他内核控制接口协作：⚪ TBD。
 
@@ -207,7 +208,7 @@ workload:
 - **ActPlane（MIT，Rust + eBPF LSM）**：需要 root 或 `CAP_BPF` + `CAP_SYS_ADMIN`，与 trimum 最小权限红线冲突；
   只作设计参考，不采用其运行时。
 - **依赖策略**：核心运行时保持纯 Python；不新增 Rust 工具链、第二套常驻服务或额外 root 控制器。
-- **内核策略**：目标 Linux 7.0；升级后先跑能力自检，再决定 sched_ext / BPF LSM / memcg 的 PoC 与复用。
+- **内核策略**：真机已是 Linux 7.0；先跑能力自检与最小 PoC，再决定 sched_ext / BPF LSM / memcg 的复用。
 
 ### 4.6 裁决（2026-11-11）：A 规则 / 阈值优先
 
@@ -425,7 +426,7 @@ sequenceDiagram
 
 | 决策 | 结论 |
 |---|---|
-| 内核基线 | **Linux 7.0**（计划升级）；升级后先做 sched_ext / BPF LSM / memcg 能力自检。 |
+| 内核基线 | **Linux 7.0.0-31-generic**（2026-11-22 已升级）；sched_ext / BPF LSM / memcg 仍需能力自检与最小 PoC。 |
 | 外部复用 | **AgentCgroup 第一优先**；SchedCP / AgentSight 可选外部；ActPlane 只作设计参考。 |
 | eBPF perf gate | **A 短期保持 `perf_event_paranoid=3`**；纯 `bpf(2)` attach 作为后备设计项。 |
 | 审计链刷屏 | **先诊断（D）**；确认是密钥轮换/归档残留再隔离旧链 + 新链（C）；疑似篡改则保留证据、人工裁决。 |
@@ -447,8 +448,8 @@ sequenceDiagram
 
 **关于 PoC**：PoC（Proof of Concept，概念验证）是用最小代价验证「这条路是否走得通」，
 不是生产实现。例如：写一个最小 sched_ext 程序，在支持的内核上加载、跑一组固定负载、记录吞吐/延迟，
-看是否值得继续。PoC 成功 ≠ 可上线；之后还要设计、验证、回滚。目标内核是 Linux 7.0，
-sched_ext 的版本门槛已满足，但加载权限、内核配置与实际稳定性仍需逐项验证；PoC 不阻塞 MVP。
+看是否值得继续。PoC 成功 ≠ 可上线；之后还要设计、验证、回滚。真机已是 Linux 7.0，
+sched_ext 的版本与内核配置门槛已满足，但加载权限、实际稳定性与回滚仍需逐项验证；PoC 不阻塞 MVP。
 
 ---
 

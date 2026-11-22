@@ -31,8 +31,9 @@ if command -v gcc >/dev/null && gcc -O0 -o "$W/ll" "$W/ll.c" 2>/dev/null; then
     1) warn "LANDLOCK_ABI=1（仅文件读/写/执行，无 TRUNCATE/REFER/IOCTL_DEV）" ;;
     2|3) warn "LANDLOCK_ABI=$ABI（有 REFER/TRUNCATE，无 IOCTL_DEV 与网络域）" ;;
     4) ok "LANDLOCK_ABI=4（含 TRUNCATE / REFER / TRUNCATE_DIR / IOCTL_DEV）" ;;
-    5|6|7) ok "LANDLOCK_ABI=$ABI" ;;
-    *) bad "无法探测 Landlock ABI（$ABI）" ;;
+    5|6|7|8|9) ok "LANDLOCK_ABI=$ABI" ;;
+    ERR) bad "无法探测 Landlock ABI（$ABI）" ;;
+    *) warn "LANDLOCK_ABI=$ABI（超出脚本已知范围，按可用处理，但需复核新能力）" ;;
   esac
 else
   warn "无 gcc，跳过 ABI 探测（装 build-essential 后可测）"
