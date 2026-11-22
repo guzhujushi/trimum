@@ -187,6 +187,9 @@ DEFAULT_CONFIG = {
     "agent_manager": {
         "max_agents": 10,
         "health_check_interval": 30,  # seconds
+        # hard = cgroup 限额必须在 exec 前生效且读回一致，否则拒绝启动；
+        # soft = 尽力施加，失败照常运行但在 spawn 结果里标注降级。
+        "resource_enforcement": "soft",
     },
 }
 

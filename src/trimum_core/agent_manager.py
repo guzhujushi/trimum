@@ -11,7 +11,7 @@ import asyncio
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 import psutil
 
@@ -22,6 +22,7 @@ from .resource_controller import (
     CgroupApplyResult,
     ResourceController,
     create_resource_controller,
+    default_resource_enforcement,
     resource_enforcement_from_config,
     resource_limits_from_config,
 )
@@ -50,11 +51,15 @@ class AgentManager:
         health_check_interval: int = 30,
         resource_controller: Optional[ResourceController] = None,
         agents_root: Optional[str] = None,
+        resource_enforcement: Optional[str] = None,
     ) -> None:
         self._max_agents = max_agents
         self._health_check_interval = health_check_interval
         self._agents_root = agents_root
         self._resource_controller = resource_controller or create_resource_controller()
+        self._resource_enforcement = (
+            resource_enforcement or default_resource_enforcement()
+        )
         self._agents: Dict[str, "_AgentRecord"] = {}
         self._lock = asyncio.Lock()
         self._health_task: Optional[asyncio.Task[None]] = None
@@ -133,11 +138,104 @@ class AgentManager:
                 config=request.config,
             )
 
+            limits = resource_limits_from_config(request.config)
+            enforcement = resource_enforcement_from_config(
+                request.config, default=self._resource_enforcement
+            )
+            try:
+                await self._resource_controller.set_limits(agent_id, limits)
+            except Exception as exc:
+                detail = f"{type(exc).__name__}: {exc}"
+                if enforcement == "hard":
+                    log.error(
+                        "agent_manager.spawn.resource_policy_not_recorded",
+                        agent_id=agent_id,
+                        detail=detail,
+                    )
+                    return SpawnResponse(
+                        agent_id=agent_id,
+                        status=AgentStatus.FAILED,
+                        pid=None,
+                        message=(
+                            "resource enforcement required but the policy could "
+                            f"not be recorded: {detail}"
+                        ),
+                    )
+                log.warning(
+                    "agent_manager.spawn.resource_policy_not_recorded",
+                    agent_id=agent_id,
+                    detail=detail,
+                )
+
+            # ── hard：先准备并验证 cgroup，再启动进程 ───────────────────
+            # 这一步是安全边界：进程一旦 exec，就可能已经执行代码或派生
+            # 子进程。准备失败时 hard 直接拒绝启动，绝不「先跑再追着绑」。
+            script = resolve_agent_script(request.agent_type, self._agents_root)
+            preexec: Optional[Callable[[], None]] = None
+            prepared = False
+            prepare_detail = ""
+            if script is not None:
+                prepare = getattr(self._resource_controller, "prepare_cgroup", None)
+                if callable(prepare):
+                    try:
+                        prep = await prepare(agent_id, limits)
+                    except Exception as exc:
+                        prep = CgroupApplyResult(
+                            applied=False,
+                            verified=False,
+                            limits_verified=False,
+                            detail=f"{type(exc).__name__}: {exc}",
+                        )
+                    if isinstance(prep, CgroupApplyResult) and prep.prepared:
+                        hook_maker = getattr(
+                            self._resource_controller, "preexec_hook", None
+                        )
+                        if callable(hook_maker):
+                            preexec = hook_maker(agent_id)
+                        if preexec is None:
+                            prepare_detail = (
+                                "controller cannot provide a pre-exec cgroup hook"
+                            )
+                        else:
+                            prepared = True
+                            prepare_detail = prep.detail
+                    elif isinstance(prep, CgroupApplyResult):
+                        prepare_detail = (
+                            prep.detail or "cgroup limits could not be verified"
+                        )
+                    else:
+                        prepare_detail = (
+                            "controller returned no cgroup preparation result"
+                        )
+                else:
+                    prepare_detail = (
+                        "controller does not support pre-spawn cgroup preparation"
+                    )
+
+                if enforcement == "hard" and not prepared:
+                    detail = prepare_detail or "cgroup preparation failed"
+                    log.error(
+                        "agent_manager.spawn.resource_enforcement_not_prepared",
+                        agent_id=agent_id,
+                        detail=detail,
+                    )
+                    return SpawnResponse(
+                        agent_id=agent_id,
+                        status=AgentStatus.FAILED,
+                        pid=None,
+                        message=(
+                            "resource enforcement required but not prepared "
+                            f"before launch: {detail}"
+                        ),
+                    )
+
             # 真实 spawn：脚本存在才起进程（未安装脚本 → 仅登记，保持旧语义）
             launch = await launch_agent(
                 agent_id,
                 request.agent_type,
+                script=script,
                 base=self._agents_root,
+                preexec=preexec,
             )
             process = launch.process
             pid = launch.pid
@@ -158,31 +256,40 @@ class AgentManager:
 
             record = self._AgentRecord(info=info, process=process)
 
-            limits = resource_limits_from_config(request.config)
-            enforcement = resource_enforcement_from_config(request.config)
             enforcement_ok: bool | None = None
-            enforcement_detail = ""
-            try:
-                await self._resource_controller.set_limits(agent_id, limits)
-                if pid is not None and info.status == AgentStatus.RUNNING:
-                    # 真实 PID 绑定 cgroup v2（Linux）/ PsutilController（其它平台）
+            enforcement_detail = prepare_detail
+            if pid is not None and info.status == AgentStatus.RUNNING:
+                try:
+                    # 进程已在 preexec 里入组（若可用）；这里再次写 PID 并读回
+                    # cpu.max / memory.max，证明内核实际配置符合请求。
                     result = await self._resource_controller.apply_cgroup(
                         agent_id, pid, limits
                     )
                     if isinstance(result, CgroupApplyResult):
                         enforcement_ok = result.enforced
-                        enforcement_detail = result.detail
+                        enforcement_detail = result.detail or enforcement_detail
+                    elif enforcement == "hard":
+                        # 旧 controller 只能证明 PID，不能证明内核限额 → hard 拒绝。
+                        enforcement_ok = False
+                        enforcement_detail = (
+                            "controller only verified PID, not kernel limits"
+                        )
                     else:
                         # 兼容只实现旧签名的 controller：读回确认，别假定成功。
                         enforcement_ok = await self._verify_assignment(agent_id, pid)
-            except Exception as exc:
-                enforcement_ok = False
-                enforcement_detail = f"{type(exc).__name__}: {exc}"
-                log.warning(
-                    "agent_manager.spawn.resource_limits_failed",
-                    agent_id=agent_id,
-                    exc_info=True,
-                )
+                        if enforcement_ok is None:
+                            enforcement_detail = (
+                                enforcement_detail
+                                or "cgroup assignment could not be verified"
+                            )
+                except Exception as exc:
+                    enforcement_ok = False
+                    enforcement_detail = f"{type(exc).__name__}: {exc}"
+                    log.warning(
+                        "agent_manager.spawn.resource_limits_failed",
+                        agent_id=agent_id,
+                        exc_info=True,
+                    )
 
             if (
                 pid is not None
@@ -194,7 +301,7 @@ class AgentManager:
                     await self._stop_record(record, timeout=5.0)
                     info.status = AgentStatus.FAILED
                     message = (
-                        "resource enforcement required but not applied: " + detail
+                        "resource enforcement required but not verified: " + detail
                     )
                     log.error(
                         "agent_manager.spawn.resource_enforcement_required",
@@ -210,6 +317,16 @@ class AgentManager:
                         pid=pid,
                         detail=detail,
                     )
+            elif (
+                enforcement == "soft"
+                and info.status == AgentStatus.RUNNING
+                and not prepared
+            ):
+                # soft 允许降级，但「限制是在 spawn 之后才施加」必须让调用方看见。
+                message = (
+                    f"{message} (resource limits applied after spawn; "
+                    f"no pre-exec guarantee: {prepare_detail})"
+                )
 
             self._agents[agent_id] = record
 
@@ -310,6 +427,19 @@ class AgentManager:
                         p.kill()
                     except psutil.NoSuchProcess:
                         pass
+
+        # 主进程退出不代表它派生的子进程已经消失。cgroup.kill 能一次清掉
+        # 整棵进程树；控制器没有该能力时保留上面的单 PID 兜底语义。
+        kill_group = getattr(self._resource_controller, "kill_cgroup", None)
+        if callable(kill_group):
+            try:
+                await kill_group(info.agent_id)
+            except Exception:
+                log.warning(
+                    "agent_manager.stop.cgroup_cleanup_failed",
+                    agent_id=info.agent_id,
+                    exc_info=True,
+                )
 
         info.status = AgentStatus.STOPPED
         record.process = None

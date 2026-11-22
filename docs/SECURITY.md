@@ -124,6 +124,23 @@ token 不写日志、不回显；比较使用常量时间的字节级 `hmac.comp
 未配置 token 时应走 Unix socket（`TRIMUM_SOCKET` / `$XDG_RUNTIME_DIR/trimum.sock`）。
 非交互 `--quiet` / `--json` 的 `confirm()` 也按 fail-closed 处理，不会因为没有弹窗而自动放行。
 
+### Agent 资源强制（2026-11-22）
+
+`agent_manager.spawn()` 的资源约束分两档；策略按「请求参数 > `TRIMUM_RESOURCE_ENFORCEMENT` >
+`agent_manager.resource_enforcement` > `soft`」解析。
+
+| 模式 | 保证 | 失败行为 |
+|---|---|---|
+| `hard` | 启动前创建 cgroup、写 `cpu.max` / `memory.max` 并读回一致；子进程在 `fork` 后、`exec` 前把自己写入 `cgroup.procs`；启动后再次读回 PID 与限额 | 任一准备 / 入组 / 读回失败 ⇒ 不启动或立即终止，返回 `FAILED` |
+| `soft` | 尽力施加并读回验证；历史行为保持可用 | 允许继续运行，但 spawn 结果必须显式标注降级 / 无执行前保证 |
+
+CPU 百分比语义是「相对一个核心」：`100` ⇒ `cpu.max = 100000 100000`（一个完整核心），
+`250` ⇒ `250000 100000`（2.5 个核心）；`<= 0` 才是无配额 `max 100000`。内存 `<= 0` ⇒ `memory.max = max`。
+**`max 100000` 不等于 100%**，不得把无限制误报成「限制为一个核心」。
+
+停止 Agent 时先终止主进程，再用 `cgroup.kill` 清理整个进程树；只有控制器不支持时才退回按 PID 清理。
+`hard` 只有在「执行前限额已生效 + 启动后归属与限额均读回一致」时才可视为完整安全保证。
+
 ## Behavior Monitor 检测项
 
 | 检测 | 方法 | 阈值 |

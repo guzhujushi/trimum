@@ -116,6 +116,7 @@ async def launch_agent(
     startup_grace: float = STARTUP_GRACE_SECONDS,
     extra_write: Iterable[str] = (),
     argv_for: Optional[Callable[[Any], Sequence[str]]] = None,
+    preexec: Optional[Callable[[], None]] = None,
 ) -> LaunchResult:
     """真正把子 Agent 拉起来（``sandbox_exec.spawn_exec``，S2 后唯一入口）。
 
@@ -156,6 +157,7 @@ async def launch_agent(
                     env=build_agent_env(agent_id, agent_type, socket_path, extra_env),
                     stdout=sink,
                     stderr=sink,
+                    preexec=preexec,
                 )
             except sandbox_exec.SandboxError as exc:
                 log.error(

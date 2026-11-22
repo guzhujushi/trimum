@@ -39,7 +39,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Optional, Sequence
 
 from . import seccomp_exec
 from .logger import get_logger
@@ -1398,17 +1398,65 @@ async def _spawn_process(shell: bool, args: Sequence[Any], kwargs: dict[str, Any
     return await asyncio.create_subprocess_exec(*args, **kwargs)
 
 
-async def spawn_exec(plan: SandboxPlan, *args: Any, **kwargs: Any):
-    """``asyncio.create_subprocess_exec`` 的安全版：先施沙箱，失败不执行。"""
-    return await _spawn(plan, shell=False, args=args, kwargs=kwargs)
+async def spawn_exec(
+    plan: SandboxPlan,
+    *args: Any,
+    preexec: Callable[[], None] | Sequence[Callable[[], None]] | None = None,
+    **kwargs: Any,
+):
+    """``asyncio.create_subprocess_exec`` 的安全版：先施沙箱，失败不执行。
+
+    ``preexec`` 是额外的「子进程 exec 前」回调（例如把自己的 PID 写进
+    ``cgroup.procs``）。它**先于** Landlock/seccomp 执行；沙箱关闭或降级时
+    仍然会跑，因为资源边界不应依赖文件系统沙箱是否启用。
+    """
+    return await _spawn(
+        plan, shell=False, args=args, kwargs=kwargs, preexec=preexec
+    )
 
 
-async def spawn_shell(plan: SandboxPlan, cmd: str, **kwargs: Any):
+async def spawn_shell(
+    plan: SandboxPlan,
+    cmd: str,
+    *,
+    preexec: Callable[[], None] | Sequence[Callable[[], None]] | None = None,
+    **kwargs: Any,
+):
     """``asyncio.create_subprocess_shell`` 的安全版。"""
-    return await _spawn(plan, shell=True, args=(cmd,), kwargs=kwargs)
+    return await _spawn(
+        plan, shell=True, args=(cmd,), kwargs=kwargs, preexec=preexec
+    )
 
 
-async def _spawn(plan: SandboxPlan, *, shell: bool, args: Sequence[Any], kwargs: dict[str, Any]):
+def _compose_hooks(
+    preexec: Callable[[], None] | Sequence[Callable[[], None]] | None,
+) -> Callable[[], None] | None:
+    """把资源钩子与调用方自带的 ``preexec_fn`` 合成一个子进程回调。"""
+
+    if preexec is None:
+        return None
+    if callable(preexec):
+        hooks = [preexec]
+    else:
+        hooks = [hook for hook in preexec if callable(hook)]
+    if not hooks:
+        return None
+
+    def _run() -> None:  # pragma: no cover - runs in the forked child
+        for hook in hooks:
+            hook()
+
+    return _run
+
+
+async def _spawn(
+    plan: SandboxPlan,
+    *,
+    shell: bool,
+    args: Sequence[Any],
+    kwargs: dict[str, Any],
+    preexec: Callable[[], None] | Sequence[Callable[[], None]] | None = None,
+):
     """派生 + 施加的唯一实现。**任一分支都不许绕过** ``plan.state`` 的如实记录。
 
     四种结局：``off``（开关关了）/ ``unsupported``（平台或内核不支持，如实标记、
@@ -1417,10 +1465,22 @@ async def _spawn(plan: SandboxPlan, *, shell: bool, args: Sequence[Any], kwargs:
     并记一条 ERROR。
     """
     call_kwargs = dict(kwargs)
+    # 资源钩子（如 cgroup 入组）先于沙箱钩子。调用方若自己传了 preexec_fn，
+    # 也并进来，避免被沙箱覆盖。
+    caller_hook = call_kwargs.pop("preexec_fn", None)
+    base_hooks: list[Callable[[], None]] = []
+    if callable(caller_hook):
+        base_hooks.append(caller_hook)
+    composed = _compose_hooks(preexec)
+    if composed is not None:
+        base_hooks.insert(0, composed)
+    base_hook = _compose_hooks(base_hooks) if base_hooks else None
 
     if plan.mode == MODE_OFF:
         plan.state = STATE_OFF
         _sync(plan)
+        if base_hook is not None:
+            call_kwargs["preexec_fn"] = base_hook
         return await _spawn_process(shell, args, call_kwargs)
 
     if not plan.supported:
@@ -1428,6 +1488,8 @@ async def _spawn(plan: SandboxPlan, *, shell: bool, args: Sequence[Any], kwargs:
         plan.state = STATE_UNSUPPORTED
         _sync(plan)
         _warn_unsupported_once(plan.mode, plan.reason)
+        if base_hook is not None:
+            call_kwargs["preexec_fn"] = base_hook
         return await _spawn_process(shell, args, call_kwargs)
 
     if plan.blockers:
@@ -1444,9 +1506,15 @@ async def _spawn(plan: SandboxPlan, *, shell: bool, args: Sequence[Any], kwargs:
             blockers=plan.blockers,
             detail="fail_closed=false：降级为无沙箱执行",
         )
+        if base_hook is not None:
+            call_kwargs["preexec_fn"] = base_hook
         return await _spawn_process(shell, args, call_kwargs)
 
-    call_kwargs["preexec_fn"] = _make_hook(plan)
+    sandbox_hook = _make_hook(plan)
+    if base_hook is None:
+        call_kwargs["preexec_fn"] = sandbox_hook
+    else:
+        call_kwargs["preexec_fn"] = _compose_hooks([base_hook, sandbox_hook])
     try:
         proc = await _spawn_process(shell, args, call_kwargs)
     except subprocess.SubprocessError as exc:
@@ -1468,7 +1536,12 @@ async def _spawn(plan: SandboxPlan, *, shell: bool, args: Sequence[Any], kwargs:
             error=str(exc),
             detail="fail_closed=false：降级为无沙箱执行",
         )
-        return await _spawn_process(shell, args, dict(kwargs))
+        # 降级只放弃沙箱钩子，资源钩子仍然必须生效：否则 hard 资源边界
+        # 会退化成「spawn 后追着绑」。调用方自带的 preexec_fn 同理一并保留。
+        retry_kwargs = dict(kwargs)
+        if base_hook is not None:
+            retry_kwargs["preexec_fn"] = base_hook
+        return await _spawn_process(shell, args, retry_kwargs)
 
     _mark(plan)
     _sync(plan)

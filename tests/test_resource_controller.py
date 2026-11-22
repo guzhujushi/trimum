@@ -9,9 +9,10 @@
 """
 
 import asyncio
-import time
 import os
+import subprocess
 import sys
+import time
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -27,8 +28,13 @@ from trimum_core.resource_controller import (
     Violation,
     ResourceCheckResult,
     ResourceController,
+    _format_cpu_max,
+    _format_memory_max,
+    _parse_cpu_max,
     _parse_io_stat,
+    _parse_memory_max,
     create_resource_controller,
+    default_resource_enforcement,
     resource_enforcement_from_config,
     resource_limits_from_config,
 )
@@ -354,3 +360,93 @@ class TestResourceEnforcementConfig:
 
     def test_unknown_values_fall_back_to_soft(self):
         assert resource_enforcement_from_config({"resource_enforcement": "maybe"}) == "soft"
+
+    def test_global_default_honours_env(self, monkeypatch):
+        monkeypatch.setenv("TRIMUM_RESOURCE_ENFORCEMENT", "hard")
+        assert default_resource_enforcement() == "hard"
+        monkeypatch.setenv("TRIMUM_RESOURCE_ENFORCEMENT", "soft")
+        assert default_resource_enforcement() == "soft"
+
+
+class TestCgroupLimitContract:
+    """The request → cgroup text → readback contract used by hard enforcement."""
+
+    def test_cpu_percent_is_relative_to_one_core(self):
+        assert _format_cpu_max(100) == "100000 100000"
+        assert _format_cpu_max(250) == "250000 100000"
+        assert _format_cpu_max(0.5) == "500 100000"
+        assert _format_cpu_max(0) == "max 100000"
+        assert _format_cpu_max(-1) == "max 100000"
+
+    def test_cpu_max_parser_does_not_confuse_max_with_100_percent(self):
+        assert _parse_cpu_max("max 100000") == 0.0
+        assert _parse_cpu_max("100000 100000") == 100.0
+        assert _parse_cpu_max("250000 100000") == 250.0
+        assert _parse_cpu_max("") is None
+
+    def test_memory_format_and_parse(self):
+        assert _format_memory_max(512) == str(512 * 1024 * 1024)
+        assert _format_memory_max(0) == "max"
+        assert _parse_memory_max("max") == 0.0
+        assert _parse_memory_max(str(512 * 1024 * 1024)) == 512.0
+        assert _parse_memory_max("") is None
+
+    @pytest.mark.asyncio
+    async def test_prepare_cgroup_reads_back_both_kernel_limits(self, tmp_path):
+        controller = CgroupV2Controller(cgroup_root=tmp_path)
+
+        result = await controller.prepare_cgroup(
+            "agent_a",
+            ResourceLimits(max_cpu_percent=100, max_memory_mb=512),
+        )
+
+        agent_dir = tmp_path / "trimum" / "agent_a"
+        assert result.prepared is True
+        assert result.enforced is False  # no PID yet; preparation only proves limits
+        assert (agent_dir / "cpu.max").read_text(encoding="utf-8") == "100000 100000"
+        assert (agent_dir / "memory.max").read_text(encoding="utf-8") == str(
+            512 * 1024 * 1024
+        )
+
+    @pytest.mark.asyncio
+    async def test_prepare_cgroup_detects_kernel_clamping(self, tmp_path):
+        class ClampingController(CgroupV2Controller):
+            def _read_text(self, agent_id, filename):
+                if filename == "cpu.max":
+                    return "50000 100000"
+                return super()._read_text(agent_id, filename)
+
+        controller = ClampingController(cgroup_root=tmp_path)
+        result = await controller.prepare_cgroup(
+            "agent_a",
+            ResourceLimits(max_cpu_percent=100, max_memory_mb=512),
+        )
+
+        assert result.applied is True
+        assert result.limits_verified is False
+        assert result.prepared is False
+        assert "cpu.max" in result.detail
+
+    @pytest.mark.asyncio
+    async def test_kill_cgroup_uses_cgroup_kill(self, tmp_path):
+        agent_dir = tmp_path / "trimum" / "agent_a"
+        agent_dir.mkdir(parents=True)
+        controller = CgroupV2Controller(cgroup_root=tmp_path)
+
+        assert await controller.kill_cgroup("agent_a") is True
+        assert (agent_dir / "cgroup.kill").read_text(encoding="utf-8") == "1"
+
+    def test_preexec_hook_writes_child_pid_before_exec(self, tmp_path):
+        agent_dir = tmp_path / "trimum" / "agent_a"
+        agent_dir.mkdir(parents=True)
+        procs = agent_dir / "cgroup.procs"
+        procs.touch()
+        controller = CgroupV2Controller(cgroup_root=tmp_path)
+
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(0.05)"],
+            preexec_fn=controller.preexec_hook("agent_a"),
+        )
+        child.wait(timeout=10)
+
+        assert procs.read_text(encoding="utf-8") == str(child.pid)

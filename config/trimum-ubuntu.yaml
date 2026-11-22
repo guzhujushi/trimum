@@ -24,3 +24,7 @@ policy:
 agent_manager:
   max_agents: 10
   health_check_interval: 30
+  # 资源约束：hard = cgroup 限额必须在 exec 前生效且读回一致，否则拒绝启动；
+  # soft = 尽力施加，失败照常运行但 spawn 结果会标注降级。
+  # 可用 TRIMUM_RESOURCE_ENFORCEMENT=hard|soft 覆盖；缺失/坏值按 soft。
+  resource_enforcement: "soft"

@@ -12,13 +12,15 @@ It also includes :class:`TokenUsageTracker` for LLM token accounting.
 from __future__ import annotations
 
 import logging
+import os
+import signal
 import sys
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     import psutil
@@ -42,7 +44,14 @@ class ResourceUsage:
 
 @dataclass
 class ResourceLimits:
-    """Resource limits that an agent is allowed to consume."""
+    """Resource limits that an agent is allowed to consume.
+
+    ``max_cpu_percent`` is expressed as a percentage of **one CPU core**:
+    ``100`` means one full core (``cpu.max = 100000 100000``), ``250`` means
+    2.5 cores.  A non-positive value means *no CPU quota* and is written as
+    ``max 100000``.  ``max_memory_mb`` follows the same sentinel convention:
+    a non-positive value means *no memory limit* (``memory.max = max``).
+    """
 
     max_cpu_percent: float = 80.0
     max_memory_mb: float = 512.0
@@ -73,18 +82,30 @@ class CgroupApplyResult:
     """Outcome of trying to place a PID under a cgroup.
 
     ``verified is True`` means the PID was read back from ``cgroup.procs``.
-    ``None`` means the controller could not verify (for example, non-cgroup
-    platforms or an unreadable hierarchy); callers enforcing a *hard* limit
-    must treat that as failure rather than success.
+    ``limits_verified is True`` means ``cpu.max`` and ``memory.max`` were read
+    back and matched the requested values.  ``None`` means the controller
+    could not verify that dimension (for example, non-cgroup platforms);
+    callers enforcing a *hard* limit must treat ``None`` as failure.
     """
 
     applied: bool
     verified: bool | None = None
     detail: str = ""
+    limits_verified: bool | None = None
 
     @property
     def enforced(self) -> bool:
-        return self.applied and self.verified is True
+        return (
+            self.applied
+            and self.verified is True
+            and self.limits_verified is True
+        )
+
+    @property
+    def prepared(self) -> bool:
+        """Limits are written **and** read back; no PID has to be attached yet."""
+
+        return self.applied and self.limits_verified is True
 
 
 @dataclass
@@ -133,7 +154,8 @@ def _build_check_result(
 
     violations: list[Violation] = []
 
-    if usage.cpu_percent > limits.max_cpu_percent:
+    # Non-positive CPU/memory limits mean "unlimited" (see ResourceLimits).
+    if limits.max_cpu_percent > 0 and usage.cpu_percent > limits.max_cpu_percent:
         violations.append(
             Violation(
                 resource="cpu_percent",
@@ -146,7 +168,7 @@ def _build_check_result(
             )
         )
 
-    if usage.memory_mb > limits.max_memory_mb:
+    if limits.max_memory_mb > 0 and usage.memory_mb > limits.max_memory_mb:
         violations.append(
             Violation(
                 resource="memory_mb",
@@ -224,6 +246,41 @@ class ResourceController(ABC):
         limits: ResourceLimits,
     ) -> "CgroupApplyResult | None":
         """Apply cgroup v2 constraints to a process."""
+
+    async def prepare_cgroup(
+        self,
+        agent_id: str,
+        limits: ResourceLimits,
+    ) -> CgroupApplyResult:
+        """Create/configure the agent cgroup **before** a process exists.
+
+        A hard-enforcement spawn must call this first and refuse to start the
+        child unless the returned result is :attr:`CgroupApplyResult.enforced`.
+        The default implementation reports "unsupported" so callers fail closed
+        instead of silently spawning outside the resource boundary.
+        """
+
+        return CgroupApplyResult(
+            applied=False,
+            verified=False,
+            limits_verified=False,
+            detail="controller does not support pre-spawn cgroup preparation",
+        )
+
+    def preexec_hook(self, agent_id: str) -> Callable[[], None] | None:
+        """Return a child-side hook that joins the agent cgroup before ``exec``.
+
+        The hook runs in the forked child (``preexec_fn``) and must be invoked
+        before Landlock/seccomp are applied.  Returning ``None`` means the
+        controller cannot close the post-spawn race.
+        """
+
+        return None
+
+    async def kill_cgroup(self, agent_id: str) -> bool:
+        """Kill every process in the agent cgroup (best effort)."""
+
+        return False
 
     async def assigned_pids(self, agent_id: str) -> list[int]:
         """PIDs actually constrained for *agent_id* (empty when unknowable).
@@ -314,21 +371,14 @@ class PsutilController(ResourceController):
         return CgroupApplyResult(
             applied=False,
             verified=False,
+            limits_verified=False,
             detail="cgroup v2 is not supported on this platform",
         )
 
     async def assigned_pids(self, agent_id: str) -> list[int]:
-        """PIDs listed in the agent's ``cgroup.procs`` (empty when unreadable)."""
-        text = self._read_text(agent_id, "cgroup.procs")
-        if not text:
-            return []
-        pids: list[int] = []
-        for line in text.splitlines():
-            try:
-                pids.append(int(line.strip()))
-            except ValueError:
-                continue
-        return pids
+        """This controller has no cgroup, so it can never report assignments."""
+
+        return []
 
     def record_file_write(self, agent_id: str, count: int = 1) -> None:
         """Record file-write events for the one-minute sliding window."""
@@ -342,13 +392,17 @@ class PsutilController(ResourceController):
 
 
 def _parse_cpu_max(value: str) -> float | None:
-    """Parse a cgroup v2 ``cpu.max`` value into a percentage."""
+    """Parse a cgroup v2 ``cpu.max`` value into a percentage of one core.
+
+    ``max 100000`` means *no quota* and maps to the ``0`` sentinel used by
+    :class:`ResourceLimits`; it must not be confused with ``100%``.
+    """
 
     parts = value.strip().split()
     if not parts:
         return None
     if parts[0] == "max":
-        return 100.0
+        return 0.0
 
     try:
         quota = int(parts[0])
@@ -364,11 +418,18 @@ def _parse_cpu_max(value: str) -> float | None:
 
 
 def _parse_memory_max(value: str) -> float | None:
-    """Parse a cgroup v2 ``memory.max`` value into megabytes."""
+    """Parse a cgroup v2 ``memory.max`` value into megabytes.
+
+    ``max`` means *no memory limit* and maps to the ``0`` sentinel; an empty or
+    malformed value stays ``None`` so callers can distinguish "unlimited" from
+    "could not read".
+    """
 
     value = value.strip()
-    if not value or value == "max":
+    if not value:
         return None
+    if value == "max":
+        return 0.0
     try:
         return int(value) / (1024 * 1024)
     except ValueError:
@@ -376,13 +437,48 @@ def _parse_memory_max(value: str) -> float | None:
 
 
 def _format_cpu_max(max_cpu_percent: float) -> str:
-    """Format a CPU percentage as a cgroup v2 ``cpu.max`` quota/period."""
+    """Format a CPU percentage as a cgroup v2 ``cpu.max`` quota/period.
 
-    if max_cpu_percent >= 100.0:
+    Percentages are relative to **one core**: ``100`` becomes
+    ``100000 100000`` (one full core) and ``250`` becomes ``250000 100000``
+    (2.5 cores).  A non-positive percentage is the explicit "unlimited"
+    sentinel and becomes ``max 100000``.
+    """
+
+    if max_cpu_percent <= 0:
         return "max 100000"
     period = 100000
-    quota = max(0, int(round(max_cpu_percent / 100.0 * period)))
+    quota = max(1, int(round(max_cpu_percent / 100.0 * period)))
     return f"{quota} {period}"
+
+
+def _format_memory_max(max_memory_mb: float) -> str:
+    """Format a megabyte limit for ``memory.max`` (non-positive = unlimited)."""
+
+    if max_memory_mb <= 0:
+        return "max"
+    return str(int(max_memory_mb * 1024 * 1024))
+
+
+def make_cgroup_preexec_hook(path: str | Path) -> Callable[[], None]:
+    """Build a child-side hook that writes its own PID to ``cgroup.procs``.
+
+    The hook is intentionally syscall-only (``os.open``/``os.write``) so it is
+    safe to run between ``fork`` and ``exec``.  It must be composed **before**
+    the Landlock/seccomp hook: once those are applied the child may no longer
+    be able to write the cgroup file.
+    """
+
+    target = str(path)
+
+    def _hook() -> None:  # pragma: no cover - runs in the forked child
+        fd = os.open(target, os.O_WRONLY)
+        try:
+            os.write(fd, str(os.getpid()).encode("ascii"))
+        finally:
+            os.close(fd)
+
+    return _hook
 
 
 def _parse_io_stat(value: str) -> tuple[int, int]:
@@ -532,52 +628,141 @@ class CgroupV2Controller(ResourceController):
 
         return limits
 
+    async def prepare_cgroup(
+        self,
+        agent_id: str,
+        limits: ResourceLimits,
+    ) -> CgroupApplyResult:
+        """Create the agent cgroup and prove the kernel accepted the limits.
+
+        This runs **before** any agent process exists.  A hard-enforcement
+        caller must refuse to spawn unless :attr:`CgroupApplyResult.prepared`
+        is true; reading ``cgroup.procs`` alone only proves membership, not
+        that ``cpu.max`` / ``memory.max`` match the request.
+        """
+
+        expected_cpu = _format_cpu_max(limits.max_cpu_percent)
+        expected_memory = _format_memory_max(limits.max_memory_mb)
+        try:
+            agent_dir = self._agent_dir(agent_id)
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            (agent_dir / "cpu.max").write_text(expected_cpu, encoding="utf-8")
+            (agent_dir / "memory.max").write_text(expected_memory, encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            log.warning("prepare_cgroup failed for %s", agent_id, exc_info=True)
+            return CgroupApplyResult(
+                applied=False,
+                verified=False,
+                limits_verified=False,
+                detail=detail,
+            )
+
+        actual_cpu = self._read_text(agent_id, "cpu.max")
+        actual_memory = self._read_text(agent_id, "memory.max")
+        mismatches: list[str] = []
+        if actual_cpu is None:
+            mismatches.append("cpu.max unreadable")
+        elif actual_cpu != expected_cpu:
+            mismatches.append(f"cpu.max={actual_cpu!r} expected {expected_cpu!r}")
+        if actual_memory is None:
+            mismatches.append("memory.max unreadable")
+        elif actual_memory != expected_memory:
+            mismatches.append(
+                f"memory.max={actual_memory!r} expected {expected_memory!r}"
+            )
+        if mismatches:
+            return CgroupApplyResult(
+                applied=True,
+                verified=None,
+                limits_verified=False,
+                detail="limit readback mismatch: " + "; ".join(mismatches),
+            )
+        return CgroupApplyResult(
+            applied=True,
+            verified=None,
+            limits_verified=True,
+            detail=(
+                f"limits verified (cpu.max={actual_cpu!r}, "
+                f"memory.max={actual_memory!r})"
+            ),
+        )
+
+    def preexec_hook(self, agent_id: str) -> Callable[[], None]:
+        """Join this agent's cgroup before the child calls ``exec``."""
+
+        return make_cgroup_preexec_hook(self._agent_dir(agent_id) / "cgroup.procs")
+
     async def apply_cgroup(
         self,
         agent_id: str,
         pid: int,
         limits: ResourceLimits,
     ) -> CgroupApplyResult:
-        detail = ""
-        try:
-            agent_dir = self._agent_dir(agent_id)
-            agent_dir.mkdir(parents=True, exist_ok=True)
+        prepared = await self.prepare_cgroup(agent_id, limits)
+        if not prepared.applied:
+            return prepared
 
-            (agent_dir / "cpu.max").write_text(
-                _format_cpu_max(limits.max_cpu_percent),
-                encoding="utf-8",
-            )
-            (agent_dir / "memory.max").write_text(
-                str(int(limits.max_memory_mb * 1024 * 1024)),
-                encoding="utf-8",
-            )
-            (agent_dir / "cgroup.procs").write_text(
+        try:
+            (self._agent_dir(agent_id) / "cgroup.procs").write_text(
                 str(int(pid)),
                 encoding="utf-8",
             )
         except (OSError, ValueError) as exc:
             detail = f"{type(exc).__name__}: {exc}"
-            log.warning(
-                "apply_cgroup failed for %s",
-                agent_id,
-                exc_info=True,
+            log.warning("apply_cgroup failed for %s", agent_id, exc_info=True)
+            return CgroupApplyResult(
+                applied=False,
+                verified=False,
+                limits_verified=prepared.limits_verified,
+                detail=detail,
             )
-            return CgroupApplyResult(applied=False, verified=False, detail=detail)
 
         pids = await self.assigned_pids(agent_id)
         if not pids:
             return CgroupApplyResult(
                 applied=True,
                 verified=None,
-                detail="cgroup.procs is empty or unreadable",
+                limits_verified=prepared.limits_verified,
+                detail=prepared.detail + "; cgroup.procs is empty or unreadable",
             )
         if pid in pids:
-            return CgroupApplyResult(applied=True, verified=True, detail="pid listed")
+            return CgroupApplyResult(
+                applied=True,
+                verified=True,
+                limits_verified=prepared.limits_verified,
+                detail=prepared.detail + "; pid listed",
+            )
         return CgroupApplyResult(
             applied=True,
             verified=False,
-            detail="pid is not listed in cgroup.procs",
+            limits_verified=prepared.limits_verified,
+            detail=prepared.detail + "; pid is not listed in cgroup.procs",
         )
+
+    async def kill_cgroup(self, agent_id: str) -> bool:
+        """Kill the whole agent cgroup, including grandchildren.
+
+        ``cgroup.kill`` is the preferred path (kernel >= 5.14).  If it is not
+        available, fall back to SIGKILL for every PID currently listed in the
+        cgroup, then let the caller's process-tree cleanup cover the rest.
+        """
+
+        agent_dir = self._agent_dir(agent_id)
+        try:
+            (agent_dir / "cgroup.kill").write_text("1", encoding="utf-8")
+            return True
+        except (OSError, ValueError):
+            pass
+
+        killed = False
+        for pid in await self.assigned_pids(agent_id):
+            try:
+                os.kill(pid, signal.SIGKILL)
+                killed = True
+            except (OSError, ValueError):
+                continue
+        return killed
 
     async def assigned_pids(self, agent_id: str) -> list[int]:
         """PIDs listed in the agent's ``cgroup.procs`` (empty when unreadable)."""
@@ -742,7 +927,45 @@ def resource_limits_from_config(config: dict[str, Any] | None) -> ResourceLimits
     )
 
 
-def resource_enforcement_from_config(config: dict[str, Any] | None) -> str:
+def _normalize_enforcement(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    lowered = value.strip().lower()
+    if lowered in {"hard", "strict", "required", "fail-closed", "fail_closed"}:
+        return "hard"
+    if lowered in {"soft", "best-effort", "best_effort", "warn"}:
+        return "soft"
+    return None
+
+
+def default_resource_enforcement() -> str:
+    """Global fallback for spawns that do not specify a policy.
+
+    Resolution order follows the project-wide rule: environment >
+    ``agent_manager.resource_enforcement`` > ``soft``.  Missing/broken config
+    silently falls back; a resource policy must never prevent the daemon from
+    starting.
+    """
+
+    env_value = _normalize_enforcement(os.environ.get("TRIMUM_RESOURCE_ENFORCEMENT"))
+    if env_value is not None:
+        return env_value
+    try:
+        from .config import Config
+
+        config_value = _normalize_enforcement(
+            Config().get("agent_manager.resource_enforcement")
+        )
+    except Exception:
+        return "soft"
+    return config_value or "soft"
+
+
+def resource_enforcement_from_config(
+    config: dict[str, Any] | None,
+    *,
+    default: str | None = None,
+) -> str:
     """Return ``hard`` or ``soft`` for an agent spawn request.
 
     ``hard`` means resource constraints are a precondition: if the cgroup
@@ -751,22 +974,15 @@ def resource_enforcement_from_config(config: dict[str, Any] | None) -> str:
     the spawn result.  Missing/invalid values fall back to ``soft``.
     """
 
+    fallback = _normalize_enforcement(default) or "soft"
     if not isinstance(config, dict):
-        return "soft"
+        return fallback
 
     raw: Any = config.get("resource_enforcement")
     nested = config.get("resource_limits")
     if raw is None and isinstance(nested, dict):
         raw = nested.get("enforcement")
-    if isinstance(raw, str) and raw.strip().lower() in {
-        "hard",
-        "strict",
-        "required",
-        "fail-closed",
-        "fail_closed",
-    }:
-        return "hard"
-    return "soft"
+    return _normalize_enforcement(raw) or fallback
 
 
 def create_resource_controller() -> ResourceController:
@@ -793,6 +1009,7 @@ __all__ = [
     "TokenUsageTracker",
     "Violation",
     "create_resource_controller",
+    "default_resource_enforcement",
     "resource_enforcement_from_config",
     "resource_limits_from_config",
 ]

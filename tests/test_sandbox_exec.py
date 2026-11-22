@@ -291,6 +291,61 @@ class TestSpawnFailClosed:
         assert "preexec_fn" in calls[0] and "preexec_fn" not in calls[1]
 
     @pytest.mark.asyncio
+    async def test_degraded_retry_keeps_resource_hook(self, supported, paths, monkeypatch):
+        """沙箱降级只能丢掉沙箱钩子，资源入组钩子仍须在 exec 前执行。"""
+        calls: list[dict] = []
+
+        async def fake_spawn(shell, args, kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise subprocess.SubprocessError("Exception occurred in preexec_fn.")
+            return "PROC"
+
+        monkeypatch.setattr(sandbox_exec, "_spawn_process", fake_spawn)
+        monkeypatch.setenv(sandbox_exec.ENV_FAIL_CLOSED, "0")
+        plan = sandbox_exec.plan_for(_req(cwd=str(paths.ws)))
+        order: list[str] = []
+
+        assert await sandbox_exec.spawn_exec(
+            plan,
+            "echo",
+            "hi",
+            preexec=lambda: order.append("resource"),
+        ) == "PROC"
+        assert "preexec_fn" in calls[0] and "preexec_fn" in calls[1]
+        calls[1]["preexec_fn"]()
+        assert order == ["resource"]
+
+    @pytest.mark.asyncio
+    async def test_resource_hook_runs_before_sandbox_hook(self, supported, paths, monkeypatch):
+        order: list[str] = []
+        calls: list[dict] = []
+
+        def fake_make_hook(_plan):
+            def _sandbox_hook():
+                order.append("sandbox")
+
+            return _sandbox_hook
+
+        async def fake_spawn(shell, args, kwargs):
+            calls.append(kwargs)
+            return "PROC"
+
+        monkeypatch.setattr(sandbox_exec, "_make_hook", fake_make_hook)
+        monkeypatch.setattr(sandbox_exec, "_spawn_process", fake_spawn)
+        plan = sandbox_exec.plan_for(_req(cwd=str(paths.ws)))
+
+        await sandbox_exec.spawn_exec(
+            plan,
+            "echo",
+            "hi",
+            preexec=lambda: order.append("resource"),
+        )
+        calls[0]["preexec_fn"]()
+
+        assert order == ["resource", "sandbox"]
+
+    @pytest.mark.asyncio
     async def test_unsupported_platform_still_runs_command(self, paths, monkeypatch):
         monkeypatch.setattr(
             sandbox_exec,
